@@ -399,6 +399,7 @@ const WORKSPACE_EVENT_TYPES = new Set([
   'error',
   'done',
   'user_prompt',
+  'artifact',
   'clarification.request',
   'pipeline',  // CoT visibility events (router, planner, critic, thinking)
 ]);

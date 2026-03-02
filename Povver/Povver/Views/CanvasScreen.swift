@@ -173,10 +173,10 @@ extension CanvasScreen {
                         Image(systemName: "paperplane.fill")
                             .foregroundColor(.textInverse)
                             .padding(Space.sm)
-                            .background(composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color.textSecondary : Color.accent)
+                            .background(composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || vm.isAgentThinking ? Color.textSecondary : Color.accent)
                             .clipShape(Circle())
                     }
-                    .disabled(composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || vm.isAgentThinking)
                 }
                 .padding(.horizontal, Space.lg)
                 .padding(.bottom, Space.md)
