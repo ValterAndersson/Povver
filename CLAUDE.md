@@ -111,9 +111,22 @@ End every task with a clean commit. The codebase must be in a stable, buildable 
 
 ---
 
-## Service Account Keys
+## Secrets & Service Account Keys
 
-Keys live outside the repo at `~/.config/povver/`. Two named env vars point to each key file. Set `GOOGLE_APPLICATION_CREDENTIALS` to the correct one before running a command:
+All secrets live outside the repo at `~/.config/povver/` (chmod 600). Sourced automatically via `~/.zshrc`.
+
+### API Keys
+
+Loaded from `~/.config/povver/env.sh` (sourced by `~/.zshrc`):
+
+| Env Var | Use |
+|---------|-----|
+| `FIREBASE_API_KEY` | Firebase Web API key — agent deploy, scripts |
+| `MYON_API_KEY` | Server-to-server API key — agent calls to Firebase Functions |
+
+### Service Account Keys
+
+Set `GOOGLE_APPLICATION_CREDENTIALS` to the correct one before running a command:
 
 | Env Var | Key File | Use |
 |---------|----------|-----|
@@ -130,13 +143,9 @@ export GOOGLE_APPLICATION_CREDENTIALS=$FIREBASE_SA_KEY
 export GOOGLE_APPLICATION_CREDENTIALS=$GCP_SA_KEY
 ```
 
-Add both named vars to your shell profile (`~/.zshrc`):
-```bash
-export FIREBASE_SA_KEY=~/.config/povver/myon-53d85-firebase-adminsdk-fbsvc-ca7beb1435.json
-export GCP_SA_KEY=~/.config/povver/myon-53d85-80792c186dcb.json
-```
+All vars are set in `~/.zshrc` (SA key paths) and `~/.config/povver/env.sh` (API keys, sourced by `~/.zshrc`).
 
-**Never commit key files to the repo.** The `config/` directory is in `.gitignore` as a safeguard.
+**Never commit key files or API keys to the repo.** `.gitignore` blocks `config/`, `.env`, and `GoogleService-Info.plist`.
 
 ---
 
