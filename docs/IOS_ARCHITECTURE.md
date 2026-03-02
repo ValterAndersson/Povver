@@ -73,11 +73,26 @@ struct PovverApp: App {
 │  AppFlow enum:  │
 │  - login        │──► LoginView
 │  - register     │──► RegisterView
+│  - onboarding   │──► OnboardingView
 │  - main         │──► MainTabsView
 └─────────────────┘
 ```
 
-RootView observes `AuthService.isAuthenticated` via `.onChange`. When auth state becomes `false` (sign-out, account deletion, token expiration), the flow reactively resets to `.login`. Login and register views use callbacks (`onLogin`, `onRegister`) to transition to `.main` on successful authentication.
+RootView observes `AuthService.isAuthenticated` via `.onChange`. When auth state becomes `false` (sign-out, account deletion, token expiration), the flow reactively resets to `.login`. Login and register views check `OnboardingViewModel.shouldShowOnboarding()` — new users route to `.onboarding`, returning users go to `.main`.
+
+### Onboarding Flow (`Views/Onboarding/`)
+
+Six-screen first-run experience managed by `OnboardingView` (coordinator) and `OnboardingViewModel`:
+
+```
+Welcome → Auth → Training Profile → Equipment → Trial → Routine Generation
+```
+
+- **OnboardingView** is a ZStack with persistent atmospheric layers (glow, grain texture) and screen content that transitions
+- **OnboardingViewModel** (`@StateObject`) holds flow state, user selections, and methods for saving attributes, starting trial, and completing onboarding
+- `hasCompletedOnboarding` UserDefaults flag prevents re-showing on subsequent launches
+- Post-onboarding paths: "Start training" → Coach tab, "Adjust with coach" → Coach tab with auto-navigation to CanvasScreen, "Skip" → Coach tab (no trial)
+- See `Povver/Povver/Views/Onboarding/ARCHITECTURE.md` for module details
 
 ### Tab Structure (`MainTabsView.swift`)
 
