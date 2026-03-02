@@ -190,7 +190,7 @@ final class CanvasViewModel: ObservableObject {
                     self.logCanvasSnapshot(snap: snap, trigger: "firestore_update")
 
                     self.version = snap.version
-                    self.cards = snap.cards
+                    self.mergeFirestoreCards(snap.cards)
                     self.upNext = snap.upNext
                     if let ph = snap.state.phase { self.phase = ph }
 
@@ -275,7 +275,7 @@ final class CanvasViewModel: ObservableObject {
                     self.logCanvasSnapshot(snap: snap, trigger: "firestore_update")
 
                     self.version = snap.version
-                    self.cards = snap.cards
+                    self.mergeFirestoreCards(snap.cards)
                     self.upNext = snap.upNext
                     if let ph = snap.state.phase { self.phase = ph }
 
@@ -853,6 +853,18 @@ final class CanvasViewModel: ObservableObject {
     // metadata update are now handled server-side in stream-agent-normalized.js
     // (client writes were blocked by Firestore security rules).
 
+    /// Merge Firestore-sourced cards with locally-held artifact cards.
+    /// Artifact cards (with artifactId in meta) are only appended locally from SSE events
+    /// and don't exist in the Firestore `cards` collection. Without this merge, any
+    /// Firestore snapshot emission (state change, metadata update) would wipe them.
+    private func mergeFirestoreCards(_ firestoreCards: [CanvasCardModel]) {
+        let artifactCards = cards.filter { $0.meta?.artifactId != nil }
+        let firestoreIds = Set(firestoreCards.map(\.id))
+        // Keep artifact cards that aren't already in the Firestore snapshot
+        let uniqueArtifactCards = artifactCards.filter { !firestoreIds.contains($0.id) }
+        cards = firestoreCards + uniqueArtifactCards
+    }
+
     func clearCards() {
         cards = []
         upNext = []
@@ -861,9 +873,13 @@ final class CanvasViewModel: ObservableObject {
     /// Transition proposed/active cards to completed status.
     /// Preserves artifacts in the timeline but strips action buttons
     /// so users can't re-act on stale proposals.
+    /// Artifact-sourced cards (with artifactId) are exempt — they keep
+    /// their actions until the user explicitly accepts or dismisses them.
     func archiveProposedCards() {
         cards = cards.map { card in
             guard card.status == .proposed || card.status == .active else { return card }
+            // Artifact cards have their own accept/dismiss lifecycle — don't strip actions
+            if card.meta?.artifactId != nil { return card }
             return CanvasCardModel(
                 id: card.id,
                 type: card.type,

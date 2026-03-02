@@ -35,6 +35,10 @@ The central ViewModel managing the conversation + artifact experience:
 5. Card appended to `cards` array, rendered by existing card components
 6. Action handlers in `CanvasScreen` route through `AgentsApi.artifactAction()` when `CardMeta.artifactId` is present
 
+**Artifact Card Lifecycle:**
+- Artifact cards (with `artifactId` in meta) are exempt from `archiveProposedCards()` — their action buttons persist across follow-up messages until the user explicitly accepts or dismisses them.
+- `mergeFirestoreCards()` preserves locally-held artifact cards when the Firestore `cards` collection listener fires, since artifact cards only exist in local state (not in the Firestore `cards` subcollection).
+
 **Server-Persisted Events (via Admin SDK in `stream-agent-normalized.js`):**
 - `user_prompt` — persisted before agent processing begins (client can't write to `workspace_entries` due to Firestore security rules)
 - `artifact` — persisted alongside other workspace event types so artifacts survive page reloads
