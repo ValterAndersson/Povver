@@ -10,6 +10,7 @@ Output: users/{uid}/analysis_insights/{autoId} (TTL 7 days)
 """
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -64,6 +65,11 @@ class PostWorkoutAnalyzer(BaseAnalyzer):
         rollups_map = {r["week_id"]: r for r in rollups_list}
         fatigue_metrics = self._compute_fatigue_metrics(rollups_map)
 
+        # 6b. Read recommendation history for deduplication context
+        recommendation_history = self._read_recommendation_history(
+            db, user_id, weeks=4
+        )
+
         # 7. Build LLM input (~20KB total)
         llm_input_data = {
             "workout": workout,
@@ -76,6 +82,8 @@ class PostWorkoutAnalyzer(BaseAnalyzer):
             llm_input_data["exercise_catalog"] = exercise_catalog
         if fatigue_metrics:
             llm_input_data["fatigue_metrics"] = fatigue_metrics
+        if recommendation_history:
+            llm_input_data["recommendation_history"] = recommendation_history
 
         llm_input = json.dumps(llm_input_data, indent=2, default=str)
 
@@ -418,6 +426,73 @@ class PostWorkoutAnalyzer(BaseAnalyzer):
 
         return catalog if catalog else None
 
+    def _read_recommendation_history(
+        self, db, user_id: str, weeks: int = 4
+    ) -> List[Dict[str, Any]]:
+        """Read recent recommendation history for deduplication context.
+
+        Returns deep format with full changes array, rationale, signals,
+        and state — used by the LLM to avoid redundant recommendations.
+        ~4KB addition to ~20KB input (well within gemini-2.5-pro 1M context).
+        """
+        try:
+            cutoff = datetime.now(timezone.utc) - timedelta(weeks=weeks)
+            docs = (
+                db.collection("users").document(user_id)
+                .collection("agent_recommendations")
+                .where("created_at", ">=", cutoff)
+                .order_by("created_at", direction="DESCENDING")
+                .limit(20)
+                .stream()
+            )
+
+            history = []
+            for doc in docs:
+                data = doc.to_dict()
+                rec = data.get("recommendation", {})
+                target = data.get("target", {})
+                history.append({
+                    "created_at": (
+                        data["created_at"].isoformat()
+                        if hasattr(data.get("created_at"), "isoformat")
+                        else str(data.get("created_at", ""))
+                    ),
+                    "state": data.get("state", "unknown"),
+                    "scope": data.get("scope"),
+                    "trigger": data.get("trigger"),
+                    "target": {
+                        "exercise_name": target.get("exercise_name"),
+                        "template_name": target.get("template_name"),
+                    },
+                    "type": rec.get("type"),
+                    "summary": rec.get("summary", ""),
+                    "rationale": rec.get("rationale"),
+                    "confidence": rec.get("confidence"),
+                    "signals": rec.get("signals", []),
+                    "changes": [
+                        {
+                            "path": c.get("path"),
+                            "from": c.get("from"),
+                            "to": c.get("to"),
+                        }
+                        for c in rec.get("changes", [])
+                    ],
+                    "applied_at": (
+                        data["applied_at"].isoformat()
+                        if hasattr(data.get("applied_at"), "isoformat")
+                        else data.get("applied_at")
+                    ),
+                    "applied_by": data.get("applied_by"),
+                })
+
+            return history
+        except Exception as e:
+            logging.getLogger(__name__).warning(
+                "Failed to read recommendation history for user %s: %s",
+                user_id, e,
+            )
+            return []
+
     def _write_insight(
         self, db, user_id: str, workout_id: str,
         workout: Dict[str, Any], result: Dict[str, Any]
@@ -536,6 +611,19 @@ the user deviated from their prescribed template. Key signals:
   as "missing" from the template.
 - Added/removed sets = volume adjustment by the user.
 - If no template_diff is present, the workout matched the template or was freeform.
+
+**RECOMMENDATION HISTORY (if recommendation_history present):**
+If recommendation_history is in the input, you have the user's recent recommendation states.
+Use this to:
+- **Deduplication**: Skip if an identical recommendation is already pending or was applied
+  in the last 2 weeks. Do not re-recommend the same change.
+- **Rejection persistence**: If a recommendation was rejected but the underlying signal
+  persists (e.g., plateau continues), re-recommend with escalated context:
+  "Previously suggested [X], plateau continues at [data]."
+- **Adaptation**: Lower confidence slightly (by 0.1) for re-recommendations of previously
+  rejected types for the same exercise.
+- **Self-progression awareness**: If the user already applied a similar change
+  (applied_by: "user"), acknowledge their self-progression rather than re-recommending.
 
 Return JSON matching this schema EXACTLY:
 {

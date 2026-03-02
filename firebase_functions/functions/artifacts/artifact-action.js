@@ -108,12 +108,24 @@ async function artifactActionHandler(req, res) {
             const templateSnap = await templateRef.get();
 
             if (templateSnap.exists) {
-              await templateRef.update({
+              const batch = db.batch();
+              batch.update(templateRef, {
                 name: templateData.name,
                 exercises: templateData.exercises,
                 analytics: null,
                 updated_at: now,
               });
+
+              // Changelog entry for audit trail
+              const changelogRef = templateRef.collection('changelog').doc();
+              batch.set(changelogRef, {
+                timestamp: now,
+                source: 'agent_coached_edit',
+                changes: [{ field: 'exercises', operation: 'update', summary: 'Updated via routine edit' }],
+                expires_at: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+              });
+
+              await batch.commit();
               templateIds.push(sourceTemplateId);
             } else {
               const newRef = db.collection(templatesPath).doc();
@@ -250,12 +262,24 @@ async function artifactActionHandler(req, res) {
           const existingRef = db.doc(`${templatesPath}/${sourceTemplateId}`);
           const existingSnap = await existingRef.get();
           if (existingSnap.exists) {
-            await existingRef.update({
+            const batch = db.batch();
+            batch.update(existingRef, {
               name: templateData.name,
               exercises: templateData.exercises,
               analytics: null,
               updated_at: now,
             });
+
+            // Changelog entry for audit trail
+            const changelogRef = existingRef.collection('changelog').doc();
+            batch.set(changelogRef, {
+              timestamp: now,
+              source: 'agent_coached_edit',
+              changes: [{ field: 'exercises', operation: 'update', summary: 'Updated via template edit' }],
+              expires_at: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+            });
+
+            await batch.commit();
             templateId = sourceTemplateId;
             isUpdate = true;
           }

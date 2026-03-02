@@ -288,7 +288,7 @@ async function handleAccept(res, userId, recRef, recommendation, startTime) {
   // 3. Apply changes
   let result;
   try {
-    result = await applyChangesToTarget(db, userId, 'template', templateId, changes);
+    result = await applyChangesToTarget(db, userId, 'template', templateId, changes, { recommendation_id: recRef.id });
 
     logger.info('[reviewRecommendation] Changes applied', {
       userId,

@@ -540,7 +540,7 @@ async function processTemplateScopedRecommendations(db, userId, triggerType, tri
     // If auto-pilot, apply changes to template
     if (autoPilotEnabled) {
       try {
-        const result = await applyChangesToTarget(db, userId, 'template', exerciseData.templateId, changes);
+        const result = await applyChangesToTarget(db, userId, 'template', exerciseData.templateId, changes, { recommendation_id: recRef.id });
         recommendationData.applied_at = now;
         recommendationData.result = result;
         logger.info(`[processRecommendations] Auto-applied`, {

@@ -9,6 +9,7 @@
 const { onRequest } = require('firebase-functions/v2/https');
 const { requireFlexibleAuth } = require('../auth/middleware');
 const admin = require('firebase-admin');
+const { logger } = require('firebase-functions');
 const { ok, fail } = require('../utils/response');
 const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 
@@ -43,7 +44,7 @@ exports.getAnalysisSummary = onRequest(requireFlexibleAuth(async (req, res) => {
     const insightsLimit = req.body.limit || 5;
     const dateKey = req.body.date || getTodayDateKey();
 
-    const validSections = ['insights', 'weekly_review'];
+    const validSections = ['insights', 'weekly_review', 'recommendation_history'];
     const requestedSections = sections
       ? sections.filter(s => validSections.includes(s))
       : validSections;
@@ -71,6 +72,16 @@ exports.getAnalysisSummary = onRequest(requireFlexibleAuth(async (req, res) => {
         .collection('weekly_reviews')
         .orderBy('created_at', 'desc')
         .limit(1)
+        .get();
+    }
+
+    if (requestedSections.includes('recommendation_history')) {
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      reads.recommendation_history = db.collection('users').doc(userId)
+        .collection('agent_recommendations')
+        .where('created_at', '>', admin.firestore.Timestamp.fromDate(thirtyDaysAgo))
+        .orderBy('created_at', 'desc')
+        .limit(20)
         .get();
     }
 
@@ -137,10 +148,41 @@ exports.getAnalysisSummary = onRequest(requireFlexibleAuth(async (req, res) => {
       response.weekly_review = weeklyReview;
     }
 
+    if (results.recommendation_history) {
+      const recommendations = [];
+      for (const doc of results.recommendation_history.docs) {
+        const data = doc.data();
+        const rec = data.recommendation || {};
+        const target = data.target || {};
+        recommendations.push({
+          id: doc.id,
+          created_at: data.created_at?.toDate?.()?.toISOString() || data.created_at,
+          state: data.state || 'unknown',
+          scope: data.scope || null,
+          trigger: data.trigger || null,
+          target: {
+            exercise_name: target.exercise_name || null,
+            template_name: target.template_name || null,
+            muscle_group: target.muscle_group || null,
+          },
+          recommendation: {
+            type: rec.type || null,
+            summary: rec.summary || '',
+            rationale: rec.rationale || null,
+            confidence: rec.confidence || null,
+            change_count: (rec.changes || []).length,
+          },
+          applied_at: data.applied_at?.toDate?.()?.toISOString() || data.applied_at || null,
+          applied_by: data.applied_by || null,
+        });
+      }
+      response.recommendation_history = recommendations;
+    }
+
     return ok(res, response);
 
   } catch (error) {
-    console.error('Error in getAnalysisSummary:', error);
+    logger.error('[getAnalysisSummary] Error', { error: error.message });
     return fail(res, 'INTERNAL_ERROR', error.message, null, 500);
   }
 }));

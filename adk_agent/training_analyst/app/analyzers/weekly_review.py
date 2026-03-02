@@ -80,6 +80,11 @@ class WeeklyReviewAnalyzer(BaseAnalyzer):
         rollups_map = {r["week_id"]: r for r in rollups}
         fatigue_metrics = self._compute_fatigue_metrics(rollups_map)
 
+        # 7b. Read recommendation history for lifecycle tracking
+        recommendation_history = self._read_recommendation_history(
+            db, user_id, weeks=8
+        )
+
         # 8. Build LLM input (~50KB total)
         llm_input_data = {
             "week_ending": week_ending,
@@ -96,6 +101,8 @@ class WeeklyReviewAnalyzer(BaseAnalyzer):
             llm_input_data["self_progression"] = self_progression
         if fatigue_metrics:
             llm_input_data["fatigue_metrics"] = fatigue_metrics
+        if recommendation_history:
+            llm_input_data["recommendation_history"] = recommendation_history
         llm_input = json.dumps(llm_input_data, indent=2, default=str)
 
         # 9. Call LLM (Pro for comprehensive analysis)
@@ -352,6 +359,14 @@ class WeeklyReviewAnalyzer(BaseAnalyzer):
                     "summary": data.get("summary", ""),
                     "highlights": data.get("highlights", [])[:3],
                     "flags": data.get("flags", [])[:3],
+                    "recommendations": [
+                        {
+                            "type": r.get("type"),
+                            "target": r.get("target"),
+                            "action": r.get("action"),
+                        }
+                        for r in (data.get("recommendations") or [])[:5]
+                    ],
                 })
 
             return insights if insights else None
@@ -429,6 +444,70 @@ class WeeklyReviewAnalyzer(BaseAnalyzer):
                 "Failed to read template diffs for user %s: %s", user_id, e
             )
             return None
+
+    def _read_recommendation_history(
+        self, db, user_id: str, weeks: int = 8
+    ) -> List[Dict[str, Any]]:
+        """Read recommendation history for weekly review context.
+
+        Compact format — broader scope, less per-item detail than post-workout.
+        Used to track acceptance rates, progression velocity, and rejection patterns.
+        """
+        try:
+            cutoff = datetime.now(timezone.utc) - timedelta(weeks=weeks)
+            docs = (
+                db.collection("users").document(user_id)
+                .collection("agent_recommendations")
+                .where("created_at", ">=", cutoff)
+                .order_by("created_at", direction="DESCENDING")
+                .limit(25)
+                .stream()
+            )
+
+            history = []
+            for doc in docs:
+                data = doc.to_dict()
+                rec = data.get("recommendation", {})
+                target = data.get("target", {})
+                history.append({
+                    "created_at": (
+                        data["created_at"].isoformat()
+                        if hasattr(data.get("created_at"), "isoformat")
+                        else str(data.get("created_at", ""))
+                    ),
+                    "state": data.get("state", "unknown"),
+                    "scope": data.get("scope"),
+                    "trigger": data.get("trigger"),
+                    "target": {
+                        "exercise_name": target.get("exercise_name"),
+                        "template_name": target.get("template_name"),
+                    },
+                    "type": rec.get("type"),
+                    "summary": rec.get("summary", ""),
+                    "confidence": rec.get("confidence"),
+                    "changes": [
+                        {
+                            "path": c.get("path"),
+                            "from": c.get("from"),
+                            "to": c.get("to"),
+                        }
+                        for c in rec.get("changes", [])
+                    ],
+                    "applied_at": (
+                        data["applied_at"].isoformat()
+                        if hasattr(data.get("applied_at"), "isoformat")
+                        else data.get("applied_at")
+                    ),
+                    "applied_by": data.get("applied_by"),
+                })
+
+            return history
+        except Exception as e:
+            logging.getLogger(__name__).warning(
+                "Failed to read recommendation history for user %s: %s",
+                user_id, e,
+            )
+            return []
 
     def _write_review(
         self, db, user_id: str, iso_week: str,
@@ -543,6 +622,21 @@ independent modifications to their templates during workouts this week. Weight
 increases indicate the user is self-progressing — acknowledge this positively
 in the summary. Don't recommend progressions the user has already made.
 Exercise swaps indicate preference changes — note them but don't flag as issues.
+
+**RECOMMENDATION HISTORY (if recommendation_history present):**
+If recommendation_history is in the input, you have the lifecycle of past recommendations.
+Use this to:
+- **Acceptance rate patterns**: Track how many recommendations were accepted vs. rejected.
+  If acceptance rate is low (<30%), note this in the summary and consider if recommendation
+  types need adjustment.
+- **Progression velocity**: Use applied recommendations to gauge how fast the user is
+  progressing. Frequent applied progressions = fast progression, consider periodization.
+- **Rejection patterns**: If the user consistently rejects a category (e.g., always rejects
+  deloads), adjust your recommendations. Still flag the underlying signal but suggest
+  alternative actions.
+- **Persistence on valid rejections**: If data still supports a rejected recommendation,
+  re-recommend with stronger evidence. Reference the previous rejection:
+  "Previously suggested [X] — signal persists: [updated data]."
 
 **CRITICAL RULES:**
 - ONLY reference exercise names, IDs, and muscle groups that appear in the input data. NEVER invent data.

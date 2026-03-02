@@ -32,6 +32,26 @@ See `docs/TRAINING_ANALYTICS_API_V2_SPEC.md` for the full specification.
 | `context.coaching.pack` | 15KB |
 | `active.snapshotLite` | 2KB |
 
+## `recommendation_history` Section
+
+Added to `getAnalysisSummary` as a requestable section. Reads the last 30 days of `agent_recommendations` (limit 20, ordered by `created_at` desc).
+
+Response shape per recommendation:
+```
+{
+  id, created_at, state, scope, trigger,
+  target: { exercise_name, template_name, muscle_group },
+  recommendation: { type, summary, rationale, confidence, change_count },
+  applied_at, applied_by
+}
+```
+
+Empty results return `recommendation_history: []` (never null or omitted).
+
+Consumers:
+- Shell agent (`tool_get_training_analysis`): coaching context for recommendation-aware responses
+- Workout brief (`workout_skills.py`): filtered to current workout exercises, capped at 3
+
 ## Cross-References
 
 - Caps constants: `utils/caps.js`

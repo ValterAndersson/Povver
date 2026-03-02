@@ -706,7 +706,8 @@ def tool_get_training_analysis(
     ~6KB total — well within token budget for a single call.
 
     Args:
-        sections: Optional filter. Valid values: "insights", "weekly_review"
+        sections: Optional filter. Valid values:
+            "insights", "weekly_review", "recommendation_history"
             Default (None): returns all available sections in a single call.
 
     Returns:
@@ -750,10 +751,19 @@ def tool_get_training_analysis(
             }
         }
 
+        recommendation_history: [{
+            id, created_at, state: "pending_review"|"applied"|"rejected"|"failed",
+            scope: "template"|"exercise", trigger: "post_workout"|"weekly_review",
+            target: { exercise_name, template_name, muscle_group },
+            recommendation: { type, summary, rationale, confidence, change_count },
+            applied_at, applied_by: "agent"|"user"|null
+        }]
+
     Examples:
         tool_get_training_analysis()  # all sections
         tool_get_training_analysis(sections=["insights"])  # insights only
         tool_get_training_analysis(sections=["weekly_review"])  # weekly review only
+        tool_get_training_analysis(sections=["recommendation_history"])  # rec history only
     """
     ban = _check_workout_ban("tool_get_training_analysis")
     if ban:

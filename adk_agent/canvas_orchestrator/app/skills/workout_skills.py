@@ -152,7 +152,8 @@ def get_workout_state_formatted(user_id: str, workout_id: str) -> str:
                 client.get_active_workout, user_id, workout_id=workout_id
             )
             analysis_future = executor.submit(
-                client.get_analysis_summary, user_id, sections=["weekly_review"]
+                client.get_analysis_summary, user_id,
+                sections=["weekly_review", "recommendation_history"],
             )
 
             # Get workout data first to extract current exercise
@@ -187,6 +188,13 @@ def get_workout_state_formatted(user_id: str, workout_id: str) -> str:
             if analysis_resp.get("success"):
                 weekly_review = analysis_resp.get("data", {}).get("weekly_review")
 
+            # Extract recommendation history for workout-relevant recs
+            recommendation_history = None
+            if analysis_resp.get("success"):
+                recommendation_history = (
+                    analysis_resp.get("data", {}).get("recommendation_history")
+                )
+
             # Fetch exercise history result if submitted
             exercise_history = None
             if exercise_future:
@@ -197,7 +205,9 @@ def get_workout_state_formatted(user_id: str, workout_id: str) -> str:
                 except Exception as e:
                     logger.debug("Failed to fetch exercise history: %s", e)
 
-        return _format_workout_brief(workout_data, exercise_history, weekly_review)
+        return _format_workout_brief(
+            workout_data, exercise_history, weekly_review, recommendation_history,
+        )
 
     except Exception as e:
         logger.error("get_workout_state_formatted error: %s", e)
@@ -226,6 +236,7 @@ def _format_workout_brief(
     workout_data: Dict[str, Any],
     exercise_history: Optional[Dict[str, Any]],
     weekly_review: Optional[Dict[str, Any]],
+    recommendation_history: Optional[list] = None,
 ) -> str:
     """
     Format workout brief as compact text for LLM context.
@@ -378,6 +389,59 @@ def _format_workout_brief(
             lines.append(f"Readiness: {readiness} \u2014 {groups_str} building fatigue")
         else:
             lines.append(f"Readiness: {readiness}")
+
+    # Recommendation context — filter to exercises in this workout
+    if recommendation_history:
+        workout_exercise_names = {
+            (ex.get("name") or "").lower()
+            for ex in workout_data.get("exercises", [])
+        }
+        relevant_recs = [
+            rec for rec in recommendation_history
+            if (rec.get("target", {}).get("exercise_name") or "").lower()
+            in workout_exercise_names
+        ][:3]  # Cap at 3 lines to stay within token budget
+
+        if relevant_recs:
+            lines.append("")
+            lines.append("Recommendations:")
+            for rec in relevant_recs:
+                ex_name = rec.get("target", {}).get("exercise_name", "?")
+                rec_type = (
+                    rec.get("recommendation", {}).get("type")
+                    or rec.get("type", "?")
+                )
+                state = rec.get("state", "?")
+                # Format age
+                created = rec.get("created_at", "")
+                age_str = ""
+                if created:
+                    try:
+                        from datetime import datetime as dt
+                        created_dt = dt.fromisoformat(
+                            created.replace("Z", "+00:00")
+                        )
+                        days_ago = (
+                            dt.now(created_dt.tzinfo) - created_dt
+                        ).days
+                        age_str = (
+                            f", {days_ago}d ago"
+                            if days_ago > 0
+                            else ", today"
+                        )
+                    except Exception:
+                        pass
+                summary = rec.get("recommendation", {}).get("summary", "")
+                if not summary:
+                    summary = rec.get("summary", "")
+                # Truncate summary to keep token budget tight
+                if len(summary) > 60:
+                    summary = summary[:57] + "..."
+                lines.append(
+                    f"  {ex_name}: {rec_type} {state}"
+                    f"{age_str}"
+                    + (f" — {summary}" if summary else "")
+                )
 
     return "\n".join(lines)
 

@@ -705,19 +705,24 @@ Subcollections:
      - `reps_per_muscle_group, reps_per_muscle: { [key]: number }`
      - `relative_stimulus_per_muscle_group, relative_stimulus_per_muscle: { [key]: number }`
 
-   - Subcollection: `templates/{templateId}/changelog/{autoId}`
-     - Tracks all template modifications with source attribution. 90-day TTL via `expires_at`.
-     - Written by `patch-template.js` (user edits, workout saves) and `complete-active-workout.js` (workout deviations).
-     - Fields:
-       - `timestamp: Timestamp` (serverTimestamp)
-       - `source: "user_edit" | "workout_save" | "ai_recommendation" | "workout_completion"`
-       - `workout_id?: string` (present when source is `workout_save` or `workout_completion`)
-       - `recommendation_id?: string` (present when source is `ai_recommendation`)
-       - `changes: Array<{ field: string, operation: string, summary: string }>`
-         - `field`: e.g. `"exercises"`, `"exercises.swap"`, `"name"`, `"description"`
-         - `operation`: `"add"` | `"remove"` | `"update"` | `"reorder"` | `"swap"` | `"deviated"`
-         - `summary`: Human-readable description, e.g. `"Swapped 1 exercise(s)"`, `"Renamed to \"Push A\""`
-       - `expires_at: Timestamp` (serverTimestamp + 90 days, for Firestore TTL policy)
+#### `templates/{tid}/changelog/{changelogId}`
+
+Audit trail for template mutations from all sources. Written by Cloud Functions using Admin SDK (bypasses Firestore security rules).
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `timestamp` | timestamp | When the change was made |
+| `source` | string | Origin: `"user_edit"` \| `"workout_save"` \| `"agent_auto_pilot"` \| `"agent_coached_edit"` |
+| `recommendation_id` | string? | Links to `agent_recommendations` doc if change came from a recommendation |
+| `workout_id` | string? | Links to workout if change came from workout save |
+| `changes` | array | `[{ field, operation: "update"\|"add", summary }]` |
+| `expires_at` | Date | 90-day TTL for automatic cleanup |
+
+**Sources:**
+- `user_edit`: Direct template edits via `patch-template.js`
+- `workout_save`: Post-workout template save via `save-workout.js`
+- `agent_auto_pilot`: Auto-applied recommendations via `apply-progression.js`
+- `agent_coached_edit`: Shell agent template/routine updates via `artifact-action.js`
 
 6) routines/{routineId}
    - Weekly/monthly routine structure referencing templates.
@@ -957,6 +962,12 @@ Subcollections:
      pending_review → expired (TTL sweep)
      applied (initial) → failed (application error, then retry or manual fix)
      ```
+
+   **Consumed by:**
+   - **Post-workout analyzer** (`adk_agent/training_analyst/app/analyzers/post_workout.py`): Reads 4 weeks, limit 20. Deep format with full changes array, rationale, signals. Used for deduplication and rejection-aware re-recommendations.
+   - **Weekly review analyzer** (`adk_agent/training_analyst/app/analyzers/weekly_review.py`): Reads 8 weeks, limit 25. Compact format for acceptance rate tracking, progression velocity, and rejection patterns.
+   - **Shell agent** via `getAnalysisSummary` (`firebase_functions/functions/training/get-analysis-summary.js`): Reads 30 days, limit 20. Narrative-oriented format with summary fields for coaching context.
+   - **Workout brief** (`adk_agent/canvas_orchestrator/app/skills/workout_skills.py`): Filtered to exercises in current workout, capped at 3 recommendations. Compact one-line format for mid-workout context.
 
 17) subscription_events/{auto-id}
    - Audit log of App Store Server Notifications. Written by `app-store-webhook.js` on every notification.

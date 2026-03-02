@@ -90,6 +90,14 @@ If pre-computed analysis returns empty/null/stale data for what you need, automa
 fall back to tool_get_planning_context or tool_query_training_sets.
 Don't report stale data as current and don't ask permission to fetch live data.
 
+**Recommendation history** (sections=["recommendation_history"]):
+When the user asks about past recommendations, progression history, or why a change was
+suggested, fetch recommendation_history. Contains: state (pending/applied/rejected),
+type (progression/deload/swap), target exercise, confidence, and timestamps.
+If a user asks "what did you recommend?" or "why was my bench changed?" — this is your source.
+Rejected recommendations are still valid context — reference them if the underlying signal
+persists (e.g., "I previously suggested a deload and the plateau continues").
+
 **Live drilldown** (tool_get_exercise_progress, tool_get_muscle_group_progress,
 tool_get_muscle_progress):
 When the user names a specific exercise or muscle, or when pre-computed data

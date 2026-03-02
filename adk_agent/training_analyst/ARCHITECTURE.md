@@ -205,6 +205,23 @@ gcloud firestore indexes composite create \
 - Output documents have TTL for automatic cleanup
 - All LLM calls use JSON response mode
 
+## Recommendation History Integration
+
+Both analyzers read from `users/{uid}/agent_recommendations` to provide context-aware recommendations:
+
+- **Post-workout** (`_read_recommendation_history`): 4-week window, limit 20. Deep format includes full `changes` array, `rationale`, `signals`, `confidence`, and `state`. Used for:
+  - Deduplication: skip if identical rec is pending or recently applied
+  - Rejection persistence: re-recommend with escalated context if signal persists
+  - Self-progression awareness: acknowledge user-applied changes
+  - Confidence adjustment: lower by 0.1 for re-recommendations of rejected types
+
+- **Weekly review** (`_read_recommendation_history`): 8-week window, limit 25. Compact format for broader lifecycle tracking:
+  - Acceptance rate patterns: track applied vs. rejected ratio
+  - Progression velocity: gauge speed from frequency of applied progressions
+  - Rejection patterns: adjust recommendation types if user consistently rejects a category
+
+Both methods wrap Firestore reads in try/except, returning `[]` on failure to avoid blocking the analysis pipeline.
+
 ## Monitoring
 
 Structured JSON logs for:

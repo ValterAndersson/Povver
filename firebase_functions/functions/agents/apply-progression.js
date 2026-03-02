@@ -197,10 +197,10 @@ function inferRecommendationType(changes) {
 
 /**
  * Apply changes to the target document.
- * 
+ *
  * @returns {Object} Result with applied changes
  */
-async function applyChangesToTarget(db, userId, targetType, targetId, changes) {
+async function applyChangesToTarget(db, userId, targetType, targetId, changes, metadata = {}) {
   const targetPath = targetType === 'template' 
     ? `users/${userId}/templates/${targetId}`
     : `users/${userId}/routines/${targetId}`;
@@ -229,13 +229,33 @@ async function applyChangesToTarget(db, userId, targetType, targetId, changes) {
   // For complex nested updates, we need to handle arrays specially
   // For now, do a full document read-modify-write
   const updatedData = applyChangesToObject(targetData, changes);
-  
-  await targetRef.update({
+
+  const batch = db.batch();
+
+  batch.update(targetRef, {
     ...updatedData,
     updated_at: admin.firestore.FieldValue.serverTimestamp(),
     last_progression_at: admin.firestore.FieldValue.serverTimestamp(),
   });
-  
+
+  // Write changelog entry for template mutations (audit trail)
+  if (targetType === 'template') {
+    const changelogRef = targetRef.collection('changelog').doc();
+    batch.set(changelogRef, {
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      source: 'agent_auto_pilot',
+      recommendation_id: metadata.recommendation_id || null,
+      changes: changes.map(c => ({
+        field: c.path,
+        operation: c.from != null ? 'update' : 'add',
+        summary: c.rationale || `${c.path}: ${c.from} → ${c.to}`,
+      })),
+      expires_at: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+    });
+  }
+
+  await batch.commit();
+
   return {
     [`${targetType}_id`]: targetId,
     changes_applied: changes.length,
