@@ -31,6 +31,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime as dt
 from typing import Any, Dict, Optional, Tuple
 
 import requests
@@ -417,7 +418,6 @@ def _format_workout_brief(
                 age_str = ""
                 if created:
                     try:
-                        from datetime import datetime as dt
                         created_dt = dt.fromisoformat(
                             created.replace("Z", "+00:00")
                         )
