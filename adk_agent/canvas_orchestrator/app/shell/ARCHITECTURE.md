@@ -14,7 +14,7 @@ The Shell Agent is the single agent architecture that routes all user messages t
 | `planner.py` | SLOW lane planning logic |
 | `critic.py` | Output quality validation |
 | `safety_gate.py` | Safety checks for write operations |
-| `instruction.py` | System instruction. Principles-over-rules design: teaches thinking patterns via examples with Think/Tool/Response chains. Includes DATE AWARENESS section (today from context prefix), ACTIVE WORKOUT MODE section activated by workout_id in context, BRIEF-FIRST REASONING rule (answer from workout brief before calling tools — reduces latency 50-70%), and WARM-UP PROTOCOL (standard ramp at 50/65/80% of working weight). |
+| `instruction.py` | System instruction. Principles-over-rules design: teaches thinking patterns via examples with Think/Tool/Response chains. Includes DATE AWARENESS section (today from context prefix), ACTIVE WORKOUT MODE section activated by workout_id in context, BRIEF-FIRST REASONING rule (answer from workout brief before calling tools — reduces latency 50-70%), and WARM-UP PROTOCOL (standard ramp at 50/65/80% of working weight). 3-mode artifact system: UPDATE (modify existing routine/template), DISCUSS (collaborative strategy design), CREATE (new artifact from scratch). |
 | `__init__.py` | Module exports |
 
 ## Routing Flow
