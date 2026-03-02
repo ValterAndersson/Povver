@@ -47,6 +47,9 @@ enum MainTab: String, CaseIterable {
 }
 
 struct MainTabsView: View {
+    /// One-shot entry context for "Adjust with coach" after onboarding
+    var adjustWithCoachContext: String? = nil
+
     /// Persisted tab selection with migration support
     @AppStorage("selectedTab") private var selectedTabRaw: String = MainTab.coach.rawValue
 
@@ -72,7 +75,7 @@ struct MainTabsView: View {
         TabView(selection: selectedTab) {
             // Coach Tab
             NavigationStack {
-                CoachTabView(switchToTab: switchToTab)
+                CoachTabView(switchToTab: switchToTab, initialCanvasContext: adjustWithCoachContext)
             }
             .tabItem { Label(MainTab.coach.label, systemImage: MainTab.coach.iconName) }
             .tag(MainTab.coach)

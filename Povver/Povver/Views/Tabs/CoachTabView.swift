@@ -6,6 +6,8 @@ import FirebaseFirestore
 struct CoachTabView: View {
     /// Callback to switch to another tab (e.g., Train)
     let switchToTab: (MainTab) -> Void
+    /// One-shot context to auto-navigate to canvas (e.g., after onboarding "Adjust with coach")
+    var initialCanvasContext: String? = nil
 
     /// Navigation state for canvas screen
     @State private var navigateToCanvas = false
@@ -63,6 +65,15 @@ struct CoachTabView: View {
         .onAppear {
             preWarmSession()
             loadRecentCanvases()
+            // Auto-navigate to canvas if coming from onboarding "Adjust with coach"
+            if let context = initialCanvasContext, !context.isEmpty {
+                selectedCanvasId = nil
+                entryContext = context
+                // Small delay to let NavigationStack settle
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    navigateToCanvas = true
+                }
+            }
         }
         .onChange(of: navigateToCanvas) { _, isActive in
             if !isActive {
