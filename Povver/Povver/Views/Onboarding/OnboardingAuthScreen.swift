@@ -270,7 +270,7 @@ struct OnboardingAuthScreen: View {
                     if let user = Auth.auth().currentUser {
                         session.startSession(userId: user.uid)
                         AnalyticsService.shared.loginCompleted(provider: ssoProvider == .apple ? .apple : .google)
-                        onAuthenticated()
+                        onSignIn()
                     }
                 case .newUser:
                     pendingSSOResult = result
@@ -325,7 +325,7 @@ struct OnboardingAuthScreen: View {
                         session.startSession(userId: user.uid)
                         AnalyticsService.shared.loginCompleted(provider: .email)
                         showEmailForm = false
-                        onAuthenticated()
+                        onSignIn()
                     }
                 }
             } catch {
