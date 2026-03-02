@@ -151,6 +151,15 @@ final class OnboardingViewModel: ObservableObject {
         do {
             try await UserRepository.shared.saveUserAttributes(attributes)
 
+            // Log profile completion with all collected data
+            if let level = fitnessLevel, let freq = selectedFrequency, let equip = equipmentPreference {
+                AnalyticsService.shared.onboardingProfileCompleted(
+                    fitnessLevel: level,
+                    frequency: freq,
+                    equipment: equip
+                )
+            }
+
             // Update analytics user property if fitness level is set
             if let level = fitnessLevel {
                 AnalyticsService.shared.updateFitnessLevel(level)
@@ -201,6 +210,7 @@ final class OnboardingViewModel: ObservableObject {
             return false
         }
 
+        AnalyticsService.shared.onboardingTrialStarted()
         isLoadingTrial = false
         return true
     }
@@ -208,13 +218,12 @@ final class OnboardingViewModel: ObservableObject {
     /// Marks onboarding as complete and logs analytics.
     func completeOnboarding() {
         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
-        AnalyticsService.shared.screenViewed("onboarding_completed")
     }
 
     /// Skips to basic logging and marks onboarding as complete.
     func skipToBasicLogging() {
         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
-        AnalyticsService.shared.screenViewed("onboarding_skipped")
+        AnalyticsService.shared.onboardingSkippedToBasic()
     }
 
     /// Checks if onboarding should be shown.

@@ -146,6 +146,37 @@ final class AnalyticsService {
     }
 
     // =========================================================================
+    // MARK: - Domain: Onboarding
+    // =========================================================================
+
+    func onboardingStepViewed(step: String) {
+        log("onboarding_step_viewed", params: ["step": step])
+    }
+
+    func onboardingProfileCompleted(fitnessLevel: String, frequency: Int, equipment: String) {
+        log("onboarding_profile_completed", params: [
+            "fitness_level": fitnessLevel,
+            "frequency": String(frequency),
+            "equipment": equipment,
+        ])
+    }
+
+    func onboardingTrialStarted() {
+        log("onboarding_trial_started")
+    }
+
+    func onboardingSkippedToBasic() {
+        log("onboarding_skipped_to_basic")
+    }
+
+    func onboardingCompleted(trialStarted: Bool, adjustWithCoach: Bool) {
+        log("onboarding_completed", params: [
+            "trial_started": String(trialStarted),
+            "adjust_with_coach": String(adjustWithCoach),
+        ])
+    }
+
+    // =========================================================================
     // MARK: - Domain 2: AI Coaching & Conversations
     // =========================================================================
 

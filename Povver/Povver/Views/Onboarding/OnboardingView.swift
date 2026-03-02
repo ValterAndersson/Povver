@@ -44,6 +44,9 @@ struct OnboardingView: View {
         }
         .preferredColorScheme(.dark)
         .statusBarHidden(vm.currentStep == .welcome)
+        .onChange(of: vm.currentStep) { _, newStep in
+            AnalyticsService.shared.onboardingStepViewed(step: String(describing: newStep))
+        }
     }
 
     @ViewBuilder
@@ -125,10 +128,12 @@ struct OnboardingView: View {
                 vm: vm,
                 onStartTraining: {
                     vm.completeOnboarding()
+                    AnalyticsService.shared.onboardingCompleted(trialStarted: true, adjustWithCoach: false)
                     onComplete(false)
                 },
                 onAdjustWithCoach: {
                     vm.completeOnboarding()
+                    AnalyticsService.shared.onboardingCompleted(trialStarted: true, adjustWithCoach: true)
                     onComplete(true)
                 }
             )
