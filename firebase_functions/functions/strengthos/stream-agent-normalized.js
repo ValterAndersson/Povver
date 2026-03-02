@@ -1034,7 +1034,31 @@ async function streamAgentNormalizedHandler(req, res) {
       .doc(conversationId)
       .collection('workspace_entries');
     persistWorkspaceEntry = enqueueWorkspaceEntry(workspaceRef, correlationId);
-    
+
+    // Persist user prompt as workspace entry
+    // (client can't write to workspace_entries — blocked by security rules)
+    workspaceRef.add({
+      entry: {
+        type: 'user_prompt',
+        agent: userId,
+        content: { text: message, correlation_id: correlationId },
+        timestamp: Date.now() / 1000,
+        metadata: { source: 'server' },
+      },
+      type: 'user_prompt',
+      agent: userId,
+      correlation_id: correlationId || null,
+      created_at: admin.firestore.FieldValue.serverTimestamp(),
+    }).catch(err => logger.warn('[streamAgentNormalized] user prompt workspace entry failed', { error: String(err?.message || err) }));
+
+    // Update canvas metadata for recent-chats listing
+    // (client can't update canvas doc — blocked by security rules)
+    db.collection('users').doc(userId).collection('canvases').doc(conversationId)
+      .update({
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastMessage: (message || '').slice(0, 100),
+      }).catch(err => logger.warn('[streamAgentNormalized] canvas metadata update failed', { error: String(err?.message || err) }));
+
     // Canvas Orchestrator agent ID
     const agentId = '8723635205937561600';
     const projectId = VERTEX_AI_CONFIG.projectId;

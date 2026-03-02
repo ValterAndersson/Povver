@@ -401,8 +401,17 @@ final class CanvasViewModel: ObservableObject {
                         metadata: ["source": AnyCodable("client")]
                     )
                     self.streamEvents.append(evt)
+
+                    // Inject into workspace events for immediate timeline display.
+                    // The server persists the authoritative copy; when the listener
+                    // fires it replaces this array, naturally superseding this entry.
+                    let userWorkspaceEvent = WorkspaceEvent(
+                        id: "local-\(correlationId)",
+                        event: evt,
+                        createdAt: Date()
+                    )
+                    self.workspaceEvents.append(userWorkspaceEvent)
                 }
-                self.recordUserPromptEntry(userId: userId, canvasId: canvasId, message: message, correlationId: correlationId)
                 
                 // Stream agent events
                 for try await event in DirectStreamingService.shared.streamQuery(
@@ -721,11 +730,18 @@ final class CanvasViewModel: ObservableObject {
                 workouts = decoded
             }
 
+            let mode = content["mode"] as? String
+            let sourceRoutineId = content["source_routine_id"] as? String
+            let sourceRoutineName = content["source_routine_name"] as? String
+
             let routineData = RoutineSummaryData(
                 name: name,
                 description: description,
                 frequency: frequency,
-                workouts: workouts
+                workouts: workouts,
+                mode: mode,
+                sourceRoutineId: sourceRoutineId,
+                sourceRoutineName: sourceRoutineName
             )
 
             return CanvasCardModel(
@@ -797,16 +813,24 @@ final class CanvasViewModel: ObservableObject {
     private func attachWorkspaceEntriesListener(userId: String, canvasId: String) {
         workspaceListener?.remove()
         let db = Firestore.firestore()
+        // Query newest 200 entries (descending) so recent messages are always included.
+        // Each agent turn generates ~20-50 entries, so ascending+limit(200) dropped
+        // all recent messages once a conversation exceeded ~200 total entries.
         let ref = db.collection("users")
             .document(userId)
             .collection("canvases")
             .document(canvasId)
             .collection("workspace_entries")
-            .order(by: "created_at", descending: false)
+            .order(by: "created_at", descending: true)
             .limit(to: 200)
         let decoder = JSONDecoder()
         workspaceListener = ref.addSnapshotListener { [weak self] snapshot, error in
-            guard let self, let snapshot = snapshot else { return }
+            guard let self, let snapshot = snapshot else {
+                if let error {
+                    AppLogger.shared.error(.store, "workspace_entries listener error", error)
+                }
+                return
+            }
             let docs = snapshot.documents
             let events: [WorkspaceEvent] = docs.compactMap { doc in
                 guard let entry = doc.data()["entry"] as? [String: Any],
@@ -819,55 +843,15 @@ final class CanvasViewModel: ObservableObject {
                 return WorkspaceEvent(id: doc.documentID, event: streamEvent, createdAt: timestamp)
             }
             Task { @MainActor in
-                self.workspaceEvents = events
+                // Reverse to chronological order (query returns newest-first)
+                self.workspaceEvents = events.reversed()
             }
         }
     }
 
-    private func recordUserPromptEntry(userId: String, canvasId: String, message: String, correlationId: String) {
-        let db = Firestore.firestore()
-        let ref = db.collection("users")
-            .document(userId)
-            .collection("canvases")
-            .document(canvasId)
-            .collection("workspace_entries")
-            .document()
-        let entry: [String: Any] = [
-            "entry": [
-                "type": "user_prompt",
-                "agent": userId,
-                "content": [
-                    "text": message,
-                    "correlation_id": correlationId
-                ],
-                "timestamp": Date().timeIntervalSince1970,
-                "metadata": [
-                    "source": "client"
-                ]
-            ],
-            "type": "user_prompt",
-            "agent": userId,
-            "correlation_id": correlationId,
-            "created_at": FieldValue.serverTimestamp()
-        ]
-        ref.setData(entry) { error in
-            if let error {
-                AppLogger.shared.error(.app, "Failed to log prompt entry", error)
-            }
-        }
-
-        // Update canvas root doc with metadata for recent chats listing
-        let canvasRef = db.collection("users").document(userId)
-            .collection("canvases").document(canvasId)
-        canvasRef.updateData([
-            "updatedAt": FieldValue.serverTimestamp(),
-            "lastMessage": String(message.prefix(100))
-        ]) { error in
-            if let error {
-                AppLogger.shared.error(.app, "Failed to update canvas metadata", error)
-            }
-        }
-    }
+    // recordUserPromptEntry removed — both workspace_entries write and canvas
+    // metadata update are now handled server-side in stream-agent-normalized.js
+    // (client writes were blocked by Firestore security rules).
 
     func clearCards() {
         cards = []
