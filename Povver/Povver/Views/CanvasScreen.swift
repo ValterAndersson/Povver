@@ -138,9 +138,11 @@ extension CanvasScreen {
         // When a plan is focal, show collapsed composer unless expanded
         let showCollapsed = hasProposedPlan && !composerExpanded && composerText.isEmpty
         
+        let canSend = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !vm.isAgentThinking
+
         return VStack(spacing: 0) {
             if showCollapsed {
-                // Minimal "Ask / Adjust" button
+                // Minimal "Ask / Adjust" pill
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         composerExpanded = true
@@ -155,29 +157,35 @@ extension CanvasScreen {
                     .foregroundColor(Color.textSecondary)
                     .padding(.horizontal, Space.md)
                     .padding(.vertical, 10)
-                    .background(Color.surface.opacity(0.6))
+                    .background(Color.surface)
                     .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color.separatorLine, lineWidth: StrokeWidthToken.thin))
                 }
                 .buttonStyle(PlainButtonStyle())
                 .padding(.bottom, Space.md)
             } else {
-                // Full composer
+                // Full composer — matches AgentPromptBar capsule styling
                 HStack(spacing: Space.sm) {
                     TextField(placeholder, text: $composerText, axis: .vertical)
                         .focused($composerFocused)
+                        .textInputAutocapitalization(.sentences)
                         .lineLimit(1...4)
-                        .padding(Space.sm)
-                        .background(Color.surface.opacity(0.6))
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium, style: .continuous))
+
                     Button(action: sendComposerMessage) {
-                        Image(systemName: "paperplane.fill")
-                            .foregroundColor(.textInverse)
-                            .padding(Space.sm)
-                            .background(composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || vm.isAgentThinking ? Color.textSecondary : Color.accent)
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(Color.textInverse)
+                            .padding(InsetsToken.all(Space.sm))
+                            .background(canSend ? Color.textPrimary : Color.textSecondary.opacity(0.4))
                             .clipShape(Circle())
                     }
-                    .disabled(composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || vm.isAgentThinking)
+                    .disabled(!canSend)
                 }
+                .padding(InsetsToken.symmetric(vertical: Space.md, horizontal: Space.lg))
+                .background(Color.surface)
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(Color.separatorLine, lineWidth: StrokeWidthToken.thin))
+                .shadowStyle(ShadowsToken.level2)
                 .padding(.horizontal, Space.lg)
                 .padding(.bottom, Space.md)
             }
