@@ -20,8 +20,8 @@ Firestore triggers that react to document lifecycle events. All triggers are v2 
 | `onWorkoutDeleted` | (deleted doc) | `weekly_stats/{weekId}`, `analytics_series_*` (decrements) |
 | `onTemplateCreated/Updated` | `templates/{id}` | `templates/{id}` (analytics field) |
 | `onWorkoutCreated` | `workouts/{id}` | `workouts/{id}` (analytics field) |
-| `onAnalysisInsightCreated` | `analysis_insights/{id}`, `users/{uid}`, `routines/{id}`, `templates/{id}`, `workouts/{id}`, `agent_recommendations` | `agent_recommendations/{id}`, `templates/{id}` (if auto-pilot, template-scoped only) |
-| `onWeeklyReviewCreated` | `weekly_reviews/{id}`, `users/{uid}`, `routines/{id}`, `templates/{id}`, `workouts` (recent, exercise-scoped only), `agent_recommendations` | `agent_recommendations/{id}`, `templates/{id}` (if auto-pilot, template-scoped only) |
+| `onAnalysisInsightCreated` | `analysis_insights/{id}`, `users/{uid}`, `routines/{id}`, `templates/{id}`, `series_exercises/{id}`, `set_facts`, `workouts/{id}`, `agent_recommendations` | `agent_recommendations/{id}`, `templates/{id}` (if auto-pilot, template-scoped only) |
+| `onWeeklyReviewCreated` | `weekly_reviews/{id}`, `users/{uid}`, `routines/{id}`, `templates/{id}`, `series_exercises/{id}`, `set_facts`, `workouts` (recent, exercise-scoped only), `agent_recommendations` | `agent_recommendations/{id}`, `templates/{id}` (if auto-pilot, template-scoped only) |
 | `expireStaleRecommendations` | `agent_recommendations` (collectionGroup) | `agent_recommendations/{id}` (state → expired) |
 
 ## Key Behaviors
@@ -29,6 +29,8 @@ Firestore triggers that react to document lifecycle events. All triggers are v2 
 - **Best-effort**: `workout-routine-cursor.js` catches errors and logs rather than failing the trigger
 - **Idempotent**: `weekly-analytics.js` uses deterministic set IDs for upserts
 - **Separated error handling**: `weekly-analytics.js` splits rollup writes (CRITICAL — breaks ACWR) from per-muscle series writes (non-fatal) into separate try/catch blocks
+- **Exercise name resolution**: Template exercises store `exercise_id` (catalog reference) but no `name`. `process-recommendations.js` resolves names via `series_exercises` (batch `getAll`, 1 doc per ID) with `set_facts` fallback for gaps. Stale `series_exercises` entries (where `exercise_name === doc.id`) are skipped.
+- **Non-exercise deduplication**: `writeNonExerciseRecommendations` queries existing `pending_review` recs and deduplicates on `scope:type:target_key` to prevent duplicate volume_adjust/muscle_balance recommendations across insights.
 - **No auth**: Triggers don't need authentication middleware — they fire from trusted Firestore events
 
 ## Cross-References

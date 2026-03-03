@@ -910,7 +910,7 @@ Audit trail for template mutations from all sources. Written by Cloud Functions 
        - `template_id?: string` - If scope is "template"
        - `template_name?: string` - Human-readable template name (template scope)
        - `routine_id?: string` - If scope is "template" or "routine"
-       - `exercise_name?: string` - If scope is "exercise" (no routine/template)
+       - `exercise_name?: string` - If scope is "exercise" or "template" (resolved from series_exercises/set_facts)
        - `exercise_id?: string` - If scope is "exercise"
        - `muscle_group?: string` - If scope is "routine" or "muscle_group" (muscle_balance recommendations)
        - `current_exercise?: string` - If type is "swap" — exercise being replaced
