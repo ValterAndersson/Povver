@@ -381,17 +381,74 @@ async function processTemplateScopedRecommendations(db, userId, triggerType, tri
     templateIds.map(tid => db.doc(`users/${userId}/templates/${tid}`).get())
   );
 
-  // { exercise_name_lower: { templateId, exerciseIndex, sets } }
+  // Template exercises store exercise_id (reference) but not name.
+  // Resolve exercise_id → name via series_exercises (1 doc per exercise,
+  // doc ID = exercise_id), with set_facts fallback for any gaps.
+  const allExerciseIds = new Set();
+  for (const snap of templateSnaps) {
+    if (!snap.exists) continue;
+    for (const ex of (snap.data().exercises || [])) {
+      if (ex.exercise_id) allExerciseIds.add(ex.exercise_id);
+    }
+  }
+
+  const exerciseNameMap = {}; // { exercise_id: name }
+  if (allExerciseIds.size > 0) {
+    try {
+      // Primary: series_exercises (1 doc per exercise_id, fast batch read)
+      const seriesRefs = [...allExerciseIds].map(id =>
+        db.doc(`users/${userId}/series_exercises/${id}`)
+      );
+      const seriesDocs = await db.getAll(...seriesRefs);
+      for (const doc of seriesDocs) {
+        if (doc.exists) {
+          const name = (doc.data().exercise_name || '').trim();
+          // Skip if exercise_name is the ID itself (stale entry)
+          if (name && name !== doc.id) {
+            exerciseNameMap[doc.id] = name;
+          }
+        }
+      }
+
+      // Fallback: set_facts for any unresolved exercise_ids
+      const unresolved = [...allExerciseIds].filter(id => !exerciseNameMap[id]);
+      if (unresolved.length > 0) {
+        for (let i = 0; i < unresolved.length; i += 30) {
+          const chunk = unresolved.slice(i, i + 30);
+          const sfSnap = await db.collection(`users/${userId}/set_facts`)
+            .where('exercise_id', 'in', chunk)
+            .limit(chunk.length * 10)
+            .get();
+          sfSnap.forEach(doc => {
+            const d = doc.data();
+            if (d.exercise_id && d.exercise_name && !exerciseNameMap[d.exercise_id]) {
+              exerciseNameMap[d.exercise_id] = d.exercise_name.trim();
+            }
+          });
+        }
+      }
+
+      logger.info('[processRecommendations] Resolved exercise names', {
+        userId, resolved: Object.keys(exerciseNameMap).length, total: allExerciseIds.size,
+      });
+    } catch (err) {
+      logger.warn('[processRecommendations] Failed to resolve exercise names', { error: err.message });
+    }
+  }
+
+  // { exercise_name_lower: { templateId, exerciseIndex, exerciseName, sets } }
   const exerciseIndex = {};
   for (const snap of templateSnaps) {
     if (!snap.exists) continue;
     const exercises = snap.data().exercises || [];
     exercises.forEach((ex, idx) => {
-      const key = (ex.name || '').trim().toLowerCase();
+      const name = exerciseNameMap[ex.exercise_id] || '';
+      const key = name.toLowerCase();
       if (key) {
         exerciseIndex[key] = {
           templateId: snap.id,
           exerciseIndex: idx,
+          exerciseName: name,
           sets: ex.sets || [],
         };
       }
@@ -456,6 +513,7 @@ async function processTemplateScopedRecommendations(db, userId, triggerType, tri
           template_name: templateName || null,
           routine_id: activeRoutineId,
           exercise_index: exerciseData.exerciseIndex,
+          exercise_name: exerciseData.exerciseName || exerciseName,
           current_exercise: exerciseName,
         },
         recommendation: {
@@ -515,6 +573,7 @@ async function processTemplateScopedRecommendations(db, userId, triggerType, tri
         template_id: exerciseData.templateId,
         template_name: templateName || null,
         routine_id: activeRoutineId,
+        exercise_name: exerciseData.exerciseName || exerciseName,
       },
       recommendation: {
         type: rec.type,
@@ -1035,17 +1094,49 @@ async function writeNonExerciseRecommendations(userId, triggerType, triggerConte
 
   const activeRoutineId = userData.activeRoutineId || null;
 
+  // Deduplication: query existing pending non-exercise recs
+  const pendingSnap = await db.collection(`users/${userId}/agent_recommendations`)
+    .where('state', '==', 'pending_review')
+    .get();
+
+  // Build dedup set: "scope:type:target_key"
+  const pendingKeys = new Set();
+  pendingSnap.forEach(doc => {
+    const d = doc.data();
+    const scope = d.scope || '';
+    const type = d.recommendation?.type || '';
+    const targetKey = scope === 'muscle_group'
+      ? (d.target?.muscle_group || '').trim().toLowerCase()
+      : (d.target?.description || '').trim().toLowerCase();
+    if (scope && type) {
+      pendingKeys.add(`${scope}:${type}:${targetKey}`);
+    }
+  });
+
+  let createdCount = 0;
+
   for (const rec of recommendations) {
+    const isMuscle = MUSCLE_GROUP_NAMES.has((rec.target || '').trim().toLowerCase());
+    const scope = isMuscle ? 'muscle_group' : 'routine';
+    const targetKey = (rec.target || '').trim().toLowerCase();
+    const dedupKey = `${scope}:${rec.type}:${targetKey}`;
+
+    if (pendingKeys.has(dedupKey)) {
+      logger.info('[processRecommendations] Skipping duplicate non-exercise', {
+        userId, target: rec.target, type: rec.type, scope,
+      });
+      continue;
+    }
+
     const recRef = db.collection(`users/${userId}/agent_recommendations`).doc();
     const now = FieldValue.serverTimestamp();
-    const isMuscle = MUSCLE_GROUP_NAMES.has((rec.target || '').trim().toLowerCase());
 
     const recData = {
       id: recRef.id,
       created_at: now,
       trigger: triggerType,
       trigger_context: triggerContext,
-      scope: isMuscle ? 'muscle_group' : 'routine',
+      scope,
       target: {
         routine_id: activeRoutineId,
         ...(isMuscle ? { muscle_group: rec.target } : { description: rec.target }),
@@ -1070,11 +1161,20 @@ async function writeNonExerciseRecommendations(userId, triggerType, triggerConte
     };
 
     await recRef.set(recData);
+    pendingKeys.add(dedupKey);
+    createdCount++;
     logger.info('[processRecommendations] Created non-exercise recommendation', {
       userId,
       target: rec.target,
-      scope: recData.scope,
+      scope,
       recommendationId: recRef.id,
+    });
+  }
+
+  if (createdCount < recommendations.length) {
+    logger.info('[processRecommendations] Non-exercise dedup summary', {
+      userId, total: recommendations.length, created: createdCount,
+      skipped: recommendations.length - createdCount,
     });
   }
 }
