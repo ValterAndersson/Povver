@@ -16,6 +16,14 @@ from app.config import PROJECT_ID
 
 logger = logging.getLogger(__name__)
 
+# Log tracking status at import time so Cloud Logging shows whether it's active
+try:
+    from shared.usage_tracker import TRACKING_ENABLED as _TRACKING_ENABLED
+    logger.info("Training analyst usage tracking: %s",
+                "ENABLED" if _TRACKING_ENABLED else "DISABLED")
+except ImportError:
+    logger.warning("Training analyst: shared.usage_tracker not available")
+
 # Matches dot-path keys like "weeks.2025-01-06.sets" or "weeks.2025-01-06.reps_bucket.6-10"
 _WEEKS_DOT_RE = re.compile(r"^weeks\.(\d{4}-\d{2}-\d{2})\.(.+)$")
 

@@ -4,7 +4,7 @@ Cross-agent utilities shared by `canvas_orchestrator`, `catalog_orchestrator`, a
 
 ## Files
 
-- `usage_tracker.py` — LLM usage tracking. Captures token counts from Vertex AI responses and writes to Firestore `llm_usage` collection. All writes are fire-and-forget (failures logged, never crash the caller). Gated by `ENABLE_USAGE_TRACKING` env var.
+- `usage_tracker.py` — LLM usage tracking. Captures token counts from Vertex AI responses and writes to Firestore `llm_usage` collection. All writes are fire-and-forget (failures logged, never crash the caller). Gated by `ENABLE_USAGE_TRACKING` env var. Logs tracking status at import time for Cloud Logging visibility. Shell agent tracking uses an `after_model_callback` + `ContextVar` approach (ADK Events don't propagate `usage_metadata`, so chunk-based accumulation doesn't work). Training analyst and functional lane use direct `extract_usage_from_*_response()` helpers on non-streaming responses.
 - `llm_pricing.py` — Vertex AI Gemini pricing rates (EUR per 1M tokens). Used by the query script (`scripts/query_llm_usage.js`) and available for Python-based cost estimation. Update when Google publishes new rates.
 
 ## Import Path

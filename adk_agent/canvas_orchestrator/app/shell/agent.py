@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextvars import ContextVar
 from typing import Any, Dict
 
 from google.adk import Agent
@@ -30,6 +31,13 @@ from app.shell.tools import all_tools, set_tool_context
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+# Per-request usage accumulator. ContextVar is required because Vertex AI
+# Agent Engine runs concurrent requests in the same process — a module-level
+# dict would leak usage data across requests.
+_usage_accumulator: ContextVar[Dict[str, int]] = ContextVar(
+    "_usage_accumulator", default=None
+)
 
 
 # ============================================================================
@@ -64,13 +72,48 @@ def _before_model_callback(callback_context, llm_request):
                 for part in content.parts or []:
                     if hasattr(part, "text") and part.text:
                         session_ctx = SessionContext.from_message(part.text)
-                        
+
                         # Set context for tools (new pure skills system)
                         set_tool_context(session_ctx, part.text)
                         break
     except Exception as e:
         logger.debug("before_model_callback error: %s", e)
     return None
+
+
+def _after_model_callback(callback_context, llm_response):
+    """Capture usage_metadata from each LLM response.
+
+    ADK's Event objects do not carry usage_metadata from LlmResponse, so the
+    streaming chunks in agent_engine_app.py never contain token counts.  This
+    callback fires after every model call (including multi-turn tool-use turns)
+    and accumulates totals in a ContextVar that agent_engine_app reads after
+    the stream completes.
+    """
+    try:
+        meta = getattr(llm_response, "usage_metadata", None)
+        if not meta:
+            return llm_response
+
+        prompt = getattr(meta, "prompt_token_count", 0) or 0
+        completion = getattr(meta, "candidates_token_count", 0) or 0
+        total = getattr(meta, "total_token_count", 0) or 0
+        thinking = getattr(meta, "thoughts_token_count", None)
+
+        acc = _usage_accumulator.get()
+        if acc is None:
+            acc = {}
+            _usage_accumulator.set(acc)
+
+        acc["prompt_tokens"] = acc.get("prompt_tokens", 0) + prompt
+        acc["completion_tokens"] = acc.get("completion_tokens", 0) + completion
+        acc["total_tokens"] = acc.get("total_tokens", 0) + total
+        if thinking:
+            acc["thinking_tokens"] = acc.get("thinking_tokens", 0) + thinking
+
+    except Exception as e:
+        logger.debug("after_model_callback error: %s", e)
+    return llm_response
 
 
 # ============================================================================
@@ -93,6 +136,7 @@ ShellAgent = Agent(
     generate_content_config=_SHELL_CONFIG,
     before_tool_callback=_before_tool_callback,
     before_model_callback=_before_model_callback,
+    after_model_callback=_after_model_callback,
 )
 
 
@@ -148,6 +192,7 @@ def create_shell_agent() -> Agent:
         generate_content_config=GenerateContentConfig(temperature=0.3),
         before_tool_callback=_before_tool_callback,
         before_model_callback=_before_model_callback,
+        after_model_callback=_after_model_callback,
     )
 
 
@@ -159,4 +204,5 @@ __all__ = [
     "ShellAgent",
     "create_shell_agent",
     "handle_message",
+    "_usage_accumulator",
 ]

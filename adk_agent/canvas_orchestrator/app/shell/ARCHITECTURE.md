@@ -6,7 +6,7 @@ The Shell Agent is the single agent architecture that routes all user messages t
 
 | File | Purpose |
 |------|---------|
-| `agent.py` | ShellAgent class: ADK agent definition (gemini-2.5-flash, temp 0.3), before_model/before_tool callbacks for context injection |
+| `agent.py` | ShellAgent class: ADK agent definition (gemini-2.5-flash, temp 0.3), before_model/before_tool callbacks for context injection, after_model_callback for usage tracking via `_usage_accumulator` ContextVar |
 | `router.py` | Lane router: classifies messages into FAST/FUNCTIONAL/SLOW lanes, dispatches to handlers |
 | `context.py` | Per-request context via `ContextVar`. Thread-safe session context (`user_id`, `canvas_id`, `correlation_id`, `workout_mode`, `active_workout_id`, `today`). Required because Vertex AI Agent Engine is concurrent serverless — module globals leak across requests |
 | `tools.py` | ADK `FunctionTool` definitions wrapping skill modules. Tool registry (`all_tools`) consumed by `agent.py`. 20 tools: 10 read + 4 canvas write + 6 workout. `timed_tool` decorator logs `correlation_id` and `result_keys` for end-to-end tracing. `tool_add_exercise` supports `warmup_sets` parameter for ramp-up set generation via `_calculate_warmup_ramp()`. |

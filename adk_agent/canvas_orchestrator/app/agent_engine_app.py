@@ -224,9 +224,12 @@ class AgentEngineApp(AdkApp):
             augmented_message = f"{augmented_message}\n\n{plan_prompt}"
             logger.info("PLANNER: Injected plan for %s", plan.intent)
         
-        # Collect response for critic pass + usage tracking
+        # Collect response for critic pass
         collected_text = []
-        usage_accumulator = {}
+
+        # Reset per-request usage accumulator (populated by after_model_callback)
+        from app.shell.agent import _usage_accumulator
+        _usage_accumulator.set(None)
 
         for chunk in super().stream_query(
             user_id=user_id,
@@ -245,17 +248,14 @@ class AgentEngineApp(AdkApp):
             except Exception:
                 pass
 
-            # Accumulate usage metadata across multi-turn tool use
-            try:
-                from shared.usage_tracker import accumulate_usage_from_chunk
-                accumulate_usage_from_chunk(chunk, usage_accumulator)
-            except Exception:
-                pass
-
             yield chunk
 
-        # === USAGE TRACKING: Write accumulated token counts (fire-and-forget) ===
-        if usage_accumulator.get("total_tokens"):
+        # === USAGE TRACKING: Read from after_model_callback ContextVar ===
+        # ADK Events don't carry usage_metadata, so chunk-based accumulation
+        # never works.  The after_model_callback on ShellAgent captures token
+        # counts directly from LlmResponse and stores them in _usage_accumulator.
+        usage_data = _usage_accumulator.get()
+        if usage_data and usage_data.get("total_tokens"):
             try:
                 from shared.usage_tracker import track_usage
                 track_usage(
@@ -264,7 +264,7 @@ class AgentEngineApp(AdkApp):
                     system="canvas_orchestrator",
                     feature="shell_agent",
                     model=os.getenv("CANVAS_SHELL_MODEL", "gemini-2.5-flash"),
-                    **usage_accumulator,
+                    **usage_data,
                 )
             except Exception as e:
                 logger.debug("Usage tracking error (non-fatal): %s", e)

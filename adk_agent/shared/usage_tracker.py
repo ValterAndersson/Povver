@@ -21,6 +21,7 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 TRACKING_ENABLED = os.getenv("ENABLE_USAGE_TRACKING", "false").lower() == "true"
+logger.info("Usage tracking: %s", "ENABLED" if TRACKING_ENABLED else "DISABLED")
 
 # Singleton Firestore client — stateless and thread-safe, safe for concurrent
 # requests on Vertex AI Agent Engine.  Benign double-init if two threads race
@@ -112,9 +113,15 @@ def extract_usage_from_vertex_response(response) -> Dict[str, Any]:
 def accumulate_usage_from_chunk(chunk: dict, accumulator: dict) -> None:
     """Accumulate ``usage_metadata`` from ADK streaming chunks.
 
-    ADK streams one chunk per LLM turn during multi-turn tool use.  Each
-    chunk may carry its own ``usage_metadata``.  We sum across turns to get
-    the total for the whole request.
+    **NOTE**: This function is currently unused.  ADK converts ``LlmResponse``
+    objects into ``Event`` objects but does NOT copy ``usage_metadata`` onto the
+    Event, so chunks yielded by ``AdkApp.stream_query()`` never contain token
+    counts.  Usage tracking for the shell agent is handled instead by the
+    ``after_model_callback`` on ``ShellAgent`` which captures usage directly
+    from the ``LlmResponse`` and stores it in a ``ContextVar``.
+
+    Kept for reference and in case a future ADK version starts propagating
+    usage_metadata on Events.
     """
     meta = chunk.get("usage_metadata")
     if not meta:
