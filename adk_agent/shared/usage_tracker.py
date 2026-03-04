@@ -117,8 +117,9 @@ def accumulate_usage_from_chunk(chunk: dict, accumulator: dict) -> None:
     objects into ``Event`` objects but does NOT copy ``usage_metadata`` onto the
     Event, so chunks yielded by ``AdkApp.stream_query()`` never contain token
     counts.  Usage tracking for the shell agent is handled instead by the
-    ``after_model_callback`` on ``ShellAgent`` which captures usage directly
-    from the ``LlmResponse`` and stores it in a ``ContextVar``.
+    ``after_model_callback`` on ``ShellAgent`` which calls ``track_usage()``
+    directly per LLM turn (ContextVar doesn't work across ADK's thread
+    boundary).
 
     Kept for reference and in case a future ADK version starts propagating
     usage_metadata on Events.
