@@ -227,9 +227,10 @@ class AgentEngineApp(AdkApp):
         # Collect response for critic pass
         collected_text = []
 
-        # Reset per-request usage accumulator (populated by after_model_callback)
-        from app.shell.agent import _usage_accumulator
-        _usage_accumulator.set(None)
+        # Usage tracking is handled by _after_model_callback on ShellAgent,
+        # which calls track_usage() directly per LLM turn.  ADK's Runner.run()
+        # spawns a separate thread, so ContextVar-based accumulation doesn't
+        # work (writes in the callback thread are invisible here).
 
         for chunk in super().stream_query(
             user_id=user_id,
@@ -249,25 +250,6 @@ class AgentEngineApp(AdkApp):
                 pass
 
             yield chunk
-
-        # === USAGE TRACKING: Read from after_model_callback ContextVar ===
-        # ADK Events don't carry usage_metadata, so chunk-based accumulation
-        # never works.  The after_model_callback on ShellAgent captures token
-        # counts directly from LlmResponse and stores them in _usage_accumulator.
-        usage_data = _usage_accumulator.get()
-        if usage_data and usage_data.get("total_tokens"):
-            try:
-                from shared.usage_tracker import track_usage
-                track_usage(
-                    user_id=ctx.user_id if ctx else None,
-                    category="user_initiated",
-                    system="canvas_orchestrator",
-                    feature="shell_agent",
-                    model=os.getenv("CANVAS_SHELL_MODEL", "gemini-2.5-flash"),
-                    **usage_data,
-                )
-            except Exception as e:
-                logger.debug("Usage tracking error (non-fatal): %s", e)
 
         # === 7. CRITIC PASS: Validate response ===
         if routing and collected_text:
@@ -512,7 +494,7 @@ if __name__ == "__main__":
     parser.add_argument("--location", default="us-central1")
     parser.add_argument("--agent-name", default="canvas-orchestrator")
     parser.add_argument("--requirements-file", default="agent_engine_requirements.txt")
-    parser.add_argument("--extra-packages", nargs="+", default=["./app"])
+    parser.add_argument("--extra-packages", nargs="+", default=["./app", "./shared"])
     parser.add_argument("--set-env-vars")
     args = parser.parse_args()
 

@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import logging
 import os
-from contextvars import ContextVar
 from typing import Any, Dict
 
 from google.adk import Agent
@@ -31,13 +30,6 @@ from app.shell.tools import all_tools, set_tool_context
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-
-# Per-request usage accumulator. ContextVar is required because Vertex AI
-# Agent Engine runs concurrent requests in the same process — a module-level
-# dict would leak usage data across requests.
-_usage_accumulator: ContextVar[Dict[str, int]] = ContextVar(
-    "_usage_accumulator", default=None
-)
 
 
 # ============================================================================
@@ -82,13 +74,16 @@ def _before_model_callback(callback_context, llm_request):
 
 
 def _after_model_callback(callback_context, llm_response):
-    """Capture usage_metadata from each LLM response.
+    """Track usage_metadata from each LLM response (fire-and-forget).
 
     ADK's Event objects do not carry usage_metadata from LlmResponse, so the
-    streaming chunks in agent_engine_app.py never contain token counts.  This
-    callback fires after every model call (including multi-turn tool-use turns)
-    and accumulates totals in a ContextVar that agent_engine_app reads after
-    the stream completes.
+    streaming chunks in agent_engine_app.py never contain token counts.
+
+    ADK's Runner.run() spawns a separate thread for the async agent flow, so
+    ContextVar writes here are invisible to the calling thread.  Instead we
+    call track_usage() directly per LLM turn.  Multi-turn tool-use requests
+    produce one record per turn — more granular than a single accumulated
+    record and simpler to implement correctly across thread boundaries.
     """
     try:
         meta = getattr(llm_response, "usage_metadata", None)
@@ -100,16 +95,28 @@ def _after_model_callback(callback_context, llm_response):
         total = getattr(meta, "total_token_count", 0) or 0
         thinking = getattr(meta, "thoughts_token_count", None)
 
-        acc = _usage_accumulator.get()
-        if acc is None:
-            acc = {}
-            _usage_accumulator.set(acc)
+        if total <= 0:
+            return llm_response
 
-        acc["prompt_tokens"] = acc.get("prompt_tokens", 0) + prompt
-        acc["completion_tokens"] = acc.get("completion_tokens", 0) + completion
-        acc["total_tokens"] = acc.get("total_tokens", 0) + total
-        if thinking:
-            acc["thinking_tokens"] = acc.get("thinking_tokens", 0) + thinking
+        # Get user_id from ADK's invocation context (set by stream_query)
+        user_id = None
+        try:
+            user_id = callback_context._invocation_context.user_id
+        except Exception:
+            pass
+
+        from shared.usage_tracker import track_usage
+        track_usage(
+            user_id=user_id,
+            category="user_initiated",
+            system="canvas_orchestrator",
+            feature="shell_agent",
+            model=os.getenv("CANVAS_SHELL_MODEL", "gemini-2.5-flash"),
+            prompt_tokens=prompt,
+            completion_tokens=completion,
+            total_tokens=total,
+            thinking_tokens=thinking,
+        )
 
     except Exception as e:
         logger.debug("after_model_callback error: %s", e)
@@ -204,5 +211,4 @@ __all__ = [
     "ShellAgent",
     "create_shell_agent",
     "handle_message",
-    "_usage_accumulator",
 ]

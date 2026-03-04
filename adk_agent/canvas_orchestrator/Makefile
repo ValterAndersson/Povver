@@ -12,12 +12,16 @@ deploy:
 		 echo "Set GOOGLE_APPLICATION_CREDENTIALS or GCP_SA_KEY, or place key at ~/.config/povver/myon-53d85-80792c186dcb.json"; \
 		 exit 1)
 	@echo "Using SA key: $(GCP_SA_KEY_PATH)"
+	@# Copy shared package locally (Agent Engine tarball rejects .. paths)
+	rm -rf ./shared && cp -r ../shared ./shared
 	GOOGLE_APPLICATION_CREDENTIALS="$(GCP_SA_KEY_PATH)" \
 	PYTHONPATH=.:.. python3 -m app.agent_engine_app \
 		--project myon-53d85 \
 		--location us-central1 \
 		--agent-name canvas-orchestrator \
 		--set-env-vars FIREBASE_API_KEY=$${FIREBASE_API_KEY:?Set FIREBASE_API_KEY env var},MYON_API_KEY=$${MYON_API_KEY:?Set MYON_API_KEY env var},MYON_FUNCTIONS_BASE_URL=$${MYON_FUNCTIONS_BASE_URL:-https://us-central1-myon-53d85.cloudfunctions.net},PIPELINE_USER_ID=$${PIPELINE_USER_ID:-canvas_orchestrator_engine},ENABLE_USAGE_TRACKING=true
+	@# Clean up local copy
+	rm -rf ./shared
 
 bootstrap:
 	@USER_ID=$${USER_ID:-canvas_orchestrator_engine}; \
