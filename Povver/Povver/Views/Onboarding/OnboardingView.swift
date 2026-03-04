@@ -153,35 +153,119 @@ struct OnboardingView: View {
         }
     }
 
+    /// Triggers AI routine generation via the shell agent.
+    /// Opens a canvas, streams a hyper-specific prompt, and parses the routine_summary artifact.
+    /// Falls back to opening Coach chat if generation fails.
     private func triggerRoutineGeneration() {
+        vm.isGenerating = true
         Task {
-            guard let uid = AuthService.shared.currentUser?.uid else { return }
+            guard let uid = AuthService.shared.currentUser?.uid else {
+                vm.isGenerating = false
+                return
+            }
 
-            SessionPreWarmer.shared.preWarmIfNeeded(userId: uid, trigger: "onboarding_generation")
-
+            let level = vm.fitnessLevel ?? "intermediate"
             let freq = vm.selectedFrequency ?? 4
+            let equipment = vm.equipmentPreference ?? "full_gym"
 
-            // TODO: Wire to actual agent endpoint. For now, use mock data
-            // to validate the UI flow end-to-end.
-            // When connected: pass vm.fitnessLevel and vm.selectedFrequency to agent
-            try? await Task.sleep(for: .seconds(2))
+            // Hyper-specific prompt: gives the agent all context upfront so it can
+            // call propose_routine directly without follow-up questions.
+            let prompt = """
+            New user onboarding. Create a training routine with these exact parameters:
+            - Experience level: \(level)
+            - Training frequency: \(freq) days per week
+            - Equipment access: \(equipment)
+            - Goal: hypertrophy (muscle building)
 
-            await MainActor.run {
-                vm.generatedRoutineName = freq <= 3
-                    ? "Full Body \(freq)x"
-                    : "Upper / Lower"
-                vm.generatedDays = (1...freq).map { day in
-                    let title: String
-                    if freq <= 3 {
-                        title = "Full Body \(["A", "B", "C", "D", "E", "F"][day - 1])"
-                    } else {
-                        title = day % 2 == 1 ? "Upper" : "Lower"
+            Use propose_routine to build it. Pick an appropriate split for the frequency \
+            (\(freq <= 3 ? "full body" : freq <= 4 ? "upper/lower" : "push/pull/legs or upper/lower")). \
+            Choose exercises from the catalog appropriate for the equipment level. \
+            Set reps in the 8-12 range, RIR 2-3 for \(level) level. \
+            Do not ask any questions — generate the routine immediately.
+            """
+
+            do {
+                // Create a canvas for the onboarding conversation
+                let canvasService = CanvasService()
+                let (canvasId, sessionId) = try await canvasService.openCanvas(
+                    userId: uid,
+                    purpose: "onboarding"
+                )
+
+                let correlationId = UUID().uuidString
+
+                // Stream the prompt and parse events
+                var foundArtifact = false
+                for try await event in DirectStreamingService.shared.streamQuery(
+                    userId: uid,
+                    conversationId: canvasId,
+                    message: prompt,
+                    correlationId: correlationId,
+                    sessionId: sessionId,
+                    timeoutSeconds: 60
+                ) {
+                    if event.eventType == .artifact {
+                        let artifactType = event.content?["artifact_type"]?.value as? String
+                        guard artifactType == "routine_summary" else { continue }
+
+                        let artifactContent = event.content?["artifact_content"]?.value as? [String: Any] ?? [:]
+
+                        let routineName = artifactContent["name"] as? String ?? "Your Program"
+                        let workoutsRaw = artifactContent["workouts"] as? [[String: Any]] ?? []
+
+                        let days: [(day: Int, title: String, exerciseCount: Int, duration: Int)] = workoutsRaw.enumerated().map { index, workout in
+                            let title = workout["title"] as? String ?? "Day \(index + 1)"
+                            let exerciseCount = workout["exercise_count"] as? Int
+                                ?? (workout["exercises"] as? [[String: Any]])?.count
+                                ?? (workout["blocks"] as? [[String: Any]])?.count
+                                ?? 5
+                            let duration = workout["estimated_duration"] as? Int ?? 45
+                            return (day: index + 1, title: title, exerciseCount: exerciseCount, duration: duration)
+                        }
+
+                        await MainActor.run {
+                            vm.generatedRoutineName = routineName
+                            vm.generatedDays = days
+                            vm.generationComplete = true
+                            vm.isGenerating = false
+                        }
+
+                        AnalyticsService.shared.onboardingStepViewed(step: "routine_generated")
+                        foundArtifact = true
                     }
-                    return (day: day, title: title, exerciseCount: Int.random(in: 5...7), duration: Int.random(in: 40...55))
+
+                    if event.eventType == .done && foundArtifact {
+                        break
+                    }
                 }
-                vm.generationComplete = true
+
+                // If stream finished without an artifact, fall back to mock data
+                if !foundArtifact {
+                    AppLogger.shared.error(.app, "Onboarding routine generation: no artifact received")
+                    await MainActor.run { applyFallbackRoutine(freq: freq) }
+                }
+            } catch {
+                AppLogger.shared.error(.app, "Onboarding routine generation failed", error)
+                await MainActor.run { applyFallbackRoutine(freq: freq) }
             }
         }
+    }
+
+    /// Fallback routine data when agent generation fails.
+    /// Ensures the user still sees a result and can proceed.
+    private func applyFallbackRoutine(freq: Int) {
+        vm.generatedRoutineName = freq <= 3 ? "Full Body \(freq)x" : "Upper / Lower"
+        vm.generatedDays = (1...freq).map { day in
+            let title: String
+            if freq <= 3 {
+                title = "Full Body \(["A", "B", "C"][min(day - 1, 2)])"
+            } else {
+                title = day % 2 == 1 ? "Upper" : "Lower"
+            }
+            return (day: day, title: title, exerciseCount: 5, duration: 45)
+        }
+        vm.generationComplete = true
+        vm.isGenerating = false
     }
 }
 
