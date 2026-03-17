@@ -19,12 +19,18 @@
 |----------|---------|
 | **`IOS_ARCHITECTURE.md`** | iOS app: MVVM structure, services, repositories, canvas components, design system. |
 | **`FIREBASE_FUNCTIONS_ARCHITECTURE.md`** | Firebase Functions: all HTTP endpoints, triggers, scheduled jobs. Per-endpoint auth lane annotations. |
-| **`FIRESTORE_SCHEMA.md`** | Firestore data model with field-level specifications, triggers, and automatic mutations. |
+| **`API_REFERENCE.md`** | HTTPS endpoints and SSE streaming API: request/response formats, auth lanes, error codes. |
+| **`FIRESTORE_SCHEMA.md`** | Firestore data model: collections, field-level specifications, indexes, security rules, triggers, and automatic mutations. |
 | **`SHELL_AGENT_ARCHITECTURE.md`** | Shell Agent: 4-lane routing, skills modules, ContextVar state management. |
 | **`CATALOG_ORCHESTRATOR_ARCHITECTURE.md`** | Catalog enrichment pipeline: LLM review agent, job system, apply gate. |
 | **`THINKING_STREAM_ARCHITECTURE.md`** | Agent thinking streams: `_display` metadata flow from Python agents to iOS UI. |
-| **`FOCUS_MODE_WORKOUT_EXECUTION.md`** | Workout execution: data lifecycle, backend endpoints, iOS architecture, copilot integration. |
 | **`TRAINING_ANALYTICS_API_V2_SPEC.md`** | Training analytics v2: set facts, paginated queries, series update strategy. |
+
+## Specs
+
+| Document | Purpose |
+|----------|---------|
+| **`specs/FOCUS_MODE_WORKOUT_EXECUTION.md`** | Workout execution spec: data lifecycle, backend endpoints, iOS architecture, copilot integration. |
 
 ## Reference Documentation
 

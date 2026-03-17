@@ -825,6 +825,7 @@ Povver/Povver/
 │   ├── CloudFunctionService.swift  # Firebase Functions
 │   ├── DebugLogger.swift           # Logging utilities
 │   ├── DeviceManager.swift         # Device registration
+│   ├── ConversationService.swift   # Artifact actions
 │   ├── DirectStreamingService.swift # SSE streaming
 │   ├── Errors.swift                # Error types
 │   ├── FirebaseService.swift       # Firestore abstraction
@@ -841,12 +842,14 @@ Povver/Povver/
 │   ├── CanvasViewModel.swift       # Primary canvas VM
 │   ├── ExercisesViewModel.swift
 │   ├── RecommendationsViewModel.swift  # Recommendation state + accept/reject
-│   └── RoutinesViewModel.swift
+│   ├── RoutinesViewModel.swift
+│   └── WorkoutCoachViewModel.swift # Workout chat state
 ├── Views/
 │   ├── CanvasScreen.swift          # Main canvas screen
 │   ├── ChatHomeEntry.swift         # Chat entry
 │   ├── ChatHomeView.swift          # Chat conversation
 │   ├── ComponentGallery.swift      # Dev component gallery
+│   ├── ConversationView.swift      # Main chat UI with inline artifacts
 │   ├── LoginView.swift             # Email + SSO login
 │   ├── MainTabsView.swift          # Tab navigation (5 tabs)
 │   ├── RegisterView.swift          # Email + SSO registration
@@ -905,7 +908,8 @@ Povver/Povver/
     │   ├── FocusModeWorkoutScreen.swift # Main workout screen
     │   ├── FocusModeSetGrid.swift      # Set grid + editing dock
     │   ├── FocusModeComponents.swift   # Shared components
-    │   └── FocusModeExerciseSearch.swift # Exercise search
+    │   ├── FocusModeExerciseSearch.swift # Exercise search
+    │   └── WorkoutCoachView.swift      # Compact gym chat UI
     ├── Components/
     │   ├── PovverButton.swift          # Button styles
     │   ├── MyonText.swift

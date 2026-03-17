@@ -503,6 +503,8 @@ firebase_functions/functions/
 │   ├── backup-exercises.js
 │   ├── repoint-alias.js
 │   └── repoint-shorthand-aliases.js
+├── recommendations/            # Recommendation endpoints
+│   └── review-recommendation.js  # Accept/reject recommendations
 ├── routines/                   # Routine operations
 │   ├── create-routine-from-draft.js
 │   ├── create-routine.js
@@ -543,6 +545,7 @@ firebase_functions/functions/
 │   └── (test files)
 ├── triggers/                   # Firestore triggers
 │   ├── muscle-volume-calculations.js
+│   ├── process-recommendations.js  # Analysis → recommendation pipeline
 │   ├── weekly-analytics.js
 │   └── workout-routine-cursor.js
 ├── user/                       # User operations

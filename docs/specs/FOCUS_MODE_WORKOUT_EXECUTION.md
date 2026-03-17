@@ -1,6 +1,6 @@
 # Focus Mode Workout Execution Architecture
 
-> **Related Docs**: [FIRESTORE_SCHEMA.md](./FIRESTORE_SCHEMA.md), [FIREBASE_FUNCTIONS_ARCHITECTURE.md](./FIREBASE_FUNCTIONS_ARCHITECTURE.md), [SHELL_AGENT_ARCHITECTURE.md](./SHELL_AGENT_ARCHITECTURE.md)
+> **Related Docs**: [FIRESTORE_SCHEMA.md](../FIRESTORE_SCHEMA.md), [FIREBASE_FUNCTIONS_ARCHITECTURE.md](../FIREBASE_FUNCTIONS_ARCHITECTURE.md), [SHELL_AGENT_ARCHITECTURE.md](../SHELL_AGENT_ARCHITECTURE.md)
 
 ---
 
@@ -2284,46 +2284,7 @@ const RATE_LIMITS = {
 
 ---
 
-## Appendix A: Implementation Status
-
-> This section tracks implementation progress.
-
-### A.1 iOS Architecture - IMPLEMENTED ✅
-
-The following iOS components are now implemented:
-
-| Component | Status | Files |
-|-----------|--------|-------|
-| **FocusModeWorkoutService** | ✅ Complete | `FocusModeWorkoutService.swift` |
-| **MutationCoordinator** | ✅ Complete | `MutationCoordinator.swift` |
-| **FocusModeModels** | ✅ Complete | `FocusModeModels.swift` |
-| **FocusModeWorkoutScreen** | ✅ Complete | `FocusModeWorkoutScreen.swift` |
-| **FocusModeSetGrid** | ✅ Complete | `FocusModeSetGrid.swift` |
-
-**Key iOS Features Implemented:**
-- ✅ Local-first state management with optimistic updates
-- ✅ MutationCoordinator for dependency ordering and retries
-- ✅ Session scoping to prevent stale callbacks corrupting new workouts
-- ✅ Per-entity sync state tracking (`exerciseSyncState`)
-- ✅ Selective hydration (reconciliation preserves user's local work)
-- ✅ Metadata coalescing (last-write-wins for name/start_time)
-- ✅ Rollback on sync failure
-
-### A.2 Backend Endpoints - Status
-
-| Endpoint | Status | Notes |
-|----------|--------|-------|
-| `startActiveWorkout` | ✅ Implemented | `start-active-workout.js` |
-| `logSet` | ✅ Implemented | `log-set.js` |
-| `patchActiveWorkout` | ✅ Implemented | `patch-active-workout.js` |
-| `addExercise` | ✅ Implemented | `add-exercise.js` |
-| `swapExercise` | ✅ Implemented | `swap-exercise.js` |
-| `autofillExercise` | ✅ Implemented | `autofill-exercise.js` |
-| `completeActiveWorkout` | ✅ Implemented | `complete-active-workout.js` |
-| `cancelActiveWorkout` | ✅ Implemented | `cancel-active-workout.js` |
-| `getActiveWorkout` | ✅ Implemented | `get-active-workout.js` |
-
-### A.3 Remaining Work
+## Appendix A: Remaining Work
 
 | Area | Item | Priority |
 |------|------|----------|
@@ -2335,7 +2296,7 @@ The following iOS components are now implemented:
 | Integration | Copilot tools wiring | P2 |
 | Integration | Analytics pipeline trigger on complete | P2 |
 
-### A.4 Tests to Add
+### Tests to Add
 
 | ID | Scope | Test Name | What It Proves |
 |----|-------|-----------|----------------|
@@ -2348,8 +2309,8 @@ The following iOS components are now implemented:
 
 ## Appendix B: Related Documentation
 
-- [FIRESTORE_SCHEMA.md](./FIRESTORE_SCHEMA.md) - Full Firestore schema reference
-- [FIREBASE_FUNCTIONS_ARCHITECTURE.md](./FIREBASE_FUNCTIONS_ARCHITECTURE.md) - Backend architecture
-- [MULTI_AGENT_ARCHITECTURE.md](./MULTI_AGENT_ARCHITECTURE.md) - Agent system design
-- [platformvision.md](./platformvision.md) - Product vision and agent boundaries
-- [IOS_ARCHITECTURE.md](./IOS_ARCHITECTURE.md) - iOS app architecture
+- [FIRESTORE_SCHEMA.md](../FIRESTORE_SCHEMA.md) - Full Firestore schema reference
+- [FIREBASE_FUNCTIONS_ARCHITECTURE.md](../FIREBASE_FUNCTIONS_ARCHITECTURE.md) - Backend architecture
+- [MULTI_AGENT_ARCHITECTURE.md](../MULTI_AGENT_ARCHITECTURE.md) - Agent system design
+- [platformvision.md](../platformvision.md) - Product vision and agent boundaries
+- [IOS_ARCHITECTURE.md](../IOS_ARCHITECTURE.md) - iOS app architecture

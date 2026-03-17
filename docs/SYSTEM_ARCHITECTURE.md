@@ -6,47 +6,21 @@
 
 ---
 
-## CRITICAL: File Path Reference Table (ABSOLUTE PATHS)
+## File Path Reference
 
-| Component | Absolute Path | Purpose |
-|-----------|---------------|---------|
-| **iOS App Entry** | `Povver/Povver/PovverApp.swift` | SwiftUI app entry + Google URL handler |
-| **iOS Auth Service** | `Povver/Povver/Services/AuthService.swift` | Multi-provider auth (email, Google, Apple) |
-| **iOS Auth Provider** | `Povver/Povver/Models/AuthProvider.swift` | Provider enum mapping |
-| **iOS Apple Coordinator** | `Povver/Povver/Services/AppleSignInCoordinator.swift` | ASAuth delegate wrapper |
-| **iOS Root Navigation** | `Povver/Povver/Views/RootView.swift` | Reactive auth state navigation |
-| **iOS Conversation Screen** | `Povver/Povver/Views/ConversationView.swift` | Main chat UI with inline artifacts |
-| **iOS Workout Screen** | `Povver/Povver/UI/FocusMode/FocusModeWorkoutScreen.swift` | Active workout UI |
-| **iOS Streaming Service** | `Povver/Povver/Services/DirectStreamingService.swift` | Agent communication |
-| **iOS Conversation Service** | `Povver/Povver/Services/ConversationService.swift` | Artifact actions |
-| **iOS Workout Service** | `Povver/Povver/Services/FocusModeWorkoutService.swift` | Workout API calls |
-| **iOS Session Logger** | `Povver/Povver/Services/WorkoutSessionLogger.swift` | On-device workout event log (JSON) |
-| **Agent Entry Point** | `adk_agent/canvas_orchestrator/app/agent_engine_app.py` | Vertex AI entry |
-| **Agent Router** | `adk_agent/canvas_orchestrator/app/shell/router.py` | 4-Lane routing |
-| **Agent Skills** | `adk_agent/canvas_orchestrator/app/skills/` | Pure logic modules |
-| **Agent Workout Skills** | `adk_agent/canvas_orchestrator/app/skills/workout_skills.py` | Workout brief + mutation skills |
-| **iOS Workout Coach VM** | `Povver/Povver/ViewModels/WorkoutCoachViewModel.swift` | Workout chat state |
-| **iOS Workout Coach View** | `Povver/Povver/UI/FocusMode/WorkoutCoachView.swift` | Compact gym chat UI |
-| **iOS Subscription Service** | `Povver/Povver/Services/SubscriptionService.swift` | StoreKit 2 purchase/entitlements |
-| **iOS Subscription Models** | `Povver/Povver/Models/SubscriptionStatus.swift` | Tier/status enums, UserSubscriptionState |
-| **iOS Paywall** | `Povver/Povver/Views/PaywallView.swift` | Purchase sheet with trial CTA |
-| **iOS Subscription Settings** | `Povver/Povver/Views/Settings/SubscriptionView.swift` | Subscription management |
-| **Recommendation Triggers** | `firebase_functions/functions/triggers/process-recommendations.js` | Analysis → recommendation pipeline |
-| **Review Endpoint** | `firebase_functions/functions/recommendations/review-recommendation.js` | Accept/reject recommendations |
-| **iOS Recommendation Model** | `Povver/Povver/Models/AgentRecommendation.swift` | Codable recommendation structs |
-| **iOS Recommendation VM** | `Povver/Povver/ViewModels/RecommendationsViewModel.swift` | Recommendation state + actions |
-| **Subscription Gate** | `firebase_functions/functions/utils/subscription-gate.js` | `isPremiumUser()` check |
-| **App Store Webhook** | `firebase_functions/functions/subscriptions/app-store-webhook.js` | V2 server notifications |
-| **Apple JWS Verifier** | `firebase_functions/functions/subscriptions/apple-verifier.js` | Shared Apple JWS verification module |
-| **Subscription Sync** | `firebase_functions/functions/subscriptions/sync-subscription-status.js` | iOS → server entitlement sync (JWS-verified) |
-| **Account Deletion** | `firebase_functions/functions/user/delete-account.js` | Server-side full account purge (Admin SDK) |
-| **Privacy Manifest** | `Povver/Povver/PrivacyInfo.xcprivacy` | App Store privacy declarations |
-| **Firebase Index** | `firebase_functions/functions/index.js` | All Cloud Functions |
-| **Conversation APIs** | `firebase_functions/functions/conversations/` | Artifact actions |
-| **Active Workout APIs** | `firebase_functions/functions/active_workout/` | Workout endpoints |
-| **Session APIs** | `firebase_functions/functions/sessions/` | Session initialization |
-| **Shared Agent Utilities** | `adk_agent/shared/` | Cross-agent usage tracking + pricing |
-| **LLM Usage Query Script** | `scripts/query_llm_usage.js` | Weekly cost aggregation by user/system |
+Each module doc maintains its own file map:
+- **iOS**: `docs/IOS_ARCHITECTURE.md` → "Directory Structure" section
+- **Firebase Functions**: `docs/FIREBASE_FUNCTIONS_ARCHITECTURE.md` → "Directory Structure" section
+- **Shell Agent**: `docs/SHELL_AGENT_ARCHITECTURE.md` → "File Structure" section
+- **Catalog Orchestrator**: `docs/CATALOG_ORCHESTRATOR_ARCHITECTURE.md` → "File Index" section
+
+**Cross-cutting paths** (not owned by a single module):
+
+| Component | Path | Purpose |
+|-----------|------|---------|
+| Shared Agent Utilities | `adk_agent/shared/` | Cross-agent usage tracking + pricing |
+| LLM Usage Query | `scripts/query_llm_usage.js` | Weekly cost aggregation |
+| Privacy Manifest | `Povver/Povver/PrivacyInfo.xcprivacy` | App Store privacy declarations |
 
 ---
 

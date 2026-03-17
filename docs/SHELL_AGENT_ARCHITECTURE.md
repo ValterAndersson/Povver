@@ -149,6 +149,7 @@ adk_agent/canvas_orchestrator/
 │   │   ├── copilot_skills.py     # Lane 1: log_set, get_next_set
 │   │   ├── coach_skills.py       # Analytics, user data
 │   │   ├── planner_skills.py     # Artifact creation (returns data, not cards)
+│   │   ├── workout_skills.py     # Workout brief + mutation skills
 │   │   └── gated_planner.py      # Safety Gate wrapper
 │   │
 │   └── agents/                   # LEGACY (deprecated)
