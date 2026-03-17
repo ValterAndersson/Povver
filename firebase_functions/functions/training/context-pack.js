@@ -11,6 +11,7 @@ const { onRequest } = require('firebase-functions/v2/https');
 const { requireFlexibleAuth } = require('../auth/middleware');
 const admin = require('firebase-admin');
 const { getAuthenticatedUserId } = require('../utils/auth-helpers');
+const { fetchUserContext } = require('../shared/planning-context');
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -176,15 +177,13 @@ exports.getCoachingPack = onRequest(requireFlexibleAuth(async (req, res) => {
     const totalSessions = Array.from(sessionsPerWeek.values()).reduce((s, c) => s + c, 0);
     const avgSessionsPerWeek = weeksWithData > 0 ? Math.round((totalSessions / weeksWithData) * 10) / 10 : 0;
     
-    // Get user target sessions (from user doc)
+    // Get user target sessions via shared user context
     let targetSessionsPerWeek = null;
     try {
-      const userDoc = await db.collection('users').doc(userId).get();
-      if (userDoc.exists) {
-        targetSessionsPerWeek = userDoc.data().target_sessions_per_week || null;
-      }
+      const userCtx = await fetchUserContext(db, userId);
+      targetSessionsPerWeek = userCtx.profile?.target_sessions_per_week || null;
     } catch (e) {
-      // Ignore
+      // Non-critical: adherence target is optional
     }
     
     const adherence = {
