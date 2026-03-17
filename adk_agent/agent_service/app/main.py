@@ -89,12 +89,19 @@ async def stream_handler(request: Request) -> StreamingResponse:
             if parsed:
                 try:
                     from app.skills.copilot_skills import log_set_shorthand
+                    # Convert lbs to kg if user specified lbs
+                    weight_kg = parsed["weight"]
+                    unit = parsed.get("unit", "kg")
+                    if unit.lower().startswith("lb"):
+                        weight_kg = round(parsed["weight"] * 0.453592, 1)
                     result = await log_set_shorthand(
                         ctx=ctx,
                         reps=parsed["reps"],
-                        weight_kg=parsed["weight"],
+                        weight_kg=weight_kg,
                     )
-                    yield sse_event("message", {"text": f"Logged: {parsed['reps']} × {parsed['weight']}kg"}).encode()
+                    display_weight = parsed["weight"]
+                    display_unit = unit if unit.lower().startswith("lb") else "kg"
+                    yield sse_event("message", {"text": f"Logged: {parsed['reps']} × {display_weight}{display_unit}"}).encode()
                     yield sse_event("done", {}).encode()
                     return
                 except Exception as e:

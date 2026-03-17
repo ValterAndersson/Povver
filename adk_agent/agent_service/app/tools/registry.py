@@ -31,7 +31,8 @@ async def execute_tool(tool_name: str, args: dict, ctx: RequestContext) -> Any:
 # Tools that are banned during active workout mode (heavy-compute, disruptive)
 WORKOUT_BANNED_TOOLS = {
     "get_planning_context", "search_exercises", "query_training_sets",
-    "get_training_analysis", "propose_routine", "propose_routine_update",
+    "get_training_analysis", "propose_routine", "update_routine",
+    "propose_workout", "update_template", "apply_progression",
 }
 
 
