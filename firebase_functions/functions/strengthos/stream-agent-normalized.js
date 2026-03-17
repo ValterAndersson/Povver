@@ -94,6 +94,11 @@ const { VERTEX_AI_CONFIG } = require('./config');
 const { isPremiumUser } = require('../utils/subscription-gate');
 const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const { agentLimiter } = require('../utils/rate-limiter');
+const { v4: uuidv4 } = require('uuid');
+
+// Cloud Run Agent Service URL (set via firebase functions .env)
+const AGENT_SERVICE_URL = process.env.AGENT_SERVICE_URL;
+// Note: AGENT_SERVICE_URL is optional during migration — if not set, falls back to Vertex AI
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -205,6 +210,14 @@ const TOOL_LABELS = {
   tool_format_workout_plan_cards: 'Formatting plan',
   tool_format_analysis_cards: 'Formatting analysis',
   tool_publish_cards: 'Publishing',
+};
+
+// Backward compatibility — new Cloud Run event names → iOS-expected names
+// Removed in Phase 7 when iOS is updated
+const EVENT_COMPAT = {
+  'tool_start': 'toolRunning',
+  'tool_end': 'toolComplete',
+  'clarification': 'clarification.request',
 };
 
 const TELEMETRY_LABELS = {
@@ -826,6 +839,119 @@ async function invalidateUserSessions(userId) {
 }
 
 // ============================================================================
+// CLOUD RUN AGENT SERVICE (Phase 3a — replaces Vertex AI when AGENT_SERVICE_URL is set)
+// ============================================================================
+
+async function callAgentService(userId, conversationId, message, correlationId, workoutId) {
+  const auth = new GoogleAuth();
+  const client = await auth.getIdTokenClient(AGENT_SERVICE_URL);
+  const response = await client.request({
+    url: `${AGENT_SERVICE_URL}/stream`,
+    method: 'POST',
+    data: {
+      user_id: userId,
+      conversation_id: conversationId,
+      message,
+      correlation_id: correlationId || uuidv4(),
+      workout_id: workoutId || null,
+    },
+    responseType: 'stream',
+    timeout: 180000,
+  });
+  return response.data;
+}
+
+function relayCloudRunStream(stream, sse, persistWorkspaceEntry, normalizer, userId, conversationId, correlationId) {
+  return new Promise((resolve, reject) => {
+    let partial = '';
+    let accumulatedAgentText = '';
+
+    stream.on('data', (chunk) => {
+      partial += chunk.toString('utf8');
+      const lines = partial.split('\n');
+      partial = lines.pop();
+
+      for (const rawLine of lines) {
+        const trimmed = rawLine.trim();
+        if (!trimmed) continue;
+
+        // SSE format: "event: type\ndata: {...}\n\n" or "data: {...}\n\n"
+        if (trimmed.startsWith('event:')) continue; // skip event type line, data follows
+        if (!trimmed.startsWith('data:')) continue;
+
+        const jsonStr = trimmed.slice(5).trim(); // remove "data: "
+        if (!jsonStr) continue;
+
+        try {
+          const evt = JSON.parse(jsonStr);
+          const eventType = evt.type || 'unknown';
+
+          // Translate event types for iOS backward compatibility
+          const translatedType = EVENT_COMPAT[eventType] || eventType;
+
+          // Accumulate agent text for conversation persistence
+          if (eventType === 'message' && evt.data?.text) {
+            accumulatedAgentText += evt.data.text;
+          }
+
+          // Special handling for specific event types
+          if (eventType === 'tool_start') {
+            const name = evt.data?.tool_name || 'tool';
+            const label = TOOL_LABELS[name] || `Running ${name}`;
+            sse.write({ type: 'tool_started', name, args: evt.data?.args || {} });
+          } else if (eventType === 'tool_end') {
+            const name = evt.data?.tool_name || 'tool';
+            sse.write({ type: 'tool_result', name, summary: evt.data?.result || '' });
+          } else if (eventType === 'message') {
+            const text = normalizer.normalize ? normalizer.preprocess(evt.data?.text || '') : (evt.data?.text || '');
+            if (text) {
+              sse.write({ type: 'text_delta', text });
+            }
+          } else if (eventType === 'artifact') {
+            sse.write({ type: 'artifact', ...evt.data });
+          } else if (eventType === 'status') {
+            sse.write({ type: 'status', content: evt.data });
+          } else if (eventType === 'heartbeat') {
+            sse.write({ type: 'heartbeat' });
+          } else if (eventType === 'done') {
+            // Don't emit done here — handled by caller
+          } else if (eventType === 'error') {
+            sse.write({ type: 'error', error: evt.data });
+          }
+
+          // Persist to workspace_entries
+          persistWorkspaceEntry({ type: translatedType, ...evt.data });
+
+        } catch (parseErr) {
+          logger.debug('[relayCloudRun] Failed to parse SSE line', { line: trimmed.slice(0, 200) });
+        }
+      }
+    });
+
+    stream.on('end', () => {
+      // Persist accumulated agent response
+      if (accumulatedAgentText) {
+        const messagesRef = db
+          .collection('users').doc(userId)
+          .collection('canvases').doc(conversationId)
+          .collection('messages');
+        messagesRef.add({
+          type: 'agent_response',
+          content: accumulatedAgentText,
+          correlation_id: correlationId || null,
+          created_at: admin.firestore.FieldValue.serverTimestamp(),
+        }).catch(err => logger.warn('[relayCloudRun] agent response persist failed', { error: String(err?.message || err) }));
+      }
+      resolve();
+    });
+
+    stream.on('error', (err) => {
+      reject(err);
+    });
+  });
+}
+
+// ============================================================================
 // CONVERSATION TITLE GENERATION (fire-and-forget after first exchange)
 // Uses Gemini 2.0 Flash to produce a short 3-6 word title from the user message.
 // Only runs once per conversation (skips if title already set).
@@ -1060,6 +1186,23 @@ async function streamAgentNormalizedHandler(req, res) {
         lastMessage: (message || '').slice(0, 100),
       }).catch(err => logger.warn('[streamAgentNormalized] canvas metadata update failed', { error: String(err?.message || err) }));
 
+    // === CLOUD RUN AGENT SERVICE (Phase 3a) ===
+    if (AGENT_SERVICE_URL) {
+      logger.info('[streamAgentNormalized] Using Cloud Run agent service', { url: AGENT_SERVICE_URL });
+
+      try {
+        const agentStream = await callAgentService(userId, conversationId, message, correlationId, workoutId);
+        await relayCloudRunStream(agentStream, sse, persistWorkspaceEntry, normalizer, userId, conversationId, correlationId);
+        done(true);
+      } catch (err) {
+        logger.error('[streamAgentNormalized] Cloud Run agent error', { error: err.message, userId });
+        sse.write({ type: 'error', error: { code: 'UPSTREAM_ERROR', message: err.message } });
+        done(false);
+      }
+      return;
+    }
+
+    // === LEGACY: Vertex AI Agent Engine (removed after Phase 3a migration) ===
     // Canvas Orchestrator agent ID
     const agentId = '8723635205937561600';
     const projectId = VERTEX_AI_CONFIG.projectId;
