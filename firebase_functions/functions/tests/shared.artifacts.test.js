@@ -145,7 +145,7 @@ describe('executeArtifactAction — validation', () => {
       () => executeArtifactAction(mockDb, null, CONV_ID, ART_ID, 'accept'),
       (err) => {
         assert.ok(err instanceof ValidationError);
-        assert.equal(err.http, 400);
+        assert.equal(err.httpStatus, 400);
         return true;
       },
     );
@@ -186,7 +186,7 @@ describe('executeArtifactAction — not found', () => {
       () => executeArtifactAction(mockDb, USER_ID, CONV_ID, ART_ID, 'accept'),
       (err) => {
         assert.ok(err instanceof NotFoundError);
-        assert.equal(err.http, 404);
+        assert.equal(err.httpStatus, 404);
         return true;
       },
     );
@@ -267,7 +267,7 @@ describe('save_template action', () => {
       () => executeArtifactAction(mockDb, USER_ID, CONV_ID, ART_ID, 'save_template'),
       (err) => {
         assert.ok(err instanceof PremiumRequiredError);
-        assert.equal(err.http, 403);
+        assert.equal(err.httpStatus, 403);
         return true;
       },
     );
