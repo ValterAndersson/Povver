@@ -2740,7 +2740,7 @@ async def stream_handler(request: Request) -> StreamingResponse:
         # Import here to avoid circular imports during startup
         from app.agent_loop import run_agent_loop, sse_event
         from app.context import RequestContext
-        from app.firestore_client import FirestoreClient
+        from app.firestore_client import get_firestore_client
         from app.llm.gemini import GeminiClient
         from app.router import route_request, Lane
         from app.tools.registry import get_tools, execute_tool
@@ -2750,6 +2750,7 @@ async def stream_handler(request: Request) -> StreamingResponse:
             conversation_id=conversation_id,
             correlation_id=trace_id,
             workout_id=workout_id,
+            workout_mode=bool(workout_id),
         )
 
         fs = get_firestore_client()
@@ -2787,9 +2788,9 @@ async def stream_handler(request: Request) -> StreamingResponse:
 
         # Persist user message and indicate stream ended
         await fs.save_message(user_id, conversation_id, {
-            "role": "user",
+            "type": "user_prompt",
             "content": message,
-            "timestamp": _server_timestamp(),
+            "created_at": _server_timestamp(),
         })
 
     return StreamingResponse(
@@ -2803,13 +2804,17 @@ async def stream_handler(request: Request) -> StreamingResponse:
 
 
 def _format_history(messages: list[dict]) -> list[dict]:
-    """Convert Firestore message docs to LLM message format."""
+    """Convert Firestore message docs to LLM message format.
+
+    Firestore uses `type` field (user_prompt, agent_response, artifact).
+    LLM expects `role` field (user, assistant).
+    """
+    TYPE_TO_ROLE = {"user_prompt": "user", "agent_response": "assistant"}
     formatted = []
     for msg in messages:
-        role = msg.get("role", "user")
-        content = msg.get("content", "")
-        if role in ("user", "assistant"):
-            formatted.append({"role": role, "content": content})
+        role = TYPE_TO_ROLE.get(msg.get("type", "user_prompt"))
+        if role:
+            formatted.append({"role": role, "content": msg.get("content", "")})
     return formatted
 
 
@@ -3924,7 +3929,7 @@ class MemoryManager:
             self.db.collection(
                 f"users/{user_id}/{coll}/{conversation_id}/messages"
             )
-            .order_by("timestamp", direction="DESCENDING")
+            .order_by("created_at", direction="DESCENDING")
             .limit(10)
         )
         msgs = [doc.to_dict() async for doc in msgs_query.stream()]
@@ -4583,6 +4588,8 @@ deploy: build
 		--region $(REGION) \
 		--platform managed \
 		--allow-unauthenticated \
+		--service-account ai-agents@$(PROJECT_ID).iam.gserviceaccount.com \
+		--set-env-vars "GOOGLE_CLOUD_PROJECT=$(PROJECT_ID)" \
 		--memory 256Mi \
 		--cpu 1 \
 		--min-instances 0 \
