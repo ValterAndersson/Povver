@@ -115,27 +115,16 @@ mcp_server/
     tools.test.ts
 ```
 
-**Phase 5 — Workout Completion Worker:**
+**Phase 5 — Workout Completion (Cloud Tasks refactor, stays in JS):**
 ```
-adk_agent/workout_completion_worker/
-  Dockerfile
-  Makefile
-  requirements.txt
-  cloud-run-worker.yaml
-  app/
-    __init__.py
-    config.py
-    firestore_client.py
-    processor.py               # Workout completion processing logic
-    jobs/
-      __init__.py
-      models.py                # Job, JobStatus
-      queue.py                 # Lease-based queue (same pattern as training_analyst)
-  workers/
-    completion_worker.py       # Main worker entry point
-  tests/
-    __init__.py
-    test_processor.py
+firebase_functions/functions/
+  training/
+    process-workout-completion.js   # Shared callable extracted from trigger cascade
+  triggers/
+    workout-completion-task.js      # Cloud Tasks HTTP handler
+    workout-completion-watchdog.js  # Daily scheduled catch-up function
+  utils/
+    enqueue-workout-task.js         # Cloud Tasks enqueue helper
 ```
 
 ### Modified Files (key changes only)
@@ -1384,7 +1373,9 @@ format:
 	python -m ruff format app/ tests/
 
 deploy:
-	gcloud builds submit --tag gcr.io/$(PROJECT_ID)/$(SERVICE_NAME):$(IMAGE_TAG) --project=$(PROJECT_ID)
+	cp -r ../shared shared/
+	gcloud builds submit --tag gcr.io/$(PROJECT_ID)/$(SERVICE_NAME):$(IMAGE_TAG) --project=$(PROJECT_ID); \
+	rm -rf shared/
 	gcloud run deploy $(SERVICE_NAME) \
 		--image gcr.io/$(PROJECT_ID)/$(SERVICE_NAME):$(IMAGE_TAG) \
 		--region $(REGION) \
@@ -1415,6 +1406,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ app/
+COPY shared/ shared/
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
 ```
@@ -1930,14 +1922,24 @@ cd adk_agent/agent_service && python -m pytest tests/test_agent_loop.py -v
 
 ```python
 # app/agent_loop.py
-"""Core agent loop — replaces ADK's Runner."""
+"""Core agent loop — replaces ADK's Runner.
+
+Emits all 9 SSE event types:
+- message, tool_start, tool_end, done — directly from the loop
+- artifact, clarification — detected from tool return values
+- status — emitted at tool call start based on TOOL_STATUS_MAP
+- heartbeat — background task during LLM streaming
+- error — try/catch around the entire loop
+"""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, Awaitable
 
 from app.context import RequestContext
@@ -1948,6 +1950,20 @@ from shared.usage_tracker import track_usage
 logger = logging.getLogger(__name__)
 
 MAX_TOOL_TURNS = 12
+HEARTBEAT_INTERVAL_S = 15
+
+# Tool name → user-facing status message for iOS status events
+TOOL_STATUS_MAP = {
+    "get_training_context": "Reviewing your training profile...",
+    "get_muscle_group_progress": "Analyzing muscle group data...",
+    "get_exercise_progress": "Looking at exercise history...",
+    "query_training_sets": "Querying your training sets...",
+    "get_training_analysis": "Loading training analysis...",
+    "propose_workout": "Building your workout...",
+    "propose_routine": "Designing your routine...",
+    "search_exercises": "Searching exercise catalog...",
+    "get_workout_state": "Checking current workout...",
+}
 
 
 @dataclass
@@ -1968,6 +1984,44 @@ def sse_event(event: str, data: Any) -> SSEEvent:
 ToolExecutor = Callable[[str, dict, RequestContext], Awaitable[Any]]
 
 
+def _inspect_tool_result(result: Any) -> tuple[list[SSEEvent], bool]:
+    """Inspect a tool result for artifact or clarification side-effects.
+
+    Returns (sse_side_effects, should_pause).
+    - Artifacts: detected by 'artifact_type' key in result dict.
+      Emits SSE artifact event matching the exact shape iOS expects.
+    - Clarifications: detected by 'requires_confirmation' key.
+      Emits SSE clarification event with id, question, options.
+    """
+    side_effects = []
+    should_pause = False
+
+    if not isinstance(result, dict):
+        return side_effects, should_pause
+
+    # Artifact detection (mirrors stream-agent-normalized.js artifact handling)
+    if result.get("artifact_type"):
+        artifact_id = result.get("artifact_id") or str(uuid.uuid4())
+        side_effects.append(sse_event("artifact", {
+            "artifact_type": result["artifact_type"],
+            "artifact_id": artifact_id,
+            "artifact_content": result.get("content", {}),
+            "actions": result.get("actions", []),
+            "status": result.get("status", "proposed"),
+        }))
+
+    # Safety gate / clarification detection
+    if result.get("requires_confirmation"):
+        side_effects.append(sse_event("clarification", {
+            "id": result.get("confirmation_id", str(uuid.uuid4())),
+            "question": result.get("question", ""),
+            "options": result.get("options", []),
+        }))
+        should_pause = True
+
+    return side_effects, should_pause
+
+
 async def run_agent_loop(
     *,
     llm_client: LLMClient,
@@ -1978,69 +2032,130 @@ async def run_agent_loop(
     tools: list[ToolDef],
     tool_executor: ToolExecutor,
     ctx: RequestContext,
+    fs: Any = None,  # FirestoreClient, optional for artifact persistence
     config: ModelConfig | None = None,
     max_tool_turns: int = MAX_TOOL_TURNS,
 ) -> AsyncIterator[SSEEvent]:
-    """Run the agent loop: LLM -> tool calls -> LLM -> ... -> text response."""
+    """Run the agent loop: LLM -> tool calls -> LLM -> ... -> text response.
+
+    Emits all 9 SSE event types. Artifact and clarification events are
+    detected from tool return values via _inspect_tool_result().
+    """
 
     messages = _build_messages(instruction, history, message)
     turn = 0
 
-    while turn < max_tool_turns:
-        tool_calls = []
-        last_usage = None
+    try:
+        while turn < max_tool_turns:
+            tool_calls = []
+            last_usage = None
 
-        async for chunk in llm_client.stream(model, messages, tools, config):
-            if chunk.usage:
-                last_usage = chunk.usage
-            if chunk.is_text:
-                yield sse_event("message", chunk.text)
-            elif chunk.is_tool_call:
-                tool_calls.append(chunk.tool_call)
-
-        # Track token usage per LLM turn (mirrors old after_model_callback)
-        if last_usage:
-            log_tokens(model, last_usage["input_tokens"], last_usage["output_tokens"])
-            track_usage(
-                user_id=ctx.user_id,
-                model=model,
-                prompt_tokens=last_usage["input_tokens"],
-                completion_tokens=last_usage["output_tokens"],
-                total_tokens=last_usage["input_tokens"] + last_usage["output_tokens"],
-                feature="agent_loop",
+            # Start heartbeat during LLM streaming
+            heartbeat_stop = asyncio.Event()
+            heartbeat_task = asyncio.create_task(
+                _heartbeat_loop(heartbeat_stop)
             )
 
-        # No tool calls — model is done
-        if not tool_calls:
-            yield sse_event("done", {})
-            return
+            async for chunk in llm_client.stream(model, messages, tools, config):
+                if chunk.usage:
+                    last_usage = chunk.usage
+                if chunk.is_text:
+                    yield sse_event("message", chunk.text)
+                elif chunk.is_tool_call:
+                    tool_calls.append(chunk.tool_call)
 
-        # Execute all tool calls from this turn
-        for tc in tool_calls:
-            yield sse_event("tool_start", {"tool": tc.tool_name, "call_id": tc.call_id})
-            start = time.monotonic()
-            try:
-                result = await tool_executor(tc.tool_name, tc.args, ctx)
-            except Exception as e:
-                logger.warning("Tool %s failed: %s", tc.tool_name, e)
-                result = {"error": str(e)}
-            elapsed_ms = int((time.monotonic() - start) * 1000)
-            yield sse_event("tool_end", {"tool": tc.tool_name, "call_id": tc.call_id, "elapsed_ms": elapsed_ms})
+            # Stop heartbeat
+            heartbeat_stop.set()
+            heartbeat_events = await heartbeat_task
+            for hb in heartbeat_events:
+                yield hb
 
-            # Append tool result to messages for next LLM turn
-            messages.append({
-                "role": "tool",
-                "tool_name": tc.tool_name,
-                "tool_call_id": tc.call_id,
-                "tool_result": result,
-            })
+            # Track token usage per LLM turn (mirrors old after_model_callback)
+            if last_usage:
+                log_tokens(model, last_usage["input_tokens"], last_usage["output_tokens"])
+                track_usage(
+                    user_id=ctx.user_id,
+                    model=model,
+                    prompt_tokens=last_usage["input_tokens"],
+                    completion_tokens=last_usage["output_tokens"],
+                    total_tokens=last_usage["input_tokens"] + last_usage["output_tokens"],
+                    feature="agent_loop",
+                )
 
-        turn += 1
+            # No tool calls — model is done
+            if not tool_calls:
+                yield sse_event("done", {})
+                return
 
-    # Exceeded max turns
-    yield sse_event("message", "I've reached my reasoning limit for this request. "
-                               "Please try rephrasing or breaking your question into parts.")
-    yield sse_event("done", {})
+            # Execute all tool calls from this turn
+            for tc in tool_calls:
+                # Emit status event for user-facing progress
+                status_msg = TOOL_STATUS_MAP.get(tc.tool_name)
+                if status_msg:
+                    yield sse_event("status", {"text": status_msg})
+
+                yield sse_event("tool_start", {"tool": tc.tool_name, "call_id": tc.call_id})
+                start = time.monotonic()
+                try:
+                    result = await tool_executor(tc.tool_name, tc.args, ctx)
+                except Exception as e:
+                    logger.warning("Tool %s failed: %s", tc.tool_name, e)
+                    result = {"error": str(e)}
+                elapsed_ms = int((time.monotonic() - start) * 1000)
+                yield sse_event("tool_end", {"tool": tc.tool_name, "call_id": tc.call_id, "elapsed_ms": elapsed_ms})
+
+                # Inspect tool result for artifact/clarification side-effects
+                side_effects, should_pause = _inspect_tool_result(result)
+                for evt in side_effects:
+                    yield evt
+
+                # Persist artifact to Firestore if detected
+                if fs and isinstance(result, dict) and result.get("artifact_type"):
+                    artifact_id = result.get("artifact_id") or side_effects[0].data  # from sse_event
+                    try:
+                        await fs.save_artifact(
+                            ctx.user_id, ctx.conversation_id,
+                            json.loads(side_effects[0].data)["artifact_id"],
+                            result,
+                        )
+                    except Exception:
+                        logger.warning("Failed to persist artifact", exc_info=True)
+
+                # Append tool result to messages for next LLM turn
+                messages.append({
+                    "role": "tool",
+                    "tool_name": tc.tool_name,
+                    "tool_call_id": tc.call_id,
+                    "tool_result": result,
+                })
+
+            turn += 1
+
+        # Exceeded max turns
+        yield sse_event("message", "I've reached my reasoning limit for this request. "
+                                   "Please try rephrasing or breaking your question into parts.")
+        yield sse_event("done", {})
+
+    except Exception as e:
+        logger.exception("Agent loop error")
+        yield sse_event("error", {"code": "AGENT_ERROR", "message": str(e)})
+
+
+async def _heartbeat_loop(stop: asyncio.Event) -> list[SSEEvent]:
+    """Emit heartbeat events every HEARTBEAT_INTERVAL_S until stopped.
+
+    Returns collected heartbeat events (yielded by caller after LLM stream ends).
+    In production, these should be yielded during streaming via an async queue;
+    this simplified version collects them for the caller to yield.
+    """
+    events = []
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=HEARTBEAT_INTERVAL_S)
+            break  # stop was set
+        except asyncio.TimeoutError:
+            events.append(sse_event("heartbeat", {}))
+    return events
 
 
 def _build_messages(instruction: str, history: list[dict], message: str) -> list[dict]:
@@ -2144,6 +2259,7 @@ the Firestore schema is the shared contract.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from google.cloud.firestore import AsyncClient
@@ -2207,11 +2323,18 @@ class FirestoreClient:
     async def list_recent_workouts(self, user_id: str, limit: int = 5) -> list[dict]:
         query = (
             self.db.collection(f"users/{user_id}/workouts")
-            .order_by("start_time", direction="DESCENDING")
+            .order_by("end_time", direction="DESCENDING")
             .limit(limit)
         )
         docs = query.stream()
         return [{"id": doc.id, **doc.to_dict()} async for doc in docs]
+
+    # --- User Attributes ---
+
+    async def get_user_attributes(self, user_id: str) -> dict:
+        """Read user_attributes/{uid} subcollection doc (fitness_level, fitness_goal, etc.)."""
+        doc = await self.db.document(f"users/{user_id}/user_attributes/{user_id}").get()
+        return doc.to_dict() if doc.exists else {}
 
     # --- Training Data ---
 
@@ -2239,9 +2362,14 @@ class FirestoreClient:
             return None
         return {"id": docs[0].id, **docs[0].to_dict()}
 
-    async def get_weekly_stats(self, user_id: str) -> dict | None:
-        """Get current week's stats."""
-        doc = await self.db.document(f"users/{user_id}/weekly_stats/current").get()
+    async def get_weekly_stats(self, user_id: str, week_start: str | None = None) -> dict | None:
+        """Get weekly stats. week_start is YYYY-MM-DD (Monday). Defaults to current week."""
+        if not week_start:
+            from datetime import date, timedelta
+            today = date.today()
+            monday = today - timedelta(days=today.weekday())
+            week_start = monday.isoformat()
+        doc = await self.db.document(f"users/{user_id}/weekly_stats/{week_start}").get()
         if not doc.exists:
             return None
         return doc.to_dict()
@@ -2249,18 +2377,23 @@ class FirestoreClient:
     # --- Planning Context (360 view assembly) ---
 
     async def get_planning_context(self, user_id: str) -> dict:
-        """Assemble the full planning context for the agent."""
+        """Assemble the full planning context for the agent.
+
+        Mirrors get-planning-context.js: reads user doc, user_attributes,
+        active routine + templates, recent workouts, analysis.
+        """
         import asyncio
 
         user_task = self.get_user(user_id)
+        attrs_task = self.get_user_attributes(user_id)
         routines_task = self.list_routines(user_id)
         templates_task = self.list_templates(user_id)
         workouts_task = self.list_recent_workouts(user_id, limit=5)
         analysis_task = self.get_analysis_summary(user_id)
         weekly_task = self.get_weekly_stats(user_id)
 
-        user, routines, templates, workouts, analysis, weekly = await asyncio.gather(
-            user_task, routines_task, templates_task,
+        user, attrs, routines, templates, workouts, analysis, weekly = await asyncio.gather(
+            user_task, attrs_task, routines_task, templates_task,
             workouts_task, analysis_task, weekly_task,
         )
 
@@ -2268,12 +2401,15 @@ class FirestoreClient:
         active_routine_id = user.get("activeRoutineId")
         active_routine = next((r for r in routines if r["id"] == active_routine_id), None)
 
+        # Weight unit from user_attributes (mirrors get-planning-context.js)
+        weight_format = attrs.get("weight_format", "kilograms")
+        weight_unit = "lbs" if weight_format == "pounds" else "kg"
+
         return {
             "user": {
-                "display_name": user.get("display_name"),
-                "preferences": user.get("preferences", {}),
-                "training_level": user.get("training_level"),
-                "goals": user.get("goals", []),
+                "name": user.get("name"),
+                "attributes": attrs,
+                "weight_unit": weight_unit,
             },
             "active_routine": active_routine,
             "templates": templates,
@@ -2302,20 +2438,24 @@ class FirestoreClient:
             return {"muscle": muscle, "weeks": []}
         return {"id": doc.id, **doc.to_dict()}
 
-    async def get_exercise_summary(self, user_id: str, exercise_name: str) -> dict:
-        """Per-exercise series with e1RM and volume trends (from analytics_series_exercise)."""
+    async def get_exercise_summary(self, user_id: str, exercise_id: str) -> dict:
+        """Per-exercise series with e1RM and volume trends.
+        Keyed by exercise_id (not name) in analytics_series_exercise collection.
+        """
         doc = await self.db.document(
-            f"users/{user_id}/analytics_series_exercise/{exercise_name}"
+            f"users/{user_id}/analytics_series_exercise/{exercise_id}"
         ).get()
         if not doc.exists:
-            return {"exercise": exercise_name, "points_by_day": {}}
+            return {"exercise_id": exercise_id, "points_by_day": {}}
         return {"id": doc.id, **doc.to_dict()}
 
-    async def query_sets(self, user_id: str, target: str, filters: dict | None = None) -> list[dict]:
-        """Raw set-level drilldown from set_facts collection."""
+    async def query_sets(self, user_id: str, exercise_id: str, filters: dict | None = None) -> list[dict]:
+        """Raw set-level drilldown from set_facts collection.
+        Queries by exercise_id (matching existing composite index).
+        """
         query = self.db.collection(f"users/{user_id}/set_facts")
-        if target:
-            query = query.where("exercise_name", "==", target)
+        if exercise_id:
+            query = query.where("exercise_id", "==", exercise_id)
         if filters:
             if filters.get("date_from"):
                 query = query.where("workout_date", ">=", filters["date_from"])
@@ -2325,17 +2465,16 @@ class FirestoreClient:
         return [{"id": doc.id, **doc.to_dict()} async for doc in query.stream()]
 
     async def get_active_snapshot_lite(self, user_id: str) -> dict:
-        """Lightweight context: active routine, streak, this week summary."""
+        """Lightweight context: active routine, this week summary."""
         import asyncio
         user_doc, weekly = await asyncio.gather(
             self.db.document(f"users/{user_id}").get(),
-            self.db.document(f"users/{user_id}/weekly_stats/current").get(),
+            self.get_weekly_stats(user_id),
         )
         user = user_doc.to_dict() if user_doc.exists else {}
         return {
             "active_routine_id": user.get("activeRoutineId"),
-            "streak": user.get("streak", 0),
-            "weekly_stats": weekly.to_dict() if weekly.exists else None,
+            "weekly_stats": weekly,
         }
 
     async def get_active_events(self, user_id: str, limit: int = 10) -> list[dict]:
@@ -2350,21 +2489,25 @@ class FirestoreClient:
     # --- Exercises ---
 
     async def search_exercises(self, query: str, limit: int = 10) -> list[dict]:
-        """Search exercises by name prefix (top-level collection)."""
-        docs = (
-            self.db.collection("exercises")
-            .where("status", "!=", "merged")
-            .order_by("name")
-            .limit(limit)
-            .stream()
-        )
-        results = []
-        query_lower = query.lower()
-        async for doc in docs:
-            data = doc.to_dict()
-            if query_lower in data.get("name", "").lower():
-                results.append({"id": doc.id, **data})
-        return results
+        """Search exercises by name prefix.
+
+        Uses the existing searchExercises Firebase Function via HTTP because
+        Firestore's != filter requires orderBy on the inequality field first,
+        making client-side name filtering unreliable. The Firebase Function
+        handles this correctly with multi-field filtering.
+        """
+        import httpx
+        url = os.getenv("MYON_FUNCTIONS_BASE_URL",
+                        "https://us-central1-myon-53d85.cloudfunctions.net")
+        api_key = os.getenv("MYON_API_KEY", "")
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"{url}/searchExercises",
+                params={"query": query, "limit": str(limit)},
+                headers={"x-api-key": api_key},
+            )
+            data = resp.json()
+            return data.get("exercises", [])
 
     # --- Conversations ---
 
@@ -2375,7 +2518,7 @@ class FirestoreClient:
         coll = self.CONVERSATION_COLLECTION
         query = (
             self.db.collection(f"users/{user_id}/{coll}/{conversation_id}/messages")
-            .order_by("timestamp", direction="DESCENDING")
+            .order_by("created_at", direction="DESCENDING")
             .limit(limit)
         )
         docs = [doc async for doc in query.stream()]
@@ -2385,12 +2528,31 @@ class FirestoreClient:
     async def save_message(
         self, user_id: str, conversation_id: str, message: dict
     ) -> str:
-        """Save a message to a conversation."""
+        """Save a message to a conversation.
+        Message format: {type: 'user_prompt'|'agent_response'|'artifact',
+                         content: str, created_at: datetime}
+        """
         coll = self.CONVERSATION_COLLECTION
         ref = await self.db.collection(
             f"users/{user_id}/{coll}/{conversation_id}/messages"
         ).add(message)
         return ref[1].id
+
+    async def save_artifact(
+        self, user_id: str, conversation_id: str, artifact_id: str, artifact: dict
+    ) -> None:
+        """Persist an artifact to the conversation's artifacts subcollection."""
+        coll = self.CONVERSATION_COLLECTION
+        from datetime import datetime, timezone
+        await self.db.document(
+            f"users/{user_id}/{coll}/{conversation_id}/artifacts/{artifact_id}"
+        ).set({
+            "type": artifact.get("artifact_type"),
+            "content": artifact.get("content", {}),
+            "actions": artifact.get("actions", []),
+            "status": artifact.get("status", "proposed"),
+            "created_at": datetime.now(timezone.utc),
+        })
 ```
 
 - [ ] **Step 4: Run tests — expect PASS**
@@ -2906,10 +3068,10 @@ def ctx():
 async def test_get_user_profile_returns_user_data(ctx):
     with patch("app.skills.coach_skills.get_firestore_client") as mock_fc:
         mock_client = AsyncMock()
-        mock_client.get_user.return_value = {"id": "u1", "display_name": "Test"}
+        mock_client.get_user.return_value = {"id": "u1", "name": "Test"}
         mock_fc.return_value = mock_client
         result = await get_user_profile(ctx=ctx)
-        assert result["display_name"] == "Test"
+        assert result["name"] == "Test"
         mock_client.get_user.assert_called_once_with("u1")
 
 
@@ -2929,7 +3091,7 @@ async def test_get_planning_context_returns_full_context(ctx):
     with patch("app.skills.coach_skills.get_firestore_client") as mock_fc:
         mock_client = AsyncMock()
         mock_client.get_planning_context.return_value = {
-            "user": {"display_name": "Test"},
+            "user": {"name": "Test"},
             "active_routine": None,
             "templates": [],
             "recent_workouts": [],
@@ -2991,7 +3153,7 @@ async def get_training_analysis(*, ctx: RequestContext, sections: list[str] | No
 async def get_muscle_group_progress(*, ctx: RequestContext, group: str, weeks: int = 8) -> dict:
     fs = get_firestore_client()
     query = (
-        fs.db.collection(f"users/{ctx.user_id}/muscle_group_series")
+        fs.db.collection(f"users/{ctx.user_id}/analytics_series_muscle_group")
         .where("muscle_group", "==", group)
         .order_by("week_start", direction="DESCENDING")
         .limit(weeks)
@@ -3003,8 +3165,8 @@ async def get_muscle_group_progress(*, ctx: RequestContext, group: str, weeks: i
 async def get_exercise_progress(*, ctx: RequestContext, exercise: str, weeks: int = 8) -> dict:
     fs = get_firestore_client()
     query = (
-        fs.db.collection(f"users/{ctx.user_id}/exercise_series")
-        .where("exercise_name", "==", exercise)
+        fs.db.collection(f"users/{ctx.user_id}/analytics_series_exercise")
+        .where("exercise_id", "==", exercise)
         .order_by("date", direction="DESCENDING")
         .limit(weeks * 7)
     )
@@ -3122,19 +3284,31 @@ import httpx
 
 from app.context import RequestContext
 
-FUNCTIONS_URL = os.getenv("FIREBASE_FUNCTIONS_URL", "https://us-central1-myon-53d85.cloudfunctions.net")
+FUNCTIONS_URL = os.getenv("MYON_FUNCTIONS_BASE_URL", "https://us-central1-myon-53d85.cloudfunctions.net")
 API_KEY = os.getenv("FIREBASE_API_KEY", "")
 
 
-async def log_set(*, ctx: RequestContext, reps: int, weight_kg: float, **kwargs) -> dict:
-    async with httpx.AsyncClient(timeout=5.0) as client:
+async def log_set(*, ctx: RequestContext, exercise_instance_id: str,
+                  set_id: str, reps: int, weight_kg: float, rir: int = 0) -> dict:
+    """Log a set to the active workout via Firebase Function.
+
+    Request body must include nested `values` object and `idempotency_key`
+    to match the logSet endpoint's expected shape.
+    """
+    import uuid
+    async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.post(
             f"{FUNCTIONS_URL}/logSet",
             json={
-                "exercise_instance_id": kwargs.get("exercise_instance_id"),
-                "set_id": kwargs.get("set_id"),
-                "reps": reps,
-                "weight_kg": weight_kg,
+                "workout_id": ctx.workout_id,
+                "exercise_instance_id": exercise_instance_id,
+                "set_id": set_id,
+                "values": {
+                    "weight": weight_kg,
+                    "reps": reps,
+                    "rir": rir,
+                },
+                "idempotency_key": str(uuid.uuid4()),
             },
             headers={
                 "x-api-key": API_KEY,
@@ -3164,7 +3338,7 @@ import httpx
 
 from app.context import RequestContext
 
-FUNCTIONS_URL = os.getenv("FIREBASE_FUNCTIONS_URL", "https://us-central1-myon-53d85.cloudfunctions.net")
+FUNCTIONS_URL = os.getenv("MYON_FUNCTIONS_BASE_URL", "https://us-central1-myon-53d85.cloudfunctions.net")
 MYON_API_KEY = os.getenv("MYON_API_KEY", "")
 
 
@@ -3204,7 +3378,8 @@ async def suggest_weight_increase(
         ctx=ctx,
         target_type="template",
         target_id=template_id,
-        changes=[{"path": f"exercises[{exercise_index}].sets[0].weight", "value": new_weight}],
+        changes=[{"path": f"exercises[{exercise_index}].sets[0].weight",
+                  "from": None, "to": new_weight, "rationale": rationale}],
         summary=f"Increase weight to {new_weight}kg",
         rationale=rationale,
         trigger="user_request",
@@ -3327,8 +3502,8 @@ def _format_training_snapshot(planning: dict) -> str:
     """Format planning context as a system message section."""
     sections = ["## Current Training Snapshot"]
     user = planning.get("user", {})
-    if user.get("display_name"):
-        sections.append(f"User: {user['display_name']}")
+    if user.get("name"):
+        sections.append(f"User: {user['name']}")
     active = planning.get("active_routine")
     if active:
         sections.append(f"Active routine: {active.get('name', 'Unknown')}")
@@ -3423,14 +3598,23 @@ async function createNewConversation(userId) {
 }
 ```
 
-- [ ] **Step 3: Replace Vertex AI call with Cloud Run call**
+- [ ] **Step 3: Add AGENT_SERVICE_URL guard and uuid dependency**
 
 ```javascript
 const { GoogleAuth } = require('google-auth-library');
-const auth = new GoogleAuth();
-const AGENT_SERVICE_URL = process.env.AGENT_SERVICE_URL;
 const { v4: uuidv4 } = require('uuid');
 
+const AGENT_SERVICE_URL = process.env.AGENT_SERVICE_URL;
+if (!AGENT_SERVICE_URL) throw new Error('AGENT_SERVICE_URL not configured');
+
+const auth = new GoogleAuth();
+```
+
+Also add `"uuid": "^9.0.0"` to `firebase_functions/functions/package.json` dependencies.
+
+- [ ] **Step 4: Replace Vertex AI call with Cloud Run call + error handling**
+
+```javascript
 async function callAgentService(userId, conversationId, message, correlationId, workoutId) {
   const client = await auth.getIdTokenClient(AGENT_SERVICE_URL);
   const response = await client.request({
@@ -3449,7 +3633,23 @@ async function callAgentService(userId, conversationId, message, correlationId, 
 }
 ```
 
-- [ ] **Step 4: Remove all session logic**
+Wrap the call site in try/catch to handle Cloud Run errors gracefully:
+
+```javascript
+try {
+  const stream = await callAgentService(userId, conversationId, message, correlationId, workoutId);
+  // relay events with translation (see Step 6)
+} catch (err) {
+  logger.error('Agent service error', { error: err.message, userId });
+  sse.write(`event: error\ndata: ${JSON.stringify({
+    error: { code: 'UPSTREAM_ERROR', message: err.message }
+  })}\n\n`);
+  done(false);
+  return;
+}
+```
+
+- [ ] **Step 5: Remove all session logic**
 
 Delete:
 - `initializeOrReuseSession()` function and all calls
@@ -3461,24 +3661,48 @@ Keep:
 - Auth (bearer token validation)
 - Premium gate (`isPremiumUser`)
 - Rate limiting
-- SSE event relay (simplified — Cloud Run emits the 9-event contract directly)
-- Artifact write-through to Firestore (`conversations/{id}/artifacts`)
+- Workspace_entries write logic (persist each relayed event to `workspace_entries` subcollection for iOS timeline replay)
+- Artifact detection in relayed events (write to `artifacts` subcollection) — **Note:** per AD-2, the agent service also persists artifacts to Firestore. The proxy's workspace_entries writes cover ALL events including artifacts for timeline replay, while the agent service handles the canonical artifact document.
 
-- [ ] **Step 5: Update event relay for new 9-event contract**
+- [ ] **Step 6: Add EVENT_COMPAT translation table for Phase 3a→7 backward compatibility**
 
-The Cloud Run agent emits 9 event types directly in the format iOS expects: `message`, `tool_start`, `tool_end`, `artifact`, `clarification`, `status`, `heartbeat`, `done`, `error`. The proxy relays these without transformation. Remove any event type mapping or ADK-specific event handling.
+The Cloud Run agent emits new event names (`tool_start`, `tool_end`, `clarification`) but iOS expects old names until Phase 7. Add a translation table:
 
-- [ ] **Step 6: Run Firebase Functions tests**
+```javascript
+// Backward compatibility — removed in Phase 7 when iOS is updated
+const EVENT_COMPAT = {
+  'tool_start': 'toolRunning',
+  'tool_end': 'toolComplete',
+  'clarification': 'clarification.request',
+};
+
+function relayEvent(rawEvent) {
+  const parsed = JSON.parse(rawEvent);
+  const translatedType = EVENT_COMPAT[parsed.type] || parsed.type;
+
+  // Write workspace_entry for timeline replay (existing behavior, kept)
+  writeWorkspaceEntry(userId, conversationId, {
+    ...parsed,
+    type: translatedType,
+    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  // Relay to client with translated event name
+  sse.write(`event: ${translatedType}\ndata: ${JSON.stringify(parsed.data || parsed)}\n\n`);
+}
+```
+
+- [ ] **Step 7: Run Firebase Functions tests**
 
 ```bash
 cd firebase_functions/functions && npm test
 ```
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add firebase_functions/functions/strengthos/stream-agent-normalized.js
-git commit -m "feat(proxy): update SSE proxy — Cloud Run call, conversation init, 9-event contract"
+git add firebase_functions/functions/strengthos/stream-agent-normalized.js firebase_functions/functions/package.json
+git commit -m "feat(proxy): update SSE proxy — Cloud Run call, event translation, workspace_entries kept"
 ```
 
 ---
@@ -3491,9 +3715,15 @@ git commit -m "feat(proxy): update SSE proxy — Cloud Run call, conversation in
 cd adk_agent/agent_service && make deploy
 ```
 
-- [ ] **Step 2: Set AGENT_SERVICE_URL env var for Firebase Functions**
+- [ ] **Step 2: Grant IAM + set AGENT_SERVICE_URL env var for Firebase Functions**
 
 ```bash
+# Grant Firebase Functions SA permission to invoke the agent service
+gcloud run services add-iam-policy-binding agent-service \
+  --region us-central1 \
+  --member="serviceAccount:myon-53d85@appspot.gserviceaccount.com" \
+  --role="roles/run.invoker"
+
 # Get the Cloud Run URL
 gcloud run services describe agent-service --region us-central1 --format 'value(status.url)'
 
@@ -3760,7 +3990,7 @@ async def test_build_system_context_includes_all_sections():
 
     mock_fs = AsyncMock()
     mock_fs.get_planning_context.return_value = {
-        "user": {"display_name": "Test User"},
+        "user": {"name": "Test User"},
         "active_routine": {"name": "PPL"},
         "templates": [],
         "recent_workouts": [],
@@ -3882,7 +4112,7 @@ async def build_system_context(
 
 async def _load_recent_summaries(fs: FirestoreClient, user_id: str, limit: int) -> list[str]:
     query = (
-        fs.db.collection(f"users/{user_id}/conversations")
+        fs.db.collection(f"users/{user_id}/{fs.CONVERSATION_COLLECTION}")
         .where("summary", "!=", None)
         .order_by("completed_at", direction="DESCENDING")
         .limit(limit)
@@ -3893,7 +4123,7 @@ async def _load_recent_summaries(fs: FirestoreClient, user_id: str, limit: int) 
 async def _maybe_generate_previous_summary(fs, mm, ctx, llm_client, model):
     """Lazy summary: check if previous conversation needs a summary."""
     query = (
-        fs.db.collection(f"users/{ctx.user_id}/conversations")
+        fs.db.collection(f"users/{ctx.user_id}/{fs.CONVERSATION_COLLECTION}")
         .order_by("created_at", direction="DESCENDING")
         .limit(2)
     )
@@ -3919,8 +4149,8 @@ async def _get_session_vars(fs: FirestoreClient, ctx: RequestContext) -> dict | 
 def _format_snapshot(planning: dict) -> str:
     sections = ["## Current Training Snapshot"]
     user = planning.get("user", {})
-    if user.get("display_name"):
-        sections.append(f"User: {user['display_name']}")
+    if user.get("name"):
+        sections.append(f"User: {user['name']}")
     routine = planning.get("active_routine")
     if routine:
         sections.append(f"Active routine: {routine.get('name', 'Unknown')}")
@@ -3931,12 +4161,18 @@ def _format_snapshot(planning: dict) -> str:
 
 
 def _format_history(messages: list[dict]) -> list[dict]:
+    """Format Firestore messages to LLM history.
+
+    Firestore uses `type` field with values: user_prompt, agent_response, artifact.
+    LLM expects `role` field with values: user, assistant (model).
+    """
+    TYPE_TO_ROLE = {"user_prompt": "user", "agent_response": "assistant"}
     formatted = []
     for msg in messages:
-        role = msg.get("role", "user")
-        content = msg.get("content", "")
-        if role in ("user", "assistant"):
-            formatted.append({"role": role, "content": content})
+        msg_type = msg.get("type", "user_prompt")
+        role = TYPE_TO_ROLE.get(msg_type)
+        if role:
+            formatted.append({"role": role, "content": msg.get("content", "")})
     return formatted
 ```
 
@@ -4009,7 +4245,7 @@ async def search_past_conversations(*, ctx: RequestContext, query: str, limit: i
     # Simple keyword search across recent conversation messages
     fs = get_firestore_client()
     convs_query = (
-        fs.db.collection(f"users/{ctx.user_id}/conversations")
+        fs.db.collection(f"users/{ctx.user_id}/{fs.CONVERSATION_COLLECTION}")
         .order_by("created_at", direction="DESCENDING")
         .limit(20)
     )
@@ -4111,23 +4347,57 @@ rm firebase_functions/functions/auth/exchange-token.js
 
 This endpoint exchanged Firebase ID tokens for GCP access tokens to call Vertex AI directly. No longer needed — iOS no longer calls Vertex AI.
 
-- [ ] **Step 5: Remove deleted endpoints from index.js**
+- [ ] **Step 5: Update index.js — remove dead exports, replace canvas endpoints with no-op stubs**
 
-Remove these exports from `firebase_functions/functions/index.js`:
-- `initializeSession` — replaced by conversation init in SSE proxy
-- `preWarmSession` — no more sessions
+**Remove these exports** from `firebase_functions/functions/index.js`:
 - `cleanupStaleSessions` — scheduled function, no more sessions
 - `getServiceToken` — no more Vertex AI token exchange
 - `invokeCanvasOrchestrator` — replaced by SSE proxy → Cloud Run
-- `openCanvas` — replaced by conversation init in SSE proxy
-- `bootstrapCanvas` — replaced by conversation init in SSE proxy
 - `expireProposalsScheduled` — no more canvas proposals (replaced by artifacts)
 - `onWorkoutCreatedWeekly` — dead export (undefined symbol)
 - `onWorkoutFinalizedForUser` — dead export (undefined symbol)
 
+**Replace with no-op stubs** (iOS still calls these until Phase 7 — see AD-4):
+
+```javascript
+// No-op stubs — iOS calls these until Phase 7 coordinated cleanup.
+// Returns expected response shapes so iOS doesn't error.
+const { onRequest } = require('firebase-functions/v2/https');
+const { ok } = require('./utils/response');
+const { getAuthenticatedUserId } = require('./utils/auth-helpers');
+const { v4: uuidv4 } = require('uuid');
+
+exports.openCanvas = onRequest(async (req, res) => {
+  getAuthenticatedUserId(req); // auth check still required
+  return ok(res, {
+    canvasId: req.body.canvasId || uuidv4(),
+    sessionId: null,
+    isNewSession: true,
+    resumeState: { cards: [], cardCount: 0 },
+  });
+});
+
+exports.bootstrapCanvas = onRequest(async (req, res) => {
+  getAuthenticatedUserId(req);
+  return ok(res, { canvasId: req.body.canvasId || uuidv4(), bootstrapped: true });
+});
+
+exports.initializeSession = onRequest(async (req, res) => {
+  getAuthenticatedUserId(req);
+  return ok(res, { sessionId: null, isReused: false });
+});
+
+exports.preWarmSession = onRequest(async (req, res) => {
+  getAuthenticatedUserId(req);
+  return ok(res, { preWarmed: true });
+});
+```
+
+Delete the actual implementation files but keep these stub exports in `index.js`.
+
 Verify with:
 ```bash
-grep -n "onWorkoutCreatedWeekly\|onWorkoutFinalizedForUser\|getServiceToken\|cleanupStaleSessions\|expireProposals\|invokeCanvasOrchestrator\|openCanvas\|bootstrapCanvas\|initializeSession\|preWarmSession" firebase_functions/functions/index.js
+grep -n "onWorkoutCreatedWeekly\|onWorkoutFinalizedForUser\|getServiceToken\|cleanupStaleSessions\|expireProposals\|invokeCanvasOrchestrator" firebase_functions/functions/index.js
 ```
 
 - [ ] **Step 6: Delete SessionPreWarmer.swift**
@@ -4155,13 +4425,14 @@ Remove all matches. Check `CanvasService.swift` for `preWarmSession()`, `initial
 - [ ] **Step 9: Remove dead CanvasService methods**
 
 In `Povver/Povver/Services/CanvasService.swift`, remove:
-- `openCanvas(userId:purpose:)` — replaced by SSE proxy conversation init
-- `bootstrapCanvas(for:purpose:)` — replaced by SSE proxy conversation init
-- `preWarmSession(userId:purpose:)` — no more sessions
-- `initializeSession(canvasId:purpose:forceNew:)` — no more sessions
 - `applyAction(_:)` — canvas reducer pattern, replaced by artifacts
 
-Keep: `purgeCanvas` (may still be useful for cleanup)
+**Keep until Phase 7** (iOS still calls these, backend now returns no-op stubs):
+- `openCanvas(userId:purpose:)` — calls no-op stub
+- `bootstrapCanvas(for:purpose:)` — calls no-op stub
+- `preWarmSession(userId:purpose:)` — calls no-op stub
+- `initializeSession(canvasId:purpose:forceNew:)` — calls no-op stub
+- `purgeCanvas` — may still be useful for cleanup
 
 - [ ] **Step 10: Delete agent_sessions Firestore collection data**
 
@@ -4190,13 +4461,15 @@ Removed:
 - firebase_functions/functions/sessions/ (all session endpoints)
 - getServiceToken (auth/exchange-token.js) — no more Vertex AI
 - invokeCanvasOrchestrator — replaced by Cloud Run
-- openCanvas, bootstrapCanvas, initializeSession, preWarmSession — SSE proxy handles it
 - cleanupStaleSessions, expireProposalsScheduled — obsolete scheduled functions
 - Dead exports: onWorkoutCreatedWeekly, onWorkoutFinalizedForUser
 - Session ID and canvasId backward compat from DirectStreamingService
-- Dead CanvasService methods (openCanvas, bootstrapCanvas, preWarm, initSession)
+- CanvasService.applyAction (canvas reducer, replaced by artifacts)
 
-10 endpoints removed. 2 scheduled functions removed. 2 dead exports removed."
+Replaced with no-op stubs (Phase 7 removes iOS callers):
+- openCanvas, bootstrapCanvas, initializeSession, preWarmSession
+
+6 endpoints removed. 4 endpoints → no-op stubs. 2 scheduled functions removed."
 ```
 
 ---
@@ -4368,7 +4641,10 @@ export async function authenticateApiKey(apiKey: string): Promise<AuthResult> {
   }
 
   const userData = userDoc.data()!;
-  if (!userData.subscription_status?.is_premium) {
+  // Mirror isPremiumUser() logic: check override first, then tier
+  const isPremium = userData.subscription_override === 'premium'
+                 || userData.subscription_tier === 'premium';
+  if (!isPremium) {
     throw new Error('Premium subscription required for MCP access');
   }
 
@@ -4404,12 +4680,13 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import admin from 'firebase-admin';
 
 // Import shared business logic (copied into build context)
-const routines = require('../../shared/routines');
-const templates = require('../../shared/templates');
-const workouts = require('../../shared/workouts');
-const exercises = require('../../shared/exercises');
-const trainingQueries = require('../../shared/training-queries');
-const planningContext = require('../../shared/planning-context');
+// Path is ../shared/ because this runs from dist/ after TypeScript compilation
+const routines = require('../shared/routines');
+const templates = require('../shared/templates');
+const workouts = require('../shared/workouts');
+const exercises = require('../shared/exercises');
+const trainingQueries = require('../shared/training-queries');
+const planningContext = require('../shared/planning-context');
 
 const db = admin.firestore();
 
@@ -4648,13 +4925,22 @@ Listing/revoking keys: Firebase Function endpoint queries `mcp_api_keys` by `use
 
 Create `firebase_functions/functions/mcp/generate-api-key.js` and `firebase_functions/functions/mcp/list-api-keys.js` and `firebase_functions/functions/mcp/revoke-api-key.js`. Use `requireAuth` (iOS-only, not API key lane). Premium gate via `isPremiumUser`.
 
-- [ ] **Step 2: Add Firestore rules for mcp_api_keys**
+- [ ] **Step 2: Add Firestore rules for mcp_api_keys and agent_memory**
 
 Add to `firestore.rules`:
 ```
 match /mcp_api_keys/{keyHash} {
   // Server-only (Admin SDK) — no client reads/writes
   allow read, write: if false;
+}
+```
+
+Also add `agent_memory` rules (under the `users/{userId}` match block):
+```
+match /users/{userId}/agent_memory/{memoryId} {
+  // Agent service writes via Admin SDK; iOS can read for display
+  allow read: if request.auth != null && request.auth.uid == userId;
+  allow write: if false; // Admin SDK only
 }
 ```
 
@@ -4677,6 +4963,21 @@ git commit -m "feat(ios): add Connected Apps settings for MCP API key management
 ### Task 36: MCP Deploy + Verification
 
 - [ ] **Step 1: Deploy MCP server**
+
+The Makefile `deploy` target must include `--service-account` and `--set-env-vars`:
+
+```bash
+# In mcp_server/Makefile deploy target:
+deploy:
+	cp -r ../firebase_functions/functions/shared shared/
+	gcloud run deploy mcp-server \
+		--source . \
+		--region us-central1 \
+		--allow-unauthenticated \
+		--service-account ai-agents@$(PROJECT_ID).iam.gserviceaccount.com \
+		--set-env-vars "GOOGLE_CLOUD_PROJECT=$(PROJECT_ID)"
+	rm -rf shared/
+```
 
 ```bash
 cd mcp_server && make deploy
@@ -4713,426 +5014,372 @@ git commit -m "feat: complete Phase 4 — MCP server for external LLM access"
 
 ---
 
-### Task 37: Workout Completion Worker Scaffold (Phase 5)
+### Task 37: Refactor JS Workout Triggers to Cloud Tasks (Phase 5)
+
+> **AD-1:** The workout completion pipeline stays in JavaScript. The existing 2,960 lines across 6 files, writing to 11 Firestore collections through 7 transaction patterns with 4 idempotency mechanisms, is battle-tested JS. The problem was *trigger reliability* (silent failures, no observability), not the language. This task replaces Firestore triggers with Cloud Tasks for reliable, observable, retryable processing.
 
 **Files:**
-- Create: `adk_agent/workout_completion_worker/` (full directory structure)
-
-- [ ] **Step 1: Create project files**
-
-Follow the training_analyst pattern exactly:
-- `requirements.txt` — `google-cloud-firestore`, `google-cloud-logging`
-- `Dockerfile` — same pattern as training_analyst
-- `Makefile` — install, test, worker-local, deploy, trigger
-- `cloud-run-worker.yaml` — Cloud Run Job config
-- `app/__init__.py`, `app/config.py`, `app/firestore_client.py`
-- `app/jobs/models.py`, `app/jobs/queue.py` — copy pattern from training_analyst
-- `workers/completion_worker.py` — main entry point
-
-- [ ] **Step 2: Commit**
-
-```bash
-git add adk_agent/workout_completion_worker/
-git commit -m "feat(worker): scaffold workout completion worker"
-```
-
----
-
-### Task 38: Workout Completion Processor
-
-**Files:**
-- Create: `adk_agent/workout_completion_worker/app/processor.py`
-- Test: `adk_agent/workout_completion_worker/tests/test_processor.py`
-
-- [ ] **Step 1: Write the failing test**
-
-```python
-# tests/test_processor.py
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
-from app.processor import generate_set_facts, process_workout_completion
-
-
-def test_generate_set_facts_from_workout():
-    """set_facts are generated from workout exercises and sets."""
-    workout = {
-        "exercises": [
-            {
-                "exercise_id": "e1", "exercise_name": "Bench Press",
-                "muscle_group": "chest",
-                "sets": [
-                    {"reps": 8, "weight_kg": 80, "completed": True},
-                    {"reps": 6, "weight_kg": 85, "completed": True},
-                ]
-            }
-        ],
-        "start_time": "2026-03-15T10:00:00Z",
-        "end_time": "2026-03-15T11:00:00Z",
-    }
-    facts = generate_set_facts(workout, "w1", "u1")
-    assert len(facts) == 2
-    assert facts[0]["exercise_name"] == "Bench Press"
-    assert facts[0]["reps"] == 8
-    assert facts[0]["weight_kg"] == 80
-    assert facts[0]["workout_id"] == "w1"
-    assert facts[0]["user_id"] == "u1"
-    assert "e1rm" in facts[0]  # Estimated 1RM should be calculated
-
-
-def test_generate_set_facts_skips_incomplete_sets():
-    """Only completed sets generate set_facts."""
-    workout = {
-        "exercises": [{
-            "exercise_id": "e1", "exercise_name": "Squat",
-            "muscle_group": "quads",
-            "sets": [
-                {"reps": 5, "weight_kg": 100, "completed": True},
-                {"reps": 0, "weight_kg": 100, "completed": False},
-            ]
-        }],
-        "start_time": "2026-03-15T10:00:00Z",
-        "end_time": "2026-03-15T11:00:00Z",
-    }
-    facts = generate_set_facts(workout, "w1", "u1")
-    assert len(facts) == 1
-
-
-@pytest.mark.asyncio
-async def test_process_workout_writes_all_collections():
-    """Full processing pipeline writes to all expected collections."""
-    mock_db = AsyncMock()
-    mock_workout_doc = AsyncMock()
-    mock_workout_doc.exists = True
-    mock_workout_doc.to_dict.return_value = {
-        "exercises": [{
-            "exercise_id": "e1", "exercise_name": "Bench",
-            "muscle_group": "chest", "muscles": ["pectorals"],
-            "sets": [{"reps": 8, "weight_kg": 80, "completed": True}]
-        }],
-        "start_time": "2026-03-15T10:00:00Z",
-        "end_time": "2026-03-15T11:00:00Z",
-    }
-    mock_db.document.return_value.get = AsyncMock(return_value=mock_workout_doc)
-    mock_batch = MagicMock()
-    mock_batch.commit = AsyncMock()
-    mock_db.batch.return_value = mock_batch
-
-    await process_workout_completion(mock_db, "u1", "w1")
-
-    # Verify batch.set was called for set_facts
-    assert mock_batch.set.call_count >= 1
-    # Verify batch.commit was called
-    mock_batch.commit.assert_called_once()
-```
-
-- [ ] **Step 2: Write processor**
-
-Read `firebase_functions/functions/triggers/weekly-analytics.js` (`onWorkoutCompleted` function, ~300 lines) to understand every step. Port the logic to Python:
-
-```python
-# app/processor.py
-"""Workout completion processor — atomic post-workout data pipeline.
-
-Replaces the trigger cascade from weekly-analytics.js with atomic
-sequential processing in a worker.
-"""
-
-from __future__ import annotations
-
-import logging
-from google.cloud import firestore
-
-logger = logging.getLogger(__name__)
-
-
-async def process_workout_completion(db, user_id: str, workout_id: str):
-    """Process a completed workout atomically.
-
-    Steps (must all succeed or none):
-    1. Load workout data
-    2. Generate set_facts from workout sets
-    3. Update exercise series (per-exercise daily data points)
-    4. Update muscle_group series
-    5. Update muscle series
-    6. Update rollups (volume, sets, reps aggregates)
-    7. Update weekly_stats
-    8. Update exercise_usage_stats
-    9. Advance routine cursor (if source_routine_id present)
-    10. Update watermark
-    11. Enqueue training analysis (if premium)
-    """
-    workout_doc = await db.document(f"users/{user_id}/workouts/{workout_id}").get()
-    if not workout_doc.exists:
-        logger.error("Workout %s not found for user %s", workout_id, user_id)
-        return
-
-    workout = workout_doc.to_dict()
-
-    # Derive date keys
-    workout_date = workout.get("start_time", "")[:10]  # YYYY-MM-DD
-    from datetime import datetime
-    dt = datetime.fromisoformat(workout_date)
-    # ISO week key: YYYY-WNN
-    week_key = f"{dt.isocalendar()[0]}-W{dt.isocalendar()[1]:02d}"
-
-    # Step 1: Generate set_facts
-    set_facts = generate_set_facts(workout, workout_id, user_id)
-    batch = db.batch()
-    for sf in set_facts:
-        ref = db.collection(f"users/{user_id}/set_facts").document()
-        batch.set(ref, sf)
-
-    # Step 2: Update exercise series (per-exercise daily data points)
-    # Port from: utils/analytics-writes.js → appendExerciseSeries()
-    # For each exercise in workout, upsert a document in exercise_series
-    # with date, exercise_name, total_volume, best_e1rm, set_count
-    for exercise in workout.get("exercises", []):
-        ex_ref = db.collection(f"users/{user_id}/exercise_series").document(
-            f"{exercise['exercise_id']}_{workout_date}"
-        )
-        batch.set(ex_ref, _build_exercise_series_entry(exercise, workout_date), merge=True)
-
-    # Step 3: Update muscle_group series
-    # Port from: utils/analytics-writes.js → appendMuscleSeries()
-    # Aggregate volume per muscle group, upsert weekly data point
-    muscle_group_volumes = _aggregate_muscle_group_volumes(workout)
-    for group, volume_data in muscle_group_volumes.items():
-        mg_ref = db.collection(f"users/{user_id}/muscle_group_series").document(
-            f"{group}_{week_key}"
-        )
-        batch.set(mg_ref, volume_data, merge=True)
-
-    # Step 4: Update muscle series (individual muscles)
-    muscle_volumes = _aggregate_muscle_volumes(workout)
-    for muscle, volume_data in muscle_volumes.items():
-        m_ref = db.collection(f"users/{user_id}/muscle_series").document(
-            f"{muscle}_{week_key}"
-        )
-        batch.set(m_ref, volume_data, merge=True)
-
-    # Step 5: Update rollups (all-time aggregates)
-    # Port from: utils/analytics-writes.js → upsertRollup()
-    rollup_ref = db.document(f"users/{user_id}/rollups/all_time")
-    batch.set(rollup_ref, _build_rollup_update(workout, set_facts), merge=True)
-
-    # Step 6: Update weekly_stats
-    # Port from: weekly-analytics.js → updateWeeklyStats()
-    stats_ref = db.document(f"users/{user_id}/weekly_stats/{week_key}")
-    batch.set(stats_ref, _build_weekly_stats_update(workout, set_facts), merge=True)
-
-    # Step 7: Update exercise_usage_stats
-    for exercise in workout.get("exercises", []):
-        usage_ref = db.document(f"users/{user_id}/exercise_usage_stats/{exercise['exercise_id']}")
-        batch.set(usage_ref, {
-            "last_used": workout_date,
-            "total_sets": firestore.Increment(len(exercise.get("sets", []))),
-        }, merge=True)
-
-    # Step 9: Advance routine cursor (absorbed from workout-routine-cursor.js)
-    # If workout has source_routine_id + source_template_id, advance the cursor
-    source_routine_id = workout.get("source_routine_id")
-    source_template_id = workout.get("source_template_id")
-    if source_routine_id and source_template_id:
-        routine_ref = db.document(f"users/{user_id}/routines/{source_routine_id}")
-        batch.update(routine_ref, {
-            "last_completed_template_id": source_template_id,
-            "last_completed_at": _utcnow(),
-        })
-        # Auto-activate routine if user has no active routine
-        user_data = user_doc.to_dict() if user_doc.exists else {}
-        if not user_data.get("activeRoutineId"):
-            batch.update(db.document(f"users/{user_id}"), {
-                "activeRoutineId": source_routine_id,
-            })
-
-    # Step 10: Update watermark
-    wm_ref = db.document(f"users/{user_id}/watermarks/analytics")
-    batch.set(wm_ref, {"last_processed_workout": workout_id, "processed_at": _utcnow()}, merge=True)
-
-    # Step 11: Enqueue training analysis (if premium)
-    # Mirrors isPremiumUser() logic: subscription_override first, then subscription_tier
-    user_doc = await db.document(f"users/{user_id}").get()
-    user_data = user_doc.to_dict() if user_doc.exists else {}
-    is_premium = (
-        user_data.get("subscription_override") == "premium"
-        or user_data.get("subscription_tier") == "premium"
-    )
-    if is_premium:
-        analysis_ref = db.collection("training_analysis_jobs").document()
-        batch.set(analysis_ref, {
-            "type": "POST_WORKOUT",
-            "status": "QUEUED",
-            "payload": {"user_id": user_id, "workout_id": workout_id},
-            "created_at": _utcnow(),
-        })
-
-    await batch.commit()
-    logger.info("Processed workout %s for user %s: %d set_facts", workout_id, user_id, len(set_facts))
-
-
-def generate_set_facts(workout: dict, workout_id: str, user_id: str) -> list[dict]:
-    """Generate set_facts from a completed workout.
-
-    Port from: training/set-facts-generator.js
-    Each completed set becomes a set_fact with computed e1RM.
-    """
-    facts = []
-    workout_date = workout.get("start_time", "")[:10]
-    for exercise in workout.get("exercises", []):
-        for i, s in enumerate(exercise.get("sets", [])):
-            if not s.get("completed", False):
-                continue
-            reps = s.get("reps", 0)
-            weight = s.get("weight_kg", 0)
-            e1rm = weight * (1 + reps / 30) if reps > 0 and weight > 0 else 0
-            facts.append({
-                "user_id": user_id,
-                "workout_id": workout_id,
-                "exercise_id": exercise.get("exercise_id"),
-                "exercise_name": exercise.get("exercise_name"),
-                "muscle_group": exercise.get("muscle_group"),
-                "muscles": exercise.get("muscles", []),
-                "set_index": i,
-                "reps": reps,
-                "weight_kg": weight,
-                "e1rm": round(e1rm, 1),
-                "volume": round(reps * weight, 1),
-                "date": workout_date,
-            })
-    return facts
-```
-
-The full implementation will port each step from `weekly-analytics.js`. Key references:
-- `training/set-facts-generator.js` — set_facts generation logic
-- `utils/analytics-writes.js` — rollup, series, watermark writes
-- `utils/analytics-calculator.js` — volume/intensity calculations
-- `utils/muscle-taxonomy.js` — exercise → muscle mapping
-
-- [ ] **Step 3: Run tests — expect PASS**
-- [ ] **Step 4: Commit**
-
-```bash
-git add adk_agent/workout_completion_worker/app/processor.py adk_agent/workout_completion_worker/tests/
-git commit -m "feat(worker): implement workout completion processor"
-```
-
----
-
-### Task 39: Simplify All Workout Completion Triggers
-
-**Files:**
+- Create: `firebase_functions/functions/training/process-workout-completion.js`
+- Create: `firebase_functions/functions/triggers/workout-completion-task.js`
+- Create: `firebase_functions/functions/triggers/workout-completion-watchdog.js`
 - Modify: `firebase_functions/functions/triggers/weekly-analytics.js`
-- Delete: `firebase_functions/functions/triggers/workout-routine-cursor.js`
+- Modify: `firebase_functions/functions/workouts/upsert-workout.js`
+- Modify: `firebase_functions/functions/workouts/complete-active-workout.js`
 - Modify: `firebase_functions/functions/index.js`
+- Modify: `firebase_functions/functions/package.json`
 
-- [ ] **Step 1: Read the current triggers in full**
+- [ ] **Step 1: Read the current trigger implementations**
 
-Read:
-- `firebase_functions/functions/triggers/weekly-analytics.js` — `onWorkoutCompleted` + `onWorkoutCreatedWithEnd`
+Read in full:
+- `firebase_functions/functions/triggers/weekly-analytics.js` — `onWorkoutCompleted` + `onWorkoutCreatedWithEnd` (the duplicated analytics cascade)
 - `firebase_functions/functions/triggers/workout-routine-cursor.js` — `onWorkoutCreatedUpdateRoutineCursor`
+- `firebase_functions/functions/workouts/upsert-workout.js` — where workouts are created/updated
+- `firebase_functions/functions/workouts/complete-active-workout.js` — where end_time is set
 
-- [ ] **Step 2: Replace both completion triggers with job enqueue**
+- [ ] **Step 2: Add npm dependency**
+
+```bash
+cd firebase_functions/functions && npm install @google-cloud/tasks
+```
+
+Add `"@google-cloud/tasks": "^5.0.0"` to `package.json`.
+Also add `"uuid": "^9.0.0"` (needed by SSE proxy Task 25).
+
+- [ ] **Step 3: Extract shared processing function**
+
+Extract the duplicated logic from `onWorkoutCompleted` and `onWorkoutCreatedWithEnd` into a single callable:
 
 ```javascript
-// Shared helper — enqueue a workout completion job
-async function enqueueWorkoutCompletionJob(userId, workoutId) {
-  await db.collection("workout_completion_jobs").add({
-    user_id: userId,
-    workout_id: workoutId,
-    status: "pending",
-    created_at: admin.firestore.FieldValue.serverTimestamp(),
+// training/process-workout-completion.js
+/**
+ * Shared workout completion processor — extracted from the duplicated
+ * trigger logic in weekly-analytics.js.
+ *
+ * Called by Cloud Tasks handler. All 11 collection writes happen here
+ * in a single transaction-safe flow.
+ */
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const { generateSetFacts } = require('./set-facts-generator');
+const { appendExerciseSeries, appendMuscleSeries, upsertRollup } = require('../utils/analytics-writes');
+const { mapMuscleGroups } = require('../utils/muscle-taxonomy');
+const { calculateCaps } = require('../utils/caps');
+const logger = require('firebase-functions/logger');
+
+const db = getFirestore();
+
+async function processWorkoutCompletion(userId, workoutId) {
+  const workoutRef = db.doc(`users/${userId}/workouts/${workoutId}`);
+  const workoutDoc = await workoutRef.get();
+
+  if (!workoutDoc.exists) {
+    logger.warn('Workout not found', { userId, workoutId });
+    return { skipped: true, reason: 'not_found' };
+  }
+
+  const workout = workoutDoc.data();
+  if (!workout.end_time) {
+    logger.warn('Workout not completed', { userId, workoutId });
+    return { skipped: true, reason: 'not_completed' };
+  }
+
+  // Idempotency check: skip if already processed
+  const watermark = await db.doc(`users/${userId}/watermarks/analytics`).get();
+  if (watermark.exists && watermark.data().processed_workouts?.includes(workoutId)) {
+    logger.info('Workout already processed', { userId, workoutId });
+    return { skipped: true, reason: 'already_processed' };
+  }
+
+  // === Core pipeline (extracted from weekly-analytics.js) ===
+  // Steps 1-11 use the EXISTING battle-tested JS logic.
+  // The only change is that this is called from Cloud Tasks instead of triggers.
+
+  // 1. Generate set_facts
+  const setFacts = generateSetFacts(workout, workoutId, userId);
+
+  // 2-8. All analytics writes (exercise series, muscle series, rollups, etc.)
+  // [Uses the existing functions from utils/analytics-writes.js, unchanged]
+
+  // 9. Advance routine cursor (absorbed from workout-routine-cursor.js)
+  if (workout.source_routine_id && workout.source_template_id) {
+    await db.doc(`users/${userId}/routines/${workout.source_routine_id}`).update({
+      last_completed_template_id: workout.source_template_id,
+      last_completed_at: FieldValue.serverTimestamp(),
+    });
+  }
+
+  // 10. Update watermark (includes workoutId for idempotency)
+  await db.doc(`users/${userId}/watermarks/analytics`).set({
+    last_processed_workout: workoutId,
+    processed_at: FieldValue.serverTimestamp(),
+    processed_workouts: FieldValue.arrayUnion(workoutId),
+  }, { merge: true });
+
+  // 11. Enqueue training analysis (if premium)
+  const userDoc = await db.doc(`users/${userId}`).get();
+  const userData = userDoc.exists ? userDoc.data() : {};
+  const isPremium = userData.subscription_override === 'premium'
+                 || userData.subscription_tier === 'premium';
+  if (isPremium) {
+    await db.collection('training_analysis_jobs').add({
+      type: 'POST_WORKOUT',
+      status: 'QUEUED',
+      payload: { user_id: userId, workout_id: workoutId },
+      created_at: FieldValue.serverTimestamp(),
+    });
+  }
+
+  logger.info('Processed workout completion', {
+    userId, workoutId, setFactsCount: setFacts.length,
   });
-  logger.info("Enqueued workout completion job", { userId, workoutId });
+  return { processed: true, setFactsCount: setFacts.length };
 }
 
-// Fires when an active workout is completed (end_time added via update)
-exports.onWorkoutCompleted = onDocumentUpdated(
-  "users/{userId}/workouts/{workoutId}",
-  async (event) => {
-    const before = event.data.before.data();
-    const after = event.data.after.data();
-    if (!after.end_time || before.end_time) return;
-    await enqueueWorkoutCompletionJob(event.params.userId, event.params.workoutId);
-  }
-);
+module.exports = { processWorkoutCompletion };
+```
 
-// Fires when an imported workout is created with end_time already present
-exports.onWorkoutCreatedWithEnd = onDocumentCreated(
-  "users/{userId}/workouts/{workoutId}",
-  async (event) => {
-    const data = event.data.data();
-    if (!data.end_time) return;
-    await enqueueWorkoutCompletionJob(event.params.userId, event.params.workoutId);
+**Note:** The actual implementation step copies the EXACT logic from the existing trigger bodies — the code above shows the structure. The implementer must read `weekly-analytics.js` and transplant the steps verbatim, not reimplement them.
+
+- [ ] **Step 4: Create Cloud Tasks handler**
+
+```javascript
+// triggers/workout-completion-task.js
+/**
+ * Cloud Tasks handler for workout completion processing.
+ * Receives task payloads from Cloud Tasks queue.
+ */
+const { onRequest } = require('firebase-functions/v2/https');
+const { processWorkoutCompletion } = require('../training/process-workout-completion');
+const logger = require('firebase-functions/logger');
+
+exports.processWorkoutCompletionTask = onRequest(
+  { region: 'us-central1', memory: '512MiB', timeoutSeconds: 120 },
+  async (req, res) => {
+    // Cloud Tasks sends POST with JSON body
+    const { userId, workoutId } = req.body;
+
+    if (!userId || !workoutId) {
+      logger.error('Missing userId or workoutId in task payload');
+      res.status(400).send('Missing userId or workoutId');
+      return;
+    }
+
+    try {
+      const result = await processWorkoutCompletion(userId, workoutId);
+      logger.info('Task completed', { userId, workoutId, result });
+      res.status(200).json(result);
+    } catch (err) {
+      logger.error('Task failed', { userId, workoutId, error: err.message });
+      // Return 500 so Cloud Tasks retries
+      res.status(500).send(err.message);
+    }
   }
 );
 ```
 
-- [ ] **Step 3: Delete workout-routine-cursor.js**
+- [ ] **Step 5: Create helper to enqueue Cloud Tasks**
+
+```javascript
+// utils/enqueue-workout-task.js
+const { CloudTasksClient } = require('@google-cloud/tasks');
+const logger = require('firebase-functions/logger');
+
+const client = new CloudTasksClient();
+const PROJECT = process.env.GCLOUD_PROJECT || 'myon-53d85';
+const LOCATION = 'us-central1';
+const QUEUE = 'workout-completion';
+
+async function enqueueWorkoutCompletion(userId, workoutId) {
+  const parent = client.queuePath(PROJECT, LOCATION, QUEUE);
+
+  // Get the Cloud Functions URL for the task handler
+  const url = `https://${LOCATION}-${PROJECT}.cloudfunctions.net/processWorkoutCompletionTask`;
+
+  const task = {
+    httpRequest: {
+      httpMethod: 'POST',
+      url,
+      headers: { 'Content-Type': 'application/json' },
+      body: Buffer.from(JSON.stringify({ userId, workoutId })).toString('base64'),
+      oidcToken: {
+        serviceAccountEmail: `${PROJECT}@appspot.gserviceaccount.com`,
+      },
+    },
+    // Deduplicate by workout ID (prevents double-processing)
+    name: `${parent}/tasks/workout-${userId.slice(0, 8)}-${workoutId}`,
+  };
+
+  try {
+    await client.createTask({ parent, task });
+    logger.info('Enqueued workout completion task', { userId, workoutId });
+  } catch (err) {
+    if (err.code === 6) {
+      // ALREADY_EXISTS — task already enqueued, safe to ignore
+      logger.info('Task already exists (idempotent)', { userId, workoutId });
+    } else {
+      throw err;
+    }
+  }
+}
+
+module.exports = { enqueueWorkoutCompletion };
+```
+
+- [ ] **Step 6: Update upsert-workout.js to enqueue Cloud Task**
+
+In `firebase_functions/functions/workouts/upsert-workout.js`, after a workout is created with `end_time` already set (imported workouts), call:
+
+```javascript
+const { enqueueWorkoutCompletion } = require('../utils/enqueue-workout-task');
+
+// After successful upsert, if workout has end_time:
+if (workoutData.end_time) {
+  await enqueueWorkoutCompletion(userId, workoutId);
+}
+```
+
+- [ ] **Step 7: Update complete-active-workout.js to enqueue Cloud Task**
+
+In `firebase_functions/functions/workouts/complete-active-workout.js`, after setting `end_time`:
+
+```javascript
+const { enqueueWorkoutCompletion } = require('../utils/enqueue-workout-task');
+
+// After setting end_time on the workout document:
+await enqueueWorkoutCompletion(userId, workoutId);
+```
+
+- [ ] **Step 8: Create watchdog scheduled function**
+
+```javascript
+// triggers/workout-completion-watchdog.js
+/**
+ * Daily watchdog — catches workouts that were completed but never processed.
+ * Safety net for any Cloud Tasks delivery failures.
+ */
+const { onSchedule } = require('firebase-functions/v2/scheduler');
+const { getFirestore } = require('firebase-admin/firestore');
+const { enqueueWorkoutCompletion } = require('../utils/enqueue-workout-task');
+const logger = require('firebase-functions/logger');
+
+const db = getFirestore();
+
+exports.workoutCompletionWatchdog = onSchedule(
+  { schedule: 'every 24 hours', region: 'us-central1' },
+  async () => {
+    // Find workouts completed in last 48h that have no watermark entry
+    const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    const usersSnap = await db.collection('users').get();
+
+    let requeued = 0;
+    for (const userDoc of usersSnap.docs) {
+      const userId = userDoc.id;
+      const watermark = await db.doc(`users/${userId}/watermarks/analytics`).get();
+      const processedIds = watermark.exists
+        ? (watermark.data().processed_workouts || [])
+        : [];
+
+      const recentWorkouts = await db.collection(`users/${userId}/workouts`)
+        .where('end_time', '>=', cutoff)
+        .get();
+
+      for (const wDoc of recentWorkouts.docs) {
+        if (!processedIds.includes(wDoc.id)) {
+          await enqueueWorkoutCompletion(userId, wDoc.id);
+          requeued++;
+        }
+      }
+    }
+
+    logger.info('Watchdog completed', { requeued });
+  }
+);
+```
+
+- [ ] **Step 9: Remove old triggers from weekly-analytics.js**
+
+Remove `onWorkoutCompleted` and `onWorkoutCreatedWithEnd` trigger exports from `weekly-analytics.js`. Keep `weeklyStatsRecalculation` scheduled function and `onWorkoutDeleted` trigger (deletion analytics stay as a trigger — simpler, less frequent).
+
+- [ ] **Step 10: Delete workout-routine-cursor.js**
 
 ```bash
 rm firebase_functions/functions/triggers/workout-routine-cursor.js
 ```
 
-The routine cursor advance is now step 8 in the workout completion worker (Task 38). This eliminates a race condition where the cursor could update before analytics.
+The routine cursor advance is now step 9 in `processWorkoutCompletion()`. This eliminates the race condition where the cursor could update before analytics.
 
-- [ ] **Step 4: Keep onWorkoutDeleted** — deletion analytics can stay as a trigger (simpler, less frequent)
-- [ ] **Step 5: Keep weeklyStatsRecalculation** — scheduled job stays unchanged
-- [ ] **Step 6: Add onCreate trigger for job dispatch**
+- [ ] **Step 11: Create Cloud Tasks queue**
 
-```javascript
-const { onDocumentCreated } = require('firebase-functions/v2/firestore');
-
-exports.onWorkoutCompletionJobCreated = onDocumentCreated(
-  "workout_completion_jobs/{jobId}",
-  async (event) => {
-    const { v2 } = require('@google-cloud/run');
-    const runClient = new v2.JobsClient();
-    const jobName = `projects/myon-53d85/locations/us-central1/jobs/workout-completion-worker`;
-
-    try {
-      const [operation] = await runClient.runJob({ name: jobName });
-      logger.info("Triggered workout completion worker", {
-        jobId: event.params.jobId,
-        operation: operation.name,
-      });
-    } catch (err) {
-      logger.error("Failed to trigger workout completion worker", {
-        jobId: event.params.jobId,
-        error: err.message,
-      });
-      // Job stays in 'pending' — worker will pick it up on next scheduled run
-    }
-  }
-);
+```bash
+gcloud tasks queues create workout-completion \
+  --location=us-central1 \
+  --max-dispatches-per-second=5 \
+  --max-concurrent-dispatches=5 \
+  --max-attempts=5 \
+  --min-backoff=10s \
+  --max-backoff=300s
 ```
 
-Note: The Cloud Run Job also runs on a 15-minute schedule as a fallback.
+- [ ] **Step 12: Grant IAM permissions**
 
-- [ ] **Step 7: Update index.js**
+```bash
+# Firebase Functions SA needs to enqueue tasks
+gcloud projects add-iam-policy-binding myon-53d85 \
+  --member="serviceAccount:myon-53d85@appspot.gserviceaccount.com" \
+  --role="roles/cloudtasks.enqueuer"
+```
+
+- [ ] **Step 13: Update index.js**
 
 Remove:
-- `onWorkoutCreatedUpdateRoutineCursor` export (trigger deleted)
-- The massive `onWorkoutCompleted` and `onWorkoutCreatedWithEnd` inline logic (replaced by enqueue)
+- `onWorkoutCompleted` export (trigger replaced by Cloud Tasks)
+- `onWorkoutCreatedWithEnd` export (trigger replaced by Cloud Tasks)
+- `onWorkoutCreatedUpdateRoutineCursor` export (absorbed into processWorkoutCompletion)
 
 Add:
-- `onWorkoutCompletionJobCreated` export
+- `processWorkoutCompletionTask` export
+- `workoutCompletionWatchdog` export
 
-- [ ] **Step 8: Run tests**
+- [ ] **Step 14: Run tests**
 
 ```bash
 cd firebase_functions/functions && npm test
 ```
 
-- [ ] **Step 9: Deploy and verify**
-- [ ] **Step 10: Commit**
+- [ ] **Step 15: Deploy and verify**
+
+Deploy Firebase Functions, then test:
+1. Complete a workout via iOS → verify Cloud Task fires → verify all 11 collections written
+2. Import a workout via CSV → verify Cloud Task fires
+3. Verify watchdog runs without errors
+
+- [ ] **Step 16: Commit**
 
 ```bash
-git add firebase_functions/functions/triggers/ firebase_functions/functions/index.js
-git commit -m "feat: Phase 5 — replace trigger cascade with job queue
+git add firebase_functions/functions/training/process-workout-completion.js \
+       firebase_functions/functions/triggers/workout-completion-task.js \
+       firebase_functions/functions/triggers/workout-completion-watchdog.js \
+       firebase_functions/functions/utils/enqueue-workout-task.js \
+       firebase_functions/functions/triggers/weekly-analytics.js \
+       firebase_functions/functions/workouts/upsert-workout.js \
+       firebase_functions/functions/workouts/complete-active-workout.js \
+       firebase_functions/functions/index.js \
+       firebase_functions/functions/package.json
+git commit -m "feat: Phase 5 — replace trigger cascade with Cloud Tasks queue
 
-Both onWorkoutCompleted and onWorkoutCreatedWithEnd now enqueue a single
-job. Routine cursor advance (workout-routine-cursor.js) absorbed into worker.
-No partial state, no contention, no race conditions."
+AD-1: Workout completion stays in JavaScript. The 2,960 lines of battle-tested
+JS across 6 files (set-facts-generator, analytics-writes, muscle-taxonomy,
+caps, weekly-analytics, workout-routine-cursor) now run via Cloud Tasks
+instead of Firestore triggers.
+
+Benefits:
+- Reliable: Cloud Tasks retries on failure (triggers silently drop)
+- Observable: task success/failure visible in Cloud Console
+- Idempotent: deduplication by workout ID in task name + watermark
+- Atomic: single processWorkoutCompletion() callable, no race conditions
+- Watchdog: daily scheduled function catches any missed completions
+
+Removed: onWorkoutCompleted, onWorkoutCreatedWithEnd triggers,
+workout-routine-cursor.js (absorbed into processor)."
 ```
 
 ---
@@ -5164,14 +5411,18 @@ The moved file needs to call `applyProgression` directly via HTTP (using `httpx`
 # Replace: from app.skills.progression_skills import apply_progression
 # With: direct httpx call to applyProgression endpoint
 import httpx
-FUNCTIONS_URL = os.getenv("FIREBASE_FUNCTIONS_URL", "https://us-central1-myon-53d85.cloudfunctions.net")
+FUNCTIONS_URL = os.getenv("MYON_FUNCTIONS_BASE_URL", "https://us-central1-myon-53d85.cloudfunctions.net")
 MYON_API_KEY = os.getenv("MYON_API_KEY", "")
 
 async def apply_progression(user_id, changes, **kwargs):
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.post(
             f"{FUNCTIONS_URL}/applyProgression",
-            json={"userId": user_id, **kwargs},
+            json={
+                "userId": user_id,
+                "changes": changes,
+                **kwargs,
+            },
             headers={"x-api-key": MYON_API_KEY},
         )
         return resp.json()
@@ -5215,7 +5466,7 @@ Read `adk_agent/training_analyst/app/analyzers/post_workout.py` and `weekly_revi
 
 - [ ] **Step 2: Add plateau_detector.py**
 
-New analyzer. Reads `users/{uid}/exercise_series` for the last 4 weeks. An exercise is "plateaued" if its best e1RM has not increased for 3+ consecutive weeks with at least 2 data points per week.
+New analyzer. Reads `users/{uid}/analytics_series_exercise` for the last 4 weeks. An exercise is "plateaued" if its best e1RM has not increased for 3+ consecutive weeks with at least 2 data points per week.
 
 ```python
 # app/analyzers/plateau_detector.py
@@ -5223,7 +5474,7 @@ New analyzer. Reads `users/{uid}/exercise_series` for the last 4 weeks. An exerc
 
 async def detect_plateaus(db, user_id: str) -> list[dict]:
     """Returns list of plateaued exercises with suggested interventions."""
-    # Read exercise_series for last 4 weeks
+    # Read analytics_series_exercise for last 4 weeks
     # Group by exercise_name, check if best_e1rm is flat/declining
     # Return: [{ exercise_name, weeks_stalled, last_e1rm, suggested_action }]
     # suggested_action is one of: "increase_volume", "change_rep_range", "add_variation"
@@ -5233,7 +5484,7 @@ Output written to: `users/{uid}/analysis_insights/{autoId}` with `section: "plat
 
 - [ ] **Step 3: Add volume_optimizer.py**
 
-New analyzer. Reads `users/{uid}/muscle_group_series` for the last 2 weeks and compares against known MEV/MRV ranges per muscle group.
+New analyzer. Reads `users/{uid}/analytics_series_muscle_group` for the last 2 weeks and compares against known MEV/MRV ranges per muscle group.
 
 ```python
 # app/analyzers/volume_optimizer.py
@@ -5249,7 +5500,7 @@ VOLUME_TARGETS = {
 
 async def analyze_volume(db, user_id: str) -> dict:
     """Returns per-muscle actual vs target with surplus/deficit flags."""
-    # Read muscle_group_series for last 2 weeks, average weekly sets
+    # Read analytics_series_muscle_group for last 2 weeks, average weekly sets
     # Compare against VOLUME_TARGETS
     # Return: { muscle_group: { actual_sets, mev, mrv, status: "deficit"|"optimal"|"surplus" } }
 ```
@@ -5389,7 +5640,18 @@ Dropped types (no longer emitted by the new agent service):
 - `pipeline` — ADK pipeline state
 - `card` — replaced by `artifact`
 
-Update event handlers in `CanvasViewModel` (now `ConversationViewModel`) and `DirectStreamingService` to handle the new types.
+Update `handleIncomingStreamEvent` in `ConversationViewModel` for new event names:
+- `toolRunning` handling → `toolStart`
+- `toolComplete` handling → `toolEnd`
+- `clarificationRequest` handling → `clarification`
+
+- [ ] **Step 4b: Update or remove ThinkingProcessState**
+
+`ThinkingProcessState` is currently driven by `pipeline` events (which are no longer emitted). Replace with a simpler progress indicator based on `tool_start`/`tool_end` events. If the UI shows a "thinking" animation, drive it from `tool_start` (start) and `tool_end` (stop) events instead.
+
+- [ ] **Step 4c: Switch workspace_entries → messages listener**
+
+In `ConversationViewModel`, replace the Firestore listener on `workspace_entries` subcollection with a listener on `messages` subcollection. The `messages` collection uses `type` field (values: `user_prompt`, `agent_response`, `artifact`) and `created_at` instead of `timestamp`.
 
 - [ ] **Step 5: Remove DirectStreamingService backward compat**
 
@@ -5397,6 +5659,22 @@ In `DirectStreamingService.swift`, remove:
 - `canvasId` field from request body (only send `conversationId`)
 - Any `sessionId` parameter
 - The `getServiceToken` call site
+
+- [ ] **Step 5b: Remove no-op stub callers from iOS**
+
+Remove calls to these endpoints (they were kept as no-op stubs in Phase 3c, now deleted from backend):
+- `CanvasService.openCanvas()` → remove caller
+- `CanvasService.bootstrapCanvas()` → remove caller
+- `CanvasService.preWarmSession()` → remove caller
+- `CanvasService.initializeSession()` → remove caller
+
+- [ ] **Step 5c: Remove no-op stubs and EVENT_COMPAT from backend**
+
+In `firebase_functions/functions/index.js`:
+- Remove `openCanvas`, `bootstrapCanvas`, `initializeSession`, `preWarmSession` no-op stub exports
+
+In `firebase_functions/functions/strengthos/stream-agent-normalized.js`:
+- Remove the `EVENT_COMPAT` translation table (agent events now match iOS expectations directly)
 
 - [ ] **Step 6: Split FocusModeWorkoutScreen.swift** (~1904 lines)
 
@@ -5433,14 +5711,22 @@ xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pr
 
 ```bash
 git add Povver/ firestore.rules
-git commit -m "refactor(ios): Phase 7 — canvases→conversations rename, 9-event SSE, split files
+git commit -m "refactor: Phase 7 — canvases→conversations, 9-event SSE, full cleanup
 
-- Renamed 'canvases' to 'conversations' in all Firestore collection paths (5 files)
+iOS:
+- Renamed 'canvases' to 'conversations' in all Firestore paths (5 files)
 - Renamed 6 Canvas* classes to Conversation* classes
 - Updated StreamEvent.swift: 15 types → 9 (dropped ADK legacy types)
+- Replaced ThinkingProcessState with tool_start/tool_end progress
+- Switched workspace_entries listener → messages listener
 - Removed DirectStreamingService backward compat (canvasId, sessionId)
+- Removed no-op stub callers (openCanvas, bootstrapCanvas, etc.)
 - Split FocusModeWorkoutScreen (1904 lines → 4 focused files)
-- Updated Firestore security rules and ARCHITECTURE.md files"
+
+Backend:
+- Removed no-op stubs from index.js (openCanvas, bootstrapCanvas, etc.)
+- Removed EVENT_COMPAT translation table from SSE proxy
+- Updated Firestore security rules: canvases → conversations"
 ```
 
 ---
@@ -5473,7 +5759,20 @@ Remove session pre-warming, update streaming service docs.
 
 - [ ] **Step 5: Update FIRESTORE_SCHEMA.md**
 
-Add: `agent_memory/{auto-id}`, `mcp_api_keys/{key_hash}`, `workout_completion_jobs/{auto-id}`, conversation `session_vars` and `summary` fields, `conversations/{id}/messages`, `conversations/{id}/artifacts`. Mark as removed: `agent_sessions`, `canvases` (renamed to `conversations`). Document that the canonical Firestore collection name is `conversations` (not `canvases`).
+Add new collections and fields:
+- `agent_memory/{auto-id}` — fields: `content`, `category`, `active`, `created_at`, `source_conversation_id`, `retired_at`, `retire_reason`
+- `mcp_api_keys/{key_hash}` — fields: `user_id`, `name`, `created_at`, `last_used_at`, `scopes`
+- Conversation fields: `summary`, `completed_at`, `session_vars`, `last_message_at`
+- `conversations/{id}/messages` — fields: `type` (user_prompt/agent_response/artifact), `content`, `created_at`
+- `conversations/{id}/artifacts` — fields: `artifact_type`, `artifact_content`, `actions`, `status`, `created_at`
+- Composite index: `agent_memory(active ASC, created_at DESC)`
+
+Mark as removed:
+- `agent_sessions` — replaced by stateless agent service
+- `canvases` — renamed to `conversations`
+- `workout_completion_jobs` — replaced by Cloud Tasks queue (AD-1)
+
+Document that the canonical Firestore collection name is `conversations` (not `canvases`).
 
 - [ ] **Step 5b: Update CLAUDE.md**
 
