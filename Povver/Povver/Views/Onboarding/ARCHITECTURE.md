@@ -9,7 +9,7 @@ First-run onboarding flow: Welcome → Auth → Training Profile → Equipment �
 | File | Role |
 |------|------|
 | `OnboardingView.swift` | Root coordinator — ZStack with atmospheric layers + screen switching |
-| `OnboardingViewModel.swift` | `@MainActor` state management — flow state, selections, persistence, trial |
+| `OnboardingViewModel.swift` | `@MainActor` state management — flow state, selections, persistence, trial, AI routine generation |
 | `WelcomeScreen.swift` | Brand statement with wordmark and entrance animations |
 | `OnboardingAuthScreen.swift` | Apple/Google/Email auth wrapping existing `AuthService` |
 | `TrainingProfileScreen.swift` | Experience (3 cards) + frequency (5 circles) on one screen |
@@ -35,7 +35,7 @@ OnboardingViewModel.Step enum:
 1. User selections stored in `OnboardingViewModel` published properties
 2. On equipment selection → `saveUserAttributes()` writes `UserAttributes` to Firestore
 3. On "Start Free Trial" → `startFreeTrial()` triggers StoreKit purchase via `SubscriptionService`
-4. On trial success → `triggerRoutineGeneration()` calls agent (currently mock data, TODO: wire to real agent)
+4. On trial success → `triggerRoutineGeneration()` opens a canvas via `CanvasService`, streams a hyper-specific prompt via `DirectStreamingService`, and parses the `routine_summary` artifact. Falls back to static data on failure. The generation task is stored for cancellation on view disappear.
 5. On completion → `completeOnboarding()` sets `hasCompletedOnboarding` UserDefaults flag
 6. `onComplete(adjustWithCoach: Bool)` callback transitions `RootView` from `.onboarding` to `.main`
 
@@ -47,6 +47,8 @@ OnboardingViewModel.Step enum:
 - **AuthService.shared**: SSO sign-in with confirmation dialog for new accounts
 - **SubscriptionService.shared**: StoreKit 2 product loading and purchase
 - **UserRepository.shared**: Firestore persistence of `UserAttributes`
+- **CanvasService**: Opens canvas conversations for agent routine generation
+- **DirectStreamingService.shared**: SSE streaming for agent queries (60s timeout)
 - **AnalyticsService.shared**: Onboarding funnel events (`onboardingStepViewed`, `onboardingProfileCompleted`, etc.)
 
 ## Visual Architecture

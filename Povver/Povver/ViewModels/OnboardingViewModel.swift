@@ -85,6 +85,10 @@ final class OnboardingViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Generation Task (for cancellation)
+
+    private var generationTask: Task<Void, Never>?
+
     // MARK: - Methods
 
     /// Advances to the next step with animation.
@@ -213,6 +217,126 @@ final class OnboardingViewModel: ObservableObject {
         AnalyticsService.shared.onboardingTrialStarted()
         isLoadingTrial = false
         return true
+    }
+
+    /// Triggers AI routine generation via the shell agent.
+    /// Opens a canvas, streams a hyper-specific prompt, and parses the routine_summary artifact.
+    /// Falls back to fallback data if generation fails.
+    func triggerRoutineGeneration() {
+        isGenerating = true
+        generationTask = Task {
+            guard let uid = AuthService.shared.currentUser?.uid else {
+                isGenerating = false
+                return
+            }
+
+            let level = fitnessLevel ?? "intermediate"
+            let freq = selectedFrequency ?? 4
+            let equipment = equipmentPreference ?? "full_gym"
+
+            // Hyper-specific prompt: gives the agent all context upfront so it can
+            // call propose_routine directly without follow-up questions.
+            let prompt = """
+            New user onboarding. Create a training routine with these exact parameters:
+            - Experience level: \(level)
+            - Training frequency: \(freq) days per week
+            - Equipment access: \(equipment)
+            - Goal: hypertrophy (muscle building)
+
+            Use propose_routine to build it. Pick an appropriate split for the frequency \
+            (\(freq <= 3 ? "full body" : freq <= 4 ? "upper/lower" : "push/pull/legs or upper/lower")). \
+            Choose exercises from the catalog appropriate for the equipment level. \
+            Set reps in the 8-12 range, RIR 2-3 for \(level) level. \
+            Do not ask any questions — generate the routine immediately.
+            """
+
+            do {
+                let canvasService = CanvasService()
+                let (canvasId, sessionId) = try await canvasService.openCanvas(
+                    userId: uid,
+                    purpose: "onboarding"
+                )
+
+                let correlationId = UUID().uuidString
+
+                var foundArtifact = false
+                for try await event in DirectStreamingService.shared.streamQuery(
+                    userId: uid,
+                    conversationId: canvasId,
+                    message: prompt,
+                    correlationId: correlationId,
+                    sessionId: sessionId,
+                    timeoutSeconds: 60
+                ) {
+                    // Check for cancellation between events
+                    if Task.isCancelled { return }
+
+                    if event.eventType == .artifact {
+                        let artifactType = event.content?["artifact_type"]?.value as? String
+                        guard artifactType == "routine_summary" else { continue }
+
+                        let artifactContent = event.content?["artifact_content"]?.value as? [String: Any] ?? [:]
+
+                        let routineName = artifactContent["name"] as? String ?? "Your Program"
+                        let workoutsRaw = artifactContent["workouts"] as? [[String: Any]] ?? []
+
+                        let days: [(day: Int, title: String, exerciseCount: Int, duration: Int)] = workoutsRaw.enumerated().map { index, workout in
+                            let title = workout["title"] as? String ?? "Day \(index + 1)"
+                            let exerciseCount = workout["exercise_count"] as? Int
+                                ?? (workout["exercises"] as? [[String: Any]])?.count
+                                ?? (workout["blocks"] as? [[String: Any]])?.count
+                                ?? 5
+                            let duration = workout["estimated_duration"] as? Int ?? 45
+                            return (day: index + 1, title: title, exerciseCount: exerciseCount, duration: duration)
+                        }
+
+                        generatedRoutineName = routineName
+                        generatedDays = days
+                        generationComplete = true
+                        isGenerating = false
+
+                        AnalyticsService.shared.onboardingStepViewed(step: "routine_generated")
+                        foundArtifact = true
+                    }
+
+                    if event.eventType == .done && foundArtifact {
+                        break
+                    }
+                }
+
+                if !foundArtifact {
+                    AppLogger.shared.error(.app, "Onboarding routine generation: no artifact received")
+                    applyFallbackRoutine(freq: freq)
+                }
+            } catch {
+                if !Task.isCancelled {
+                    AppLogger.shared.error(.app, "Onboarding routine generation failed", error)
+                    applyFallbackRoutine(freq: freq)
+                }
+            }
+        }
+    }
+
+    /// Cancels any in-progress routine generation.
+    func cancelGeneration() {
+        generationTask?.cancel()
+        generationTask = nil
+    }
+
+    /// Fallback routine data when agent generation fails.
+    private func applyFallbackRoutine(freq: Int) {
+        generatedRoutineName = freq <= 3 ? "Full Body \(freq)x" : "Upper / Lower"
+        generatedDays = (1...freq).map { day in
+            let title: String
+            if freq <= 3 {
+                title = "Full Body \(["A", "B", "C"][min(day - 1, 2)])"
+            } else {
+                title = day % 2 == 1 ? "Upper" : "Lower"
+            }
+            return (day: day, title: title, exerciseCount: 5, duration: 45)
+        }
+        generationComplete = true
+        isGenerating = false
     }
 
     /// Marks onboarding as complete and logs analytics.

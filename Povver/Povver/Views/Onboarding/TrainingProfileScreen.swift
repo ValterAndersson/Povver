@@ -42,7 +42,7 @@ struct OnboardingSelectionCard: View {
             .padding(.horizontal, Space.md)
             .background(
                 isSelected
-                    ? Color(hex: "22C59A").opacity(0.06)
+                    ? Color.accent.opacity(0.06)
                     : Color(hex: "111820")
             )
             .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))

@@ -18,8 +18,8 @@ struct RoutineGenerationScreen: View {
                 revealPhase
             }
         }
-        .onAppear {
-            startGeneration()
+        .task {
+            await startGeneration()
         }
     }
 
@@ -178,58 +178,61 @@ struct RoutineGenerationScreen: View {
 
     // MARK: - Generation Logic
 
-    private func startGeneration() {
-        showDayCards = Array(repeating: false, count: vm.generatedDays.count)
+    private func startGeneration() async {
+        await MainActor.run {
+            showDayCards = Array(repeating: false, count: vm.generatedDays.count)
+        }
 
-        Task {
-            let startTime = Date()
+        let startTime = Date()
 
-            // Poll for generation completion (30s timeout)
-            var elapsed: TimeInterval = 0
-            while !vm.generationComplete && elapsed < 30 {
-                try? await Task.sleep(nanoseconds: 200_000_000) // 200ms
-                elapsed = Date().timeIntervalSince(startTime)
-            }
-
-            // Ensure minimum 3s in phase 1
-            let minPhase1Duration = 3.0
-            if elapsed < minPhase1Duration {
-                try? await Task.sleep(nanoseconds: UInt64((minPhase1Duration - elapsed) * 1_000_000_000))
-            }
-
-            // Transition to phase 2
-            await MainActor.run {
-                withAnimation(.easeOut(duration: 0.4)) {
-                    phase = 2
-                }
-            }
-
-            // Fire success haptic
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-
-            // Staggered reveals
-            try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
-            await MainActor.run {
-                withAnimation(.easeOut(duration: 0.3)) {
-                    showTitle = true
-                }
-            }
-
+        // Poll for generation completion (60s timeout, matching server timeoutSeconds)
+        var elapsed: TimeInterval = 0
+        while !vm.generationComplete && elapsed < 60 {
             try? await Task.sleep(nanoseconds: 200_000_000) // 200ms
-            await MainActor.run {
-                withAnimation(.easeOut(duration: 0.4)) {
-                    showRoutineName = true
-                }
-            }
+            elapsed = Date().timeIntervalSince(startTime)
+        }
 
-            // Stagger day cards (200ms each)
-            for index in vm.generatedDays.indices {
-                try? await Task.sleep(nanoseconds: 200_000_000)
-                await MainActor.run {
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                        if index < showDayCards.count {
-                            showDayCards[index] = true
-                        }
+        // Ensure minimum 3s in phase 1
+        let minPhase1Duration = 3.0
+        if elapsed < minPhase1Duration {
+            try? await Task.sleep(nanoseconds: UInt64((minPhase1Duration - elapsed) * 1_000_000_000))
+        }
+
+        // Transition to phase 2
+        await MainActor.run {
+            // Re-sync showDayCards with generated data (may have arrived during poll)
+            showDayCards = Array(repeating: false, count: vm.generatedDays.count)
+
+            withAnimation(.easeOut(duration: 0.4)) {
+                phase = 2
+            }
+        }
+
+        // Fire success haptic
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+
+        // Staggered reveals
+        try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
+        await MainActor.run {
+            withAnimation(.easeOut(duration: 0.3)) {
+                showTitle = true
+            }
+        }
+
+        try? await Task.sleep(nanoseconds: 200_000_000) // 200ms
+        await MainActor.run {
+            withAnimation(.easeOut(duration: 0.4)) {
+                showRoutineName = true
+            }
+        }
+
+        // Stagger day cards (200ms each)
+        for index in vm.generatedDays.indices {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            await MainActor.run {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                    if index < showDayCards.count {
+                        showDayCards[index] = true
                     }
                 }
             }
