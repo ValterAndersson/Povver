@@ -73,7 +73,7 @@ Sheets & feedback
 
 Run through once on staging to validate E2E wiring:
 - Start: app boots, login, navigate to Canvas tab (purpose `ad_hoc`).
-- Bootstrap: `CanvasViewModel.start(userId,purpose)` calls `bootstrapCanvas` and subscribes.
+- Bootstrap: `ConversationViewModel.start(userId,purpose)` calls `bootstrapCanvas` and subscribes.
 - Propose: after sending an instruction (when wired), cards appear via Firestore; Up‑Next shows top 20 by priority.
 - Accept: tap Accept/Reject on a card → `applyAction` with `expected_version` and idempotency; retry once on `STALE_VERSION`.
 - Group actions: Accept all/Reject all sends `payload.group_id`.

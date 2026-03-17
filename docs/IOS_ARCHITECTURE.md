@@ -91,7 +91,7 @@ Welcome → Auth → Training Profile → Equipment → Trial → Routine Genera
 - **OnboardingView** is a ZStack with persistent atmospheric layers (glow, grain texture) and screen content that transitions
 - **OnboardingViewModel** (`@StateObject`) holds flow state, user selections, and methods for saving attributes, starting trial, and completing onboarding
 - `hasCompletedOnboarding` UserDefaults flag prevents re-showing on subsequent launches
-- Post-onboarding paths: "Start training" → Coach tab, "Adjust with coach" → Coach tab with auto-navigation to CanvasScreen, "Skip" → Coach tab (no trial)
+- Post-onboarding paths: "Start training" → Coach tab, "Adjust with coach" → Coach tab with auto-navigation to ConversationScreen, "Skip" → Coach tab (no trial)
 - See `Povver/Povver/Views/Onboarding/ARCHITECTURE.md` for module details
 
 ### Tab Structure (`MainTabsView.swift`)
@@ -110,10 +110,10 @@ Welcome → Auth → Training Profile → Equipment → Trial → Routine Genera
 
 Navigation entry points use `conversationId` instead of `canvasId`:
 
-- `ChatHomeView` navigates to `CanvasScreen` with `entryContext` (contains `conversationId`)
-- `CoachTabView` navigates to `CanvasScreen` with `entryContext`
-- `CanvasScreen` still exists (rename deferred to avoid large refactor)
-- `CanvasViewModel` internally uses both `conversationId` and `canvasId` during migration phase
+- `ChatHomeView` navigates to `ConversationScreen` with `entryContext` (contains `conversationId`)
+- `CoachTabView` navigates to `ConversationScreen` with `entryContext`
+- `ConversationScreen` still exists (rename deferred to avoid large refactor)
+- `ConversationViewModel` internally uses both `conversationId` and `canvasId` during migration phase
 
 ---
 
@@ -122,15 +122,15 @@ Navigation entry points use `conversationId` instead of `canvasId`:
 ```
 ┌──────────────────────────────────────────────────────────┐
 │                        VIEWS                             │
-│   SwiftUI Views (CanvasScreen, RoutinesListView, etc.)   │
+│   SwiftUI Views (ConversationScreen, RoutinesListView, etc.)   │
 ├──────────────────────────────────────────────────────────┤
 │                      VIEWMODELS                          │
 │   Observable state + business logic                      │
-│   (CanvasViewModel, RoutinesViewModel, etc.)             │
+│   (ConversationViewModel, RoutinesViewModel, etc.)             │
 ├──────────────────────────────────────────────────────────┤
 │                       SERVICES                           │
 │   Singleton managers for cross-cutting concerns          │
-│   (AuthService, CanvasService, ChatService, etc.)        │
+│   (AuthService, ConversationService, ChatService, etc.)        │
 ├──────────────────────────────────────────────────────────┤
 │                     REPOSITORIES                         │
 │   Data access abstraction over Firestore                 │
@@ -152,7 +152,7 @@ Navigation entry points use `conversationId` instead of `canvasId`:
 |---------|------|---------|
 | `AuthService` | Singleton | Firebase Auth management |
 | `SessionManager` | Singleton | User session state |
-| `CanvasService` | Class | Canvas CRUD operations via Cloud Functions |
+| `ConversationService` | Class | Canvas CRUD operations via Cloud Functions |
 | `ChatService` | Singleton | Chat session management + streaming |
 | `DirectStreamingService` | Singleton | SSE streaming to Agent Engine |
 | `CloudFunctionService` | Class | Firebase Functions HTTP client |
@@ -214,7 +214,7 @@ Navigation entry points use `conversationId` instead of `canvasId`:
 - Parameter `conversationId` passed to backend
 - SSE contract uses 9 event types: `thinking`, `thought`, `tool_start`, `tool_end`, `message_start`, `text`, `artifact`, `message_end`, `error`
 
-#### `CanvasService` (Partially DEPRECATED)
+#### `ConversationService` (Partially DEPRECATED)
 - ~~`bootstrapCanvas(userId, purpose)`~~ - (REMOVED — canvas system replaced by conversations)
 - ~~`openCanvas(userId, purpose)`~~ - (REMOVED — no session init needed)
 - ~~`initializeSession(canvasId, purpose)`~~ - (REMOVED — sessions eliminated)
@@ -310,12 +310,12 @@ func withRetry<T>(
 
 | ViewModel | Views | Responsibilities |
 |-----------|-------|------------------|
-| `CanvasViewModel` | `CanvasScreen`, card views | Canvas state, SSE artifact handling, card lifecycle |
+| `ConversationViewModel` | `ConversationScreen`, card views | Canvas state, SSE artifact handling, card lifecycle |
 | `RoutinesViewModel` | `RoutinesListView`, detail views | Routine CRUD, active routine management |
 | `RecommendationsViewModel` | `ActivityView`, `MoreView` (badge) | Pending/recent recommendations, accept/reject actions, premium-gated listener |
 | `ExercisesViewModel` | Exercise search | Exercise catalog fetching |
 
-### `CanvasViewModel` (Primary)
+### `ConversationViewModel` (Primary)
 
 **State:**
 - `cards: [CanvasCardModel]` - All cards (built from SSE artifact events)
@@ -349,7 +349,7 @@ func withRetry<T>(
 
 | Screen | File | Purpose |
 |--------|------|---------|
-| `CanvasScreen` | `Views/CanvasScreen.swift` | Main AI workspace |
+| `ConversationScreen` | `Views/ConversationScreen.swift` | Main AI workspace |
 | `ChatHomeEntry` | `Views/ChatHomeEntry.swift` | Chat session list |
 | `ChatHomeView` | `Views/ChatHomeView.swift` | Chat conversation |
 | `RoutinesListView` | `UI/Routines/RoutinesListView.swift` | Routine management |
@@ -367,7 +367,7 @@ func withRetry<T>(
 
 | View | Purpose |
 |------|---------|
-| `CanvasGridView` | Masonry grid layout for cards |
+| `ConversationGridView` | Masonry grid layout for cards |
 | `CardContainer` | Universal card wrapper with header/actions |
 | `CardHeader` | Title, subtitle, status badge |
 | `ThinkingBubble` | Gemini-style collapsible thinking process with live progress |
@@ -415,8 +415,8 @@ Session pre-warming and initialization have been eliminated. The agent service i
 
 **Removed components**:
 - `SessionPreWarmer.swift` (REMOVED)
-- `CanvasService.initializeSession()` (REMOVED)
-- `CanvasService.openCanvas()` (REMOVED)
+- `ConversationService.initializeSession()` (REMOVED)
+- `ConversationService.openCanvas()` (REMOVED)
 
 ### Card Actions
 
@@ -437,7 +437,7 @@ Cards can define actions in their `actions` and `menuItems` arrays:
 Card lifecycle actions (accept, dismiss, save_routine, start_workout) now use `AgentsApi.artifactAction()`:
 
 ```
-User taps Accept/Dismiss → CanvasViewModel.acceptCard() / dismissCard()
+User taps Accept/Dismiss → ConversationViewModel.acceptCard() / dismissCard()
         │
         ▼
 AgentsApi.artifactAction(artifactId: cardId, action: "accept" | "dismiss" | ...)
@@ -715,6 +715,7 @@ Standalone sheet from login screen. Sends Firebase password reset email via `Aut
 | `Views/Settings/ProfileEditView.swift` | Profile editing (account + body metrics) |
 | `Views/Settings/PreferencesView.swift` | Timezone, week start preferences |
 | `Views/Settings/SecurityView.swift` | Security hub (linked accounts, password, delete) |
+| `Views/Settings/ConnectedAppsView.swift` | MCP API key management (premium-gated) |
 | `Views/Settings/ReauthenticationView.swift` | Multi-provider reauthentication sheet |
 | `Views/Settings/EmailChangeView.swift` | Email change with verification |
 | `Views/Settings/PasswordChangeView.swift` | Change or set password |
@@ -737,13 +738,13 @@ The Canvas system has been migrated from Firestore-based card storage to SSE art
 | Card source | Firestore `cards` subcollection | SSE artifact events |
 | Card delivery | Firestore snapshot listeners | `StreamEvent.EventType.artifact` |
 | Card conversion | Direct Firestore decode | `buildCardFromArtifact()` JSON round-trip |
-| Card actions | `CanvasService.applyAction()` | `AgentsApi.artifactAction()` |
+| Card actions | `ConversationService.applyAction()` | `AgentsApi.artifactAction()` |
 | Bootstrap | `openCanvas()` + Firestore listeners | `openCanvas()` + minimal listeners + SSE |
 | Navigation param | `canvasId` | `conversationId` (with backward-compat `canvasId`) |
 
 ### Deleted Files
 
-- `Repositories/CanvasRepository.swift` - No longer needed, cards from SSE
+- `Repositories/ConversationRepository.swift` - No longer needed, cards from SSE
 - `Services/PendingAgentInvoke.swift` - Dead code, `.take()` never called
 
 ### Renamed Parameters
@@ -751,23 +752,17 @@ The Canvas system has been migrated from Firestore-based card storage to SSE art
 - `DirectStreamingService.stream()`: `canvasId` → `conversationId`
 - POST body includes both `conversationId` and `canvasId` for backward compatibility during backend migration
 
-### Deferred Renames
+### Completed Renames
 
-The following names remain unchanged to avoid large refactors:
+The Canvas → Conversation rename is complete:
 
-- `CanvasViewModel` - Still named "Canvas" but handles artifacts from conversations
-- `CanvasScreen` - Still named "Canvas" but navigates with `conversationId`
-- `canvasId` field in ViewModel - Used internally alongside `conversationId`
-
-### Migration Checklist
-
-When fully migrated to conversations:
-
-1. Rename `CanvasViewModel` to `ConversationViewModel`
-2. Rename `CanvasScreen` to `ConversationScreen`
-3. Remove `canvasId` parameter from `DirectStreamingService` (keep only `conversationId`)
-4. Update navigation paths to use `conversationId` consistently
-5. Remove Firestore schema references to `canvases/{canvasId}/cards`
+- `CanvasViewModel` → `ConversationViewModel`
+- `CanvasScreen` → `ConversationScreen`
+- `CanvasGridView` → `ConversationGridView`
+- `CanvasService` → `ConversationService`
+- `CanvasRepository` → `ConversationRepository`
+- Navigation uses `conversationId` (with backward-compat `canvasId` support in backend)
+- Firestore schema migrated from `canvases` → `conversations`
 
 ---
 
@@ -820,7 +815,7 @@ Povver/Povver/
 │   ├── CacheManager.swift          # Memory/disk cache
 │   ├── CanvasActions.swift         # Action builders
 │   ├── CanvasDTOs.swift            # Canvas data types
-│   ├── CanvasService.swift         # Canvas API
+│   ├── ConversationService.swift         # Canvas API
 │   ├── ChatService.swift           # Chat management
 │   ├── CloudFunctionService.swift  # Firebase Functions
 │   ├── DebugLogger.swift           # Logging utilities
@@ -839,13 +834,13 @@ Povver/Povver/
 │   ├── TemplateManager.swift       # Template editing
 │   └── TimezoneManager.swift       # Timezone handling
 ├── ViewModels/
-│   ├── CanvasViewModel.swift       # Primary canvas VM
+│   ├── ConversationViewModel.swift       # Primary canvas VM
 │   ├── ExercisesViewModel.swift
 │   ├── RecommendationsViewModel.swift  # Recommendation state + accept/reject
 │   ├── RoutinesViewModel.swift
 │   └── WorkoutCoachViewModel.swift # Workout chat state
 ├── Views/
-│   ├── CanvasScreen.swift          # Main canvas screen
+│   ├── ConversationScreen.swift          # Main canvas screen
 │   ├── ChatHomeEntry.swift         # Chat entry
 │   ├── ChatHomeView.swift          # Chat conversation
 │   ├── ComponentGallery.swift      # Dev component gallery
@@ -875,7 +870,7 @@ Povver/Povver/
 └── UI/
     ├── Canvas/
     │   ├── Models.swift            # Canvas card models
-    │   ├── CanvasGridView.swift    # Masonry layout
+    │   ├── ConversationGridView.swift    # Masonry layout
     │   ├── CardContainer.swift     # Card wrapper
     │   ├── CardHeader.swift
     │   ├── ThinkingBubble.swift     # Agent thinking bubble

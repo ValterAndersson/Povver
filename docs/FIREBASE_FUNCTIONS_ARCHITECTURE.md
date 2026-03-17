@@ -535,6 +535,15 @@ firebase_functions/functions/
 │   ├── initialize-session.js   # (REMOVED)
 │   └── pre-warm-session.js     # (REMOVED)
 ├── shared/                     # Shared utilities
+│   ├── artifacts.js            # Artifact action dispatch (accept, dismiss, save)
+│   ├── errors.js               # Typed error classes (ValidationError, NotFoundError, etc.) with mapErrorToResponse
+│   ├── exercises.js            # Exercise search/resolve operations
+│   ├── planning-context.js     # 360° planning context assembly
+│   ├── progressions.js         # Progression application with audit trail
+│   ├── routines.js             # Routine CRUD operations
+│   ├── templates.js            # Template CRUD operations
+│   ├── training-queries.js     # Set queries, aggregation, analysis summaries
+│   ├── workouts.js             # Workout CRUD operations
 │   └── active_workout/
 │       └── reorder_sets_core.js
 ├── strengthos/                 # Agent streaming
