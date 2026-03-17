@@ -1,20 +1,20 @@
 const { onRequest } = require('firebase-functions/v2/https');
 const { requireFlexibleAuth } = require('../auth/middleware');
-const FirestoreHelper = require('../utils/firestore-helper');
-const { ok, fail } = require('../utils/response');
 const admin = require('firebase-admin');
 const crypto = require('crypto');
+const { ok, fail } = require('../utils/response');
+const { searchExercises } = require('../shared/exercises');
 
 if (!admin.apps.length) {
   admin.initializeApp();
 }
 
-const db = new FirestoreHelper();
 const firestore = admin.firestore();
 
 // ============================================================================
 // EXERCISE CACHE (3-day TTL)
-// Memory cache for hot path, Firestore cache for persistence
+// Memory cache for hot path, Firestore cache for persistence.
+// Caching is a handler-level concern — shared/exercises.js is cache-unaware.
 // ============================================================================
 const EXERCISE_CACHE_TTL_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
 const MEMORY_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes (function instance lifetime)
@@ -34,7 +34,7 @@ async function getCachedExercises(cacheKey) {
     console.log('[ExerciseCache] Memory hit');
     return { data: memoryCached.data, source: 'memory' };
   }
-  
+
   // Layer 2: Firestore cache
   try {
     const cacheDoc = await firestore.collection('cache').doc(`exercises_${cacheKey}`).get();
@@ -42,7 +42,7 @@ async function getCachedExercises(cacheKey) {
       const cached = cacheDoc.data();
       const cachedAt = cached.cachedAt?.toMillis?.() || 0;
       const age = Date.now() - cachedAt;
-      
+
       if (age < EXERCISE_CACHE_TTL_MS) {
         console.log('[ExerciseCache] Firestore hit', { age: Math.round(age / 1000) + 's' });
         // Warm memory cache
@@ -56,7 +56,7 @@ async function getCachedExercises(cacheKey) {
   } catch (e) {
     console.warn('[ExerciseCache] Firestore read error:', e.message);
   }
-  
+
   return null; // Cache miss
 }
 
@@ -66,7 +66,7 @@ async function setCachedExercises(cacheKey, data, queryParams) {
     data,
     expiresAt: Date.now() + MEMORY_CACHE_TTL_MS
   });
-  
+
   // Set Firestore cache (async, don't await)
   firestore.collection('cache').doc(`exercises_${cacheKey}`).set({
     data,
@@ -78,32 +78,23 @@ async function setCachedExercises(cacheKey, data, queryParams) {
 
 /**
  * Firebase Function: Search Exercises (with caching)
+ * Thin wrapper — business logic lives in shared/exercises.js.
+ * This handler adds a two-layer cache (memory + Firestore) around the core search.
  */
 async function searchExercisesHandler(req, res) {
   const {
     query,
-    category,
-    movementType,
-    split,
-    equipment,
-    muscleGroup,
-    primaryMuscle,
-    secondaryMuscle,
-    difficulty, // maps to metadata.level
-    planeOfMotion,
-    unilateral,
-    stimulusTag,
-    programmingUseCase,
-    limit,
-    includeMerged,
-    canonicalOnly,
-    skipCache, // Allow bypassing cache for admin/debug
-    fields // Output format: "minimal" (id+name), "lean" (id+name+category+equipment), "full" (all)
+    category, movementType, split, equipment,
+    muscleGroup, primaryMuscle, secondaryMuscle,
+    difficulty, planeOfMotion, unilateral,
+    stimulusTag, programmingUseCase,
+    limit, includeMerged, canonicalOnly,
+    skipCache,
+    fields,
   } = req.query || {};
 
   try {
     // Build cache key from query params
-    // version: bumped to invalidate cached results from old limited fetch path
     const cacheParams = {
       version: 'v2',
       query, category, movementType, split, equipment, muscleGroup,
@@ -112,7 +103,7 @@ async function searchExercisesHandler(req, res) {
       includeMerged, canonicalOnly
     };
     const cacheKey = getCacheKey(cacheParams);
-    
+
     // Check cache first (unless skipCache=true)
     if (String(skipCache).toLowerCase() !== 'true') {
       const cached = await getCachedExercises(cacheKey);
@@ -126,252 +117,43 @@ async function searchExercisesHandler(req, res) {
       }
     }
     console.log('[ExerciseCache] Cache miss, querying Firestore...');
-    
-    // IMPORTANT: Firestore only allows ONE array-contains/array-contains-any per query.
-    // We'll use the FIRST array filter in the Firestore query, and apply the rest in-memory.
-    const where = [];
-    const memoryFilters = []; // Filters to apply in-memory after Firestore query
-    let hasArrayFilter = false;
-    
-    // Helper to add array filter (only first one goes to Firestore)
-    function addArrayFilter(field, value, isArray = false) {
-      if (!hasArrayFilter) {
-        hasArrayFilter = true;
-        if (isArray) {
-          where.push({ field, operator: 'array-contains-any', value });
-        } else {
-          where.push({ field, operator: 'array-contains', value });
-        }
-      } else {
-        // Subsequent array filters go to memory filtering
-        memoryFilters.push({ field, value, isArray });
-      }
-    }
-    
-    if (muscleGroup) {
-      // Support comma-separated muscle groups (e.g., "chest,back,shoulders")
-      const muscleArr = String(muscleGroup).split(',').map(s => s.trim()).filter(Boolean).slice(0, 10);
-      if (muscleArr.length > 1) {
-        addArrayFilter('muscles.category', muscleArr, true); // array-contains-any
-      } else if (muscleArr.length === 1) {
-        addArrayFilter('muscles.category', muscleArr[0], false); // array-contains
-      }
-    }
-    if (equipment) {
-      const equipArr = String(equipment).split(',').map(s => s.trim()).filter(Boolean).slice(0, 10);
-      if (equipArr.length > 1) {
-        addArrayFilter('equipment', equipArr, true);
-      } else if (equipArr.length === 1) {
-        addArrayFilter('equipment', equipArr[0], false);
-      }
-    }
-    if (difficulty) {
-      // Per model: metadata.level (not an array field)
-      where.push({ field: 'metadata.level', operator: '==', value: difficulty });
-    }
-    if (category) {
-      where.push({ field: 'category', operator: '==', value: String(category) });
-    }
-    if (movementType) {
-      where.push({ field: 'movement.type', operator: '==', value: String(movementType) });
-    }
-    if (split) {
-      where.push({ field: 'movement.split', operator: '==', value: String(split) });
-    }
-    if (planeOfMotion) {
-      where.push({ field: 'metadata.plane_of_motion', operator: '==', value: String(planeOfMotion) });
-    }
-    if (unilateral !== undefined) {
-      const parsedBool = String(unilateral).toLowerCase();
-      if (parsedBool === 'true' || parsedBool === 'false') {
-        where.push({ field: 'metadata.unilateral', operator: '==', value: parsedBool === 'true' });
-      }
-    }
-    if (primaryMuscle) {
-      const arr = String(primaryMuscle).split(',').map(s => s.trim()).filter(Boolean).slice(0, 10);
-      if (arr.length > 1) {
-        addArrayFilter('muscles.primary', arr, true);
-      } else if (arr.length === 1) {
-        addArrayFilter('muscles.primary', arr[0], false);
-      }
-    }
-    if (secondaryMuscle) {
-      const arr = String(secondaryMuscle).split(',').map(s => s.trim()).filter(Boolean).slice(0, 10);
-      if (arr.length > 1) {
-        addArrayFilter('muscles.secondary', arr, true);
-      } else if (arr.length === 1) {
-        addArrayFilter('muscles.secondary', arr[0], false);
-      }
-    }
-    if (stimulusTag) {
-      const arr = String(stimulusTag).split(',').map(s => s.trim()).filter(Boolean).slice(0, 10);
-      if (arr.length > 1) {
-        addArrayFilter('stimulus_tags', arr, true);
-      } else if (arr.length === 1) {
-        addArrayFilter('stimulus_tags', arr[0], false);
-      }
-    }
-    if (programmingUseCase) {
-      const arr = String(programmingUseCase).split(',').map(s => s.trim()).filter(Boolean).slice(0, 10);
-      if (arr.length > 1) {
-        addArrayFilter('programming_use_cases', arr, true);
-      } else if (arr.length === 1) {
-        addArrayFilter('programming_use_cases', arr[0], false);
-      }
-    }
-    const parsedLimit = parseInt(limit) || 50;
-    const mergedFlag = String(includeMerged || '').toLowerCase() === 'true';
-    const canonicalFlag = mergedFlag ? false : (String(canonicalOnly || 'true').toLowerCase() !== 'false');
-    const queryParams = {};
-    if (where.length) queryParams.where = where;
-    queryParams.limit = parsedLimit;
 
-    let exercises;
-    if (query && !where.length) {
-      // Text-only search: fetch full catalog for client-side text matching
-      const fetchLimit = 2000; // Full catalog scan (~1000 exercises)
-      exercises = await db.getDocuments('exercises', {
-        orderBy: { field: 'name', direction: 'asc' },
-        limit: fetchLimit
-      });
-    } else if (query && where.length) {
-      // Combined filter+text: Firestore filters narrow by field, then client-side
-      // text matching runs on the result. Must fetch all filtered docs (not just
-      // parsedLimit) so text matching doesn't miss exercises whose doc IDs fall
-      // after the limit. The catalog is ~1000 items, so 2000 is a safe ceiling.
-      const filterParams = { ...queryParams, limit: 2000 };
-      exercises = await db.getDocuments('exercises', filterParams);
-    } else {
-      exercises = await db.getDocuments('exercises', queryParams);
-    }
-
-    // Text search if query provided
-    if (query) {
-      const searchTerm = query.toLowerCase();
-
-      // Strip common equipment prefixes for fuzzy matching.
-      // Catalog uses "Name (Equipment)" format (e.g., "Deadlift (Barbell)"),
-      // but queries often use "Equipment Name" format (e.g., "Barbell Deadlift").
-      const equipmentPrefixes = /^(barbell|dumbbell|cable|machine|ez[- ]?bar|trap[- ]?bar|band|bodyweight|smith[- ]?machine|kettlebell)\s+/i;
-      const strippedTerm = searchTerm.replace(equipmentPrefixes, '').trim();
-
-      // Split query into individual words for multi-word matching
-      const queryWords = searchTerm.split(/\s+/).filter(w => w.length > 1);
-
-      exercises = exercises.filter(ex => {
-        const name = (ex.name || '').toLowerCase();
-        const category = (ex.category || '').toLowerCase();
-        const movementType = (ex.movement?.type || '').toLowerCase();
-        const equipmentText = Array.isArray(ex.equipment) ? ex.equipment.join(' ').toLowerCase() : '';
-        const primary = Array.isArray(ex.muscles?.primary) ? ex.muscles.primary.map(m=>m.toLowerCase()) : [];
-        const secondary = Array.isArray(ex.muscles?.secondary) ? ex.muscles.secondary.map(m=>m.toLowerCase()) : [];
-        const groups = Array.isArray(ex.muscles?.category) ? ex.muscles.category.map(g=>g.toLowerCase()) : [];
-        const notes = Array.isArray(ex.execution_notes) ? ex.execution_notes.join(' ').toLowerCase() : '';
-        const mistakes = Array.isArray(ex.common_mistakes) ? ex.common_mistakes.join(' ').toLowerCase() : '';
-        const programming = Array.isArray(ex.programming_use_cases) ? ex.programming_use_cases.join(' ').toLowerCase() : '';
-        const tags = Array.isArray(ex.stimulus_tags) ? ex.stimulus_tags.map(t=>t.toLowerCase()) : [];
-
-        // Combine name + equipment for cross-field matching
-        // e.g., "Deadlift (Barbell)" + "barbell" → "deadlift (barbell) barbell"
-        const nameAndEquipment = name + ' ' + equipmentText;
-
-        return (
-          // Direct substring match (original behavior)
-          name.includes(searchTerm) ||
-          // Stripped term match (e.g., "barbell deadlift" → "deadlift")
-          (strippedTerm !== searchTerm && name.includes(strippedTerm)) ||
-          // All query words appear in name+equipment combo
-          // e.g., "barbell deadlift" → both "barbell" and "deadlift" in name+equipment
-          (queryWords.length > 1 && queryWords.every(w => nameAndEquipment.includes(w))) ||
-          // Standard field searches
-          category.includes(searchTerm) ||
-          movementType.includes(searchTerm) ||
-          equipmentText.includes(searchTerm) ||
-          primary.some(m => m.includes(searchTerm)) ||
-          secondary.some(m => m.includes(searchTerm)) ||
-          groups.some(g => g.includes(searchTerm)) ||
-          notes.includes(searchTerm) ||
-          mistakes.includes(searchTerm) ||
-          programming.includes(searchTerm) ||
-          tags.some(t => t.includes(searchTerm))
-        );
-      });
-    }
-
-    // Apply in-memory array filters that couldn't be in Firestore query
-    if (memoryFilters.length > 0) {
-      console.log('[ExerciseCache] Applying', memoryFilters.length, 'in-memory filters');
-      exercises = exercises.filter(ex => {
-        return memoryFilters.every(filter => {
-          // Navigate to nested field (e.g., 'muscles.category' -> ex.muscles.category)
-          const fieldParts = filter.field.split('.');
-          let fieldValue = ex;
-          for (const part of fieldParts) {
-            fieldValue = fieldValue?.[part];
-          }
-          
-          if (!Array.isArray(fieldValue)) return false;
-          
-          if (filter.isArray) {
-            // array-contains-any: at least one value must match
-            return filter.value.some(v => fieldValue.includes(v));
-          } else {
-            // array-contains: single value must match
-            return fieldValue.includes(filter.value);
-          }
-        });
-      });
-    }
-
-    // Filter out merged/source docs unless explicitly included
-    if (canonicalFlag) {
-      exercises = exercises.filter(ex => !ex?.merged_into && (ex?.status || '').toLowerCase() !== 'merged');
-    }
+    const result = await searchExercises(firestore, {
+      query, category, movementType, split, equipment,
+      muscleGroup, primaryMuscle, secondaryMuscle,
+      difficulty, planeOfMotion, unilateral,
+      stimulusTag, programmingUseCase,
+      limit, includeMerged, canonicalOnly, fields,
+    });
 
     // Cache the results for future requests (async, don't wait)
-    setCachedExercises(cacheKey, exercises, cacheParams);
-    console.log('[ExerciseCache] Cached results', { count: exercises.length });
+    setCachedExercises(cacheKey, result.items, cacheParams);
+    console.log('[ExerciseCache] Cached results', { count: result.count });
 
-    // Apply field projection based on 'fields' parameter
-    // "minimal" = id + name only (smallest token footprint)
-    // "lean" = id, name, category, first equipment
-    // "full" = all fields (default)
-    let outputExercises = exercises;
-    const fieldsMode = String(fields || 'full').toLowerCase();
-    
-    if (fieldsMode === 'minimal') {
-      outputExercises = exercises.map(ex => ({
-        id: ex.id,
-        name: ex.name,
-      }));
-    } else if (fieldsMode === 'lean') {
-      outputExercises = exercises.map(ex => ({
-        id: ex.id,
-        name: ex.name,
-        category: ex.category,
-        equipment: Array.isArray(ex.equipment) ? ex.equipment.slice(0, 1) : [],
-      }));
-    }
-    // else "full" - return as-is
-
-    return ok(res, { items: outputExercises, count: outputExercises.length, source: 'fresh', fields: fieldsMode, filters: {
-      query: query || null,
-      category: category || null,
-      muscleGroup: muscleGroup || null,
-      primaryMuscle: primaryMuscle || null,
-      secondaryMuscle: secondaryMuscle || null,
-      equipment: equipment || null,
-      difficulty: difficulty || null,
-      planeOfMotion: planeOfMotion || null,
-      unilateral: unilateral ?? null,
-      movementType: movementType || null,
-      split: split || null,
-      stimulusTag: stimulusTag || null,
-      programmingUseCase: programmingUseCase || null,
-      limit: parsedLimit,
-      canonicalOnly: canonicalFlag,
-      includeMerged: mergedFlag
-    } });
+    return ok(res, {
+      items: result.items,
+      count: result.count,
+      source: 'fresh',
+      fields: result.fieldsMode,
+      filters: {
+        query: query || null,
+        category: category || null,
+        muscleGroup: muscleGroup || null,
+        primaryMuscle: primaryMuscle || null,
+        secondaryMuscle: secondaryMuscle || null,
+        equipment: equipment || null,
+        difficulty: difficulty || null,
+        planeOfMotion: planeOfMotion || null,
+        unilateral: unilateral ?? null,
+        movementType: movementType || null,
+        split: split || null,
+        stimulusTag: stimulusTag || null,
+        programmingUseCase: programmingUseCase || null,
+        limit: result.parsedLimit,
+        canonicalOnly: result.canonicalOnly,
+        includeMerged: result.includeMerged,
+      },
+    });
 
   } catch (error) {
     console.error('search-exercises function error:', error);

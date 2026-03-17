@@ -1,26 +1,25 @@
 const { onRequest } = require('firebase-functions/v2/https');
 const { requireFlexibleAuth } = require('../auth/middleware');
-const FirestoreHelper = require('../utils/firestore-helper');
+const admin = require('firebase-admin');
 const { ok, fail } = require('../utils/response');
+const { listExercises } = require('../shared/exercises');
 
-const db = new FirestoreHelper();
+if (!admin.apps.length) admin.initializeApp();
+const db = admin.firestore();
 
 /**
  * Firebase Function: Get All Exercises
+ * Thin wrapper — business logic lives in shared/exercises.js
  */
 async function getExercisesHandler(req, res) {
   try {
     const limit = parseInt(req.query.limit) || 200;
     const includeMerged = String(req.query.includeMerged || '').toLowerCase() === 'true';
-    // canonicalOnly defaults to true unless includeMerged=true explicitly set
     const canonicalOnly = includeMerged ? false : (String(req.query.canonicalOnly || 'true').toLowerCase() !== 'false');
 
-    let items = await db.getDocuments('exercises', { orderBy: { field: 'name', direction: 'asc' }, limit });
+    const result = await listExercises(db, { limit, canonicalOnly, includeMerged });
 
-    if (canonicalOnly) {
-      items = items.filter(ex => !ex?.merged_into && (ex?.status || '').toLowerCase() !== 'merged');
-    }
-    return ok(res, { items, count: items.length, limit, canonicalOnly, includeMerged });
+    return ok(res, { ...result, limit, canonicalOnly, includeMerged });
   } catch (error) {
     console.error('get-exercises function error:', error);
     return fail(res, 'INTERNAL', 'Failed to get exercises', { message: error.message }, 500);
