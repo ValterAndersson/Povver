@@ -174,6 +174,25 @@ const TOOL_LABELS = {
   ask_user: 'Clarifying',
   send_message: 'Responding',
   
+  // === AGENT SERVICE TOOLS (Cloud Run — no tool_ prefix) ===
+  get_user_profile: 'Loading profile',
+  get_planning_context: 'Loading planning context',
+  get_training_analysis: 'Analyzing training data',
+  get_exercise_progress: 'Loading exercise progress',
+  get_muscle_group_progress: 'Analyzing muscle group',
+  query_training_sets: 'Querying training data',
+  log_set_shorthand: 'Logging set',
+  get_next_set: 'Finding next set',
+  add_exercise: 'Adding exercise',
+  prescribe_set: 'Updating set',
+  apply_progression: 'Applying progression',
+  suggest_weight_increase: 'Suggesting weight increase',
+  suggest_deload: 'Suggesting deload',
+  save_memory: 'Saving memory',
+  retire_memory: 'Retiring memory',
+  list_memories: 'Loading memories',
+  search_past_conversations: 'Searching history',
+
   // === WORKOUT TOOLS (active workout coaching) ===
   tool_log_set: 'Logging set',
   tool_swap_exercise: 'Swapping exercise',
@@ -649,7 +668,7 @@ function transformToIOSEvent(adkEvent) {
         content: {
           artifact_id: adkEvent.artifact_id || null,
           artifact_type: adkEvent.artifact_type || 'unknown',
-          artifact_content: adkEvent.content || {},
+          artifact_content: adkEvent.artifact_content || adkEvent.content || {},
           actions: adkEvent.actions || [],
           status: adkEvent.status || 'proposed',
         }
@@ -850,8 +869,8 @@ function relayCloudRunStream(stream, sse, persistWorkspaceEntry, normalizer, use
             sse.write({ type: 'error', error: evt });
           }
 
-          // Persist to workspace_entries
-          persistWorkspaceEntry({ type: translatedType, ...evt.data });
+          // Persist to workspace_entries (evt fields are at top level, not nested in evt.data)
+          persistWorkspaceEntry({ type: translatedType, text: evt.text, tool: evt.tool });
 
         } catch (parseErr) {
           logger.debug('[relayCloudRun] Failed to parse SSE line', { line: trimmed.slice(0, 200) });

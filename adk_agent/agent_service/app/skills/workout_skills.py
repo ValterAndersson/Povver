@@ -11,7 +11,7 @@ Skills:
 - prescribe_set: Modify planned values on a set (weight, reps, rir)
 - complete_workout: Complete and archive the active workout
 
-All functions use FIREBASE_API_KEY for authentication (bearer lane).
+All functions use MYON_API_KEY for authentication (API key lane).
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ FUNCTIONS_URL = os.getenv(
     "MYON_FUNCTIONS_BASE_URL",
     "https://us-central1-myon-53d85.cloudfunctions.net",
 )
-API_KEY = os.getenv("FIREBASE_API_KEY", "")
+API_KEY = os.getenv("MYON_API_KEY", "")
 
 
 def _headers(ctx: RequestContext) -> dict[str, str]:

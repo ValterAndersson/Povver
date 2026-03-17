@@ -1,4 +1,4 @@
-.PHONY: help install test dev deploy lint format check
+.PHONY: help install test dev deploy lint format check smoke
 
 PROJECT_ID ?= myon-53d85
 REGION ?= us-central1
@@ -23,7 +23,12 @@ install:
 	pip install -r requirements.txt
 
 test:
-	python -m pytest tests/ -v
+	python -m pytest tests/ -v --ignore=tests/test_smoke.py
+
+smoke:
+	@echo "Running smoke tests against $${SMOKE_URL:?Set SMOKE_URL (e.g. http://localhost:8080)}"
+	SMOKE_URL=$${SMOKE_URL} SMOKE_USER_ID=$${SMOKE_USER_ID:-} MYON_API_KEY=$${MYON_API_KEY:-} \
+		python -m pytest tests/test_smoke.py -v --tb=short
 
 dev:
 	uvicorn app.main:app --reload --port 8080
@@ -50,4 +55,4 @@ deploy:
 		--timeout 300 \
 		--concurrency 1 \
 		--service-account ai-agents@$(PROJECT_ID).iam.gserviceaccount.com \
-		--set-env-vars "PROJECT_ID=$(PROJECT_ID),GOOGLE_CLOUD_PROJECT=$(PROJECT_ID),ENABLE_USAGE_TRACKING=true,CONVERSATION_COLLECTION=canvases,FIREBASE_API_KEY=$${FIREBASE_API_KEY:?Set FIREBASE_API_KEY env var},MYON_API_KEY=$${MYON_API_KEY:?Set MYON_API_KEY env var},MYON_FUNCTIONS_BASE_URL=$${MYON_FUNCTIONS_BASE_URL:-https://us-central1-myon-53d85.cloudfunctions.net}"
+		--set-env-vars "PROJECT_ID=$(PROJECT_ID),GOOGLE_CLOUD_PROJECT=$(PROJECT_ID),ENABLE_USAGE_TRACKING=true,CONVERSATION_COLLECTION=conversations,MYON_API_KEY=$${MYON_API_KEY:?Set MYON_API_KEY env var},MYON_FUNCTIONS_BASE_URL=$${MYON_FUNCTIONS_BASE_URL:-https://us-central1-myon-53d85.cloudfunctions.net}"

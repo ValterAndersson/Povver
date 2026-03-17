@@ -8,7 +8,6 @@ in users/{uid}/agent_memory/{auto-id}.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from google.cloud.firestore import AsyncClient
 
 
 _mm_instance: 'MemoryManager | None' = None
@@ -24,7 +23,8 @@ def get_memory_manager() -> 'MemoryManager':
 
 class MemoryManager:
     def __init__(self):
-        self.db = AsyncClient()
+        from app.firestore_client import get_firestore_client
+        self.db = get_firestore_client().db
 
     async def save_memory(
         self, user_id: str, content: str, category: str, conversation_id: str

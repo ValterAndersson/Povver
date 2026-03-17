@@ -137,7 +137,7 @@ async def test_max_turns_guard(ctx):
 async def test_status_event_emitted_for_known_tools(ctx):
     """Known tools emit a status event before tool_start."""
     client = FakeLLMClient([
-        [LLMChunk(tool_call=ToolCallChunk("c1", "get_training_context", {}))],
+        [LLMChunk(tool_call=ToolCallChunk("c1", "get_planning_context", {}))],
         [LLMChunk(text="Done")],
     ])
 
@@ -151,7 +151,7 @@ async def test_status_event_emitted_for_known_tools(ctx):
         instruction="",
         history=[],
         message="Show training",
-        tools=[ToolDef("get_training_context", "Get context", {})],
+        tools=[ToolDef("get_planning_context", "Get context", {})],
         tool_executor=mock_executor,
         ctx=ctx,
     ):

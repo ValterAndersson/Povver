@@ -21,7 +21,7 @@ from typing import Any, AsyncIterator, Callable, Awaitable
 
 from app.context import RequestContext
 from app.llm.protocol import LLMClient, LLMChunk, ModelConfig, ToolDef
-from app.observability import log_tokens
+from app.observability import log_tokens, log_tool_call, set_trace_id
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ HEARTBEAT_INTERVAL_S = 15
 
 # Tool name -> user-facing status message for iOS status events
 TOOL_STATUS_MAP = {
-    "get_training_context": "Reviewing your training profile...",
+    "get_planning_context": "Reviewing your training profile...",
     "get_muscle_group_progress": "Analyzing muscle group data...",
     "get_exercise_progress": "Looking at exercise history...",
     "query_training_sets": "Querying your training sets...",
@@ -120,6 +120,10 @@ async def run_agent_loop(
     detected from tool return values via _inspect_tool_result().
     """
 
+    # Ensure trace_id propagates into this async generator
+    if ctx.correlation_id:
+        set_trace_id(ctx.correlation_id)
+
     messages = _build_messages(instruction, history, message)
     turn = 0
 
@@ -180,12 +184,17 @@ async def run_agent_loop(
 
                 yield sse_event("tool_start", {"tool": tc.tool_name, "call_id": tc.call_id})
                 start = time.monotonic()
+                tool_success = True
+                tool_error = ""
                 try:
                     result = await tool_executor(tc.tool_name, tc.args, ctx)
                 except Exception as e:
+                    tool_success = False
+                    tool_error = str(e)
                     logger.warning("Tool %s failed: %s", tc.tool_name, e)
                     result = {"error": str(e)}
                 elapsed_ms = int((time.monotonic() - start) * 1000)
+                log_tool_call(tc.tool_name, elapsed_ms, tool_success, tool_error)
                 yield sse_event("tool_end", {"tool": tc.tool_name, "call_id": tc.call_id, "elapsed_ms": elapsed_ms})
 
                 # Inspect tool result for artifact/clarification side-effects
@@ -193,17 +202,8 @@ async def run_agent_loop(
                 for evt in side_effects:
                     yield evt
 
-                # Persist artifact to Firestore if detected
-                if fs and isinstance(result, dict) and result.get("artifact_type") and side_effects:
-                    try:
-                        artifact_data = json.loads(side_effects[0].data)
-                        await fs.save_artifact(
-                            ctx.user_id, ctx.conversation_id,
-                            artifact_data["artifact_id"],
-                            result,
-                        )
-                    except Exception:
-                        logger.warning("Failed to persist artifact", exc_info=True)
+                # Note: artifact persistence is handled by the skill functions
+                # (planner_skills.py) — no need to duplicate here.
 
                 # Append tool result to messages for next LLM turn
                 messages.append({

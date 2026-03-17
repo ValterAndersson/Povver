@@ -8,8 +8,8 @@ Skills:
 - log_set_shorthand: Complete current set via completeCurrentSet endpoint
 - get_next_set: Get the next planned set from active workout state
 
-All skills call Firebase Functions directly via HTTP using the FIREBASE_API_KEY
-(fast lane / bearer lane).
+All skills call Firebase Functions directly via HTTP using the MYON_API_KEY
+(server-to-server / API key lane).
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ FUNCTIONS_URL = os.getenv(
     "MYON_FUNCTIONS_BASE_URL",
     "https://us-central1-myon-53d85.cloudfunctions.net",
 )
-API_KEY = os.getenv("FIREBASE_API_KEY", "")
+API_KEY = os.getenv("MYON_API_KEY", "")
 
 # Aggressive timeout for fast lane — these calls must be quick
 FAST_LANE_TIMEOUT = 5.0
