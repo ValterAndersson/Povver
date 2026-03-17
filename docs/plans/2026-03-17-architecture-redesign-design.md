@@ -240,6 +240,8 @@ async def run_agent_loop(model, instruction, history, message, tools, ctx):
 
 Handles: parallel/batch tool calls, tool execution errors (returned to model for recovery), and max iteration guard. Production implementation will add request timeouts, client disconnect detection (SSE heartbeats), usage tracking, conversation persistence, structured logging, and graceful shutdown — but the core loop above is the complete control flow that replaces ADK's Runner.
 
+**Usage tracking:** Each LLM turn extracts `usage_metadata` from the Gemini response (token counts) and calls `shared.usage_tracker.track_usage()` to persist to Firestore — directly replacing ADK's `after_model_callback` pattern. The `LLMChunk` protocol carries an optional `usage` field so the agent loop receives token counts without coupling to Gemini-specific APIs.
+
 #### Context Window Management
 
 The auto-loaded system context (Section 5) consumes ~2-4KB. Conversation history and tool results can grow unbounded. Strategy:
@@ -455,9 +457,11 @@ conversations/{id}:
 
 ### Firestore Collection: `canvases` → `conversations`
 
-The iOS app and Firestore currently use the collection name `canvases` (a legacy UI concept). This redesign renames to `conversations` — the universally understood term. With no active users, the rename has zero migration cost. The rename happens in Phase 7 (iOS Cleanup) and affects 5 Swift files with hardcoded `"canvases"` collection paths, plus Firestore security rules. The agent service and MCP server use `conversations` from day one.
+The iOS app and Firestore currently use the collection name `canvases` (a legacy UI concept). This redesign renames to `conversations` — the universally understood term. With no active users, the rename has zero migration cost.
 
-**Subcollection changes:** The old model uses `canvases/{id}/cards`, `canvases/{id}/events`, `canvases/{id}/workspace_entries`, `canvases/{id}/up_next`. The new model uses `conversations/{id}/messages` and `conversations/{id}/artifacts`. Old subcollections become dead data.
+**Sequencing constraint:** The rename must be **atomic across all layers** — proxy, agent service, iOS, and Firestore rules all switch simultaneously in Phase 7. Until Phase 7, all new components (SSE proxy conversation init, agent service, context builder) write to `canvases/{id}` to maintain iOS compatibility. The agent service uses `CONVERSATION_COLLECTION` config (defaults to `"canvases"`, switched to `"conversations"` in Phase 7). This prevents a data visibility gap where the proxy writes to `conversations` but iOS reads from `canvases`.
+
+**Subcollection migration:** The old model uses `canvases/{id}/cards`, `canvases/{id}/events`, `canvases/{id}/workspace_entries`, `canvases/{id}/up_next`. The new model uses `canvases/{id}/messages` and `canvases/{id}/artifacts` (renamed to `conversations/{id}/messages` and `conversations/{id}/artifacts` in Phase 7). Old subcollections (`cards`, `events`, `workspace_entries`, `up_next`) become dead data.
 
 ### Conversation Lifecycle
 

@@ -1079,9 +1079,12 @@ Extract the action dispatch logic into pure functions. Each function takes `(db,
 const { ValidationError, NotFoundError } = require('./errors');
 const admin = require('firebase-admin');
 
+// Uses 'canvases' until Phase 7 coordinated rename to 'conversations'.
+const CONVERSATION_COLLECTION = process.env.CONVERSATION_COLLECTION || 'canvases';
+
 async function getArtifact(db, userId, conversationId, artifactId) {
   const doc = await db.doc(
-    `users/${userId}/conversations/${conversationId}/artifacts/${artifactId}`
+    `users/${userId}/${CONVERSATION_COLLECTION}/${conversationId}/artifacts/${artifactId}`
   ).get();
   if (!doc.exists) throw new NotFoundError('Artifact not found');
   return { id: doc.id, ...doc.data() };
@@ -1090,14 +1093,14 @@ async function getArtifact(db, userId, conversationId, artifactId) {
 async function acceptArtifact(db, userId, conversationId, artifactId) {
   const artifact = await getArtifact(db, userId, conversationId, artifactId);
   await db.doc(
-    `users/${userId}/conversations/${conversationId}/artifacts/${artifactId}`
+    `users/${userId}/${CONVERSATION_COLLECTION}/${conversationId}/artifacts/${artifactId}`
   ).update({ status: 'accepted', accepted_at: admin.firestore.FieldValue.serverTimestamp() });
   return { ...artifact, status: 'accepted' };
 }
 
 async function dismissArtifact(db, userId, conversationId, artifactId) {
   await db.doc(
-    `users/${userId}/conversations/${conversationId}/artifacts/${artifactId}`
+    `users/${userId}/${CONVERSATION_COLLECTION}/${conversationId}/artifacts/${artifactId}`
   ).update({ status: 'dismissed', dismissed_at: admin.firestore.FieldValue.serverTimestamp() });
 }
 
@@ -1592,6 +1595,7 @@ class ToolCallChunk:
 class LLMChunk:
     text: str | None = None
     tool_call: ToolCallChunk | None = None
+    usage: dict | None = None  # {"input_tokens": N, "output_tokens": N} — set on final chunk
 
     @property
     def is_text(self) -> bool:
@@ -1690,15 +1694,24 @@ class GeminiClient:
             config=gen_config,
             tools=gemini_tools,
         ):
+            # Extract usage metadata (present on final chunk)
+            usage = None
+            if hasattr(response, "usage_metadata") and response.usage_metadata:
+                meta = response.usage_metadata
+                usage = {
+                    "input_tokens": getattr(meta, "prompt_token_count", 0) or 0,
+                    "output_tokens": getattr(meta, "candidates_token_count", 0) or 0,
+                }
+
             for part in response.candidates[0].content.parts:
                 if part.text:
-                    yield LLMChunk(text=part.text)
+                    yield LLMChunk(text=part.text, usage=usage)
                 elif part.function_call:
                     yield LLMChunk(tool_call=ToolCallChunk(
                         call_id=part.function_call.id or part.function_call.name,
                         tool_name=part.function_call.name,
                         args=dict(part.function_call.args) if part.function_call.args else {},
-                    ))
+                    ), usage=usage)
 
     def _extract_system_instruction(self, messages: list[dict]) -> str | None:
         """Extract system instruction from messages (Gemini handles it separately)."""
@@ -1929,6 +1942,8 @@ from typing import Any, AsyncIterator, Callable, Awaitable
 
 from app.context import RequestContext
 from app.llm.protocol import LLMClient, LLMChunk, ModelConfig, ToolDef
+from app.observability import log_tokens
+from shared.usage_tracker import track_usage
 
 logger = logging.getLogger(__name__)
 
@@ -1973,12 +1988,27 @@ async def run_agent_loop(
 
     while turn < max_tool_turns:
         tool_calls = []
+        last_usage = None
 
         async for chunk in llm_client.stream(model, messages, tools, config):
+            if chunk.usage:
+                last_usage = chunk.usage
             if chunk.is_text:
                 yield sse_event("message", chunk.text)
             elif chunk.is_tool_call:
                 tool_calls.append(chunk.tool_call)
+
+        # Track token usage per LLM turn (mirrors old after_model_callback)
+        if last_usage:
+            log_tokens(model, last_usage["input_tokens"], last_usage["output_tokens"])
+            track_usage(
+                user_id=ctx.user_id,
+                model=model,
+                prompt_tokens=last_usage["input_tokens"],
+                completion_tokens=last_usage["output_tokens"],
+                total_tokens=last_usage["input_tokens"] + last_usage["output_tokens"],
+                feature="agent_loop",
+            )
 
         # No tool calls — model is done
         if not tool_calls:
@@ -2133,6 +2163,10 @@ def get_firestore_client() -> 'FirestoreClient':
 
 
 class FirestoreClient:
+    # Uses 'canvases' until Phase 7 coordinated rename to 'conversations'.
+    # This prevents a data visibility gap — iOS reads from 'canvases' until Phase 7.
+    CONVERSATION_COLLECTION = os.getenv("CONVERSATION_COLLECTION", "canvases")
+
     def __init__(self):
         self.db = AsyncClient()
 
@@ -2338,8 +2372,9 @@ class FirestoreClient:
         self, user_id: str, conversation_id: str, limit: int = 20
     ) -> list[dict]:
         """Load recent messages for a conversation."""
+        coll = self.CONVERSATION_COLLECTION
         query = (
-            self.db.collection(f"users/{user_id}/conversations/{conversation_id}/messages")
+            self.db.collection(f"users/{user_id}/{coll}/{conversation_id}/messages")
             .order_by("timestamp", direction="DESCENDING")
             .limit(limit)
         )
@@ -2351,8 +2386,9 @@ class FirestoreClient:
         self, user_id: str, conversation_id: str, message: dict
     ) -> str:
         """Save a message to a conversation."""
+        coll = self.CONVERSATION_COLLECTION
         ref = await self.db.collection(
-            f"users/{user_id}/conversations/{conversation_id}/messages"
+            f"users/{user_id}/{coll}/{conversation_id}/messages"
         ).add(message)
         return ref[1].id
 ```
@@ -3358,15 +3394,18 @@ The SSE proxy now handles conversation lifecycle (replaces `openCanvas`, `bootst
 ```javascript
 const INACTIVITY_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
 
+// IMPORTANT: Uses 'canvases' collection until Phase 7 coordinated rename.
+// This prevents a data visibility gap — iOS reads from 'canvases' until Phase 7
+// switches everything atomically to 'conversations'.
+const CONVERSATION_COLLECTION = 'canvases';
+
 async function resolveConversationId(userId, requestConversationId) {
   if (requestConversationId) {
-    // Check inactivity timeout (skip if active workout)
-    const convDoc = await db.doc(`users/${userId}/conversations/${requestConversationId}`).get();
+    const convDoc = await db.doc(`users/${userId}/${CONVERSATION_COLLECTION}/${requestConversationId}`).get();
     if (convDoc.exists) {
       const lastMessageAt = convDoc.data().last_message_at?.toMillis() || 0;
       const hasActiveWorkout = convDoc.data().active_workout_id != null;
       if (!hasActiveWorkout && Date.now() - lastMessageAt > INACTIVITY_TIMEOUT_MS) {
-        // Stale conversation — create a new one
         return createNewConversation(userId);
       }
       return requestConversationId;
@@ -3376,7 +3415,7 @@ async function resolveConversationId(userId, requestConversationId) {
 }
 
 async function createNewConversation(userId) {
-  const ref = await db.collection(`users/${userId}/conversations`).add({
+  const ref = await db.collection(`users/${userId}/${CONVERSATION_COLLECTION}`).add({
     created_at: admin.firestore.FieldValue.serverTimestamp(),
     last_message_at: admin.firestore.FieldValue.serverTimestamp(),
   });
@@ -3639,8 +3678,10 @@ class MemoryManager:
         self, user_id: str, conversation_id: str, llm_client, model: str
     ) -> str | None:
         """Generate a summary for a completed conversation (lazy, Tier 4)."""
+        from app.firestore_client import FirestoreClient
+        coll = FirestoreClient.CONVERSATION_COLLECTION
         conv_ref = self.db.document(
-            f"users/{user_id}/conversations/{conversation_id}"
+            f"users/{user_id}/{coll}/{conversation_id}"
         )
         conv = await conv_ref.get()
         if not conv.exists:
@@ -3651,7 +3692,7 @@ class MemoryManager:
         # Load last 10 messages
         msgs_query = (
             self.db.collection(
-                f"users/{user_id}/conversations/{conversation_id}/messages"
+                f"users/{user_id}/{coll}/{conversation_id}/messages"
             )
             .order_by("timestamp", direction="DESCENDING")
             .limit(10)
@@ -3868,7 +3909,7 @@ async def _maybe_generate_previous_summary(fs, mm, ctx, llm_client, model):
 
 async def _get_session_vars(fs: FirestoreClient, ctx: RequestContext) -> dict | None:
     doc = await fs.db.document(
-        f"users/{ctx.user_id}/conversations/{ctx.conversation_id}"
+        f"users/{ctx.user_id}/{fs.CONVERSATION_COLLECTION}/{ctx.conversation_id}"
     ).get()
     if doc.exists:
         return doc.to_dict().get("session_vars")
@@ -3950,7 +3991,7 @@ async def list_memories(*, ctx: RequestContext, offset: int = 0, limit: int = 50
 async def set_session_var(*, ctx: RequestContext, key: str, value) -> dict:
     fs = get_firestore_client()
     await fs.db.document(
-        f"users/{ctx.user_id}/conversations/{ctx.conversation_id}"
+        f"users/{ctx.user_id}/{fs.CONVERSATION_COLLECTION}/{ctx.conversation_id}"
     ).update({f"session_vars.{key}": value})
     return {"set": key, "value": value}
 
@@ -3959,7 +4000,7 @@ async def delete_session_var(*, ctx: RequestContext, key: str) -> dict:
     from google.cloud.firestore import DELETE_FIELD
     fs = get_firestore_client()
     await fs.db.document(
-        f"users/{ctx.user_id}/conversations/{ctx.conversation_id}"
+        f"users/{ctx.user_id}/{fs.CONVERSATION_COLLECTION}/{ctx.conversation_id}"
     ).update({f"session_vars.{key}": DELETE_FIELD})
     return {"deleted": key}
 
@@ -4909,9 +4950,14 @@ async def process_workout_completion(db, user_id: str, workout_id: str):
     batch.set(wm_ref, {"last_processed_workout": workout_id, "processed_at": _utcnow()}, merge=True)
 
     # Step 11: Enqueue training analysis (if premium)
-    # Check user subscription, create training_analysis_jobs entry
+    # Mirrors isPremiumUser() logic: subscription_override first, then subscription_tier
     user_doc = await db.document(f"users/{user_id}").get()
-    if user_doc.exists and user_doc.to_dict().get("subscription_status", {}).get("is_premium"):
+    user_data = user_doc.to_dict() if user_doc.exists else {}
+    is_premium = (
+        user_data.get("subscription_override") == "premium"
+        or user_data.get("subscription_tier") == "premium"
+    )
+    if is_premium:
         analysis_ref = db.collection("training_analysis_jobs").document()
         batch.set(analysis_ref, {
             "type": "POST_WORKOUT",
@@ -5253,6 +5299,18 @@ git commit -m "feat(analyst): Phase 6 — add plateau, volume, periodization, co
 
 **Files:**
 - Modify: Various iOS files (see steps below)
+
+- [ ] **Step 0: Coordinated rename — all layers switch simultaneously**
+
+This rename must be atomic across all layers to prevent data visibility gaps.
+Deploy order: Firebase Functions first (proxy + rules), then agent service, then iOS.
+
+**Backend changes (deploy together):**
+- SSE proxy `stream-agent-normalized.js`: change `CONVERSATION_COLLECTION` from `'canvases'` to `'conversations'`
+- Firestore rules: rename `canvases` match to `conversations`
+- Agent service: set env var `CONVERSATION_COLLECTION=conversations` in Cloud Run
+
+**Then iOS build + deploy.**
 
 - [ ] **Step 1: Rename `canvases` → `conversations` in Firestore collection paths**
 
