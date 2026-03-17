@@ -160,7 +160,7 @@ async def _handle_swap_exercise(
 
     # Extract items from tool result (handles both dict and list returns)
     if isinstance(search_result, dict):
-        alternatives = search_result.get("items", [])
+        alternatives = search_result.get("exercises", search_result.get("items", []))
     elif isinstance(search_result, list):
         alternatives = search_result
     else:

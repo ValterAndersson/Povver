@@ -27,6 +27,7 @@ dev:
 
 deploy: build
 	cp -r ../firebase_functions/functions/shared shared/
+	cp -r ../firebase_functions/functions/utils utils/
 	gcloud run deploy $(SERVICE_NAME) \
 		--source . \
 		--region $(REGION) \
@@ -39,4 +40,4 @@ deploy: build
 		--min-instances 0 \
 		--max-instances 5 \
 		--timeout 60
-	rm -rf shared/
+	rm -rf shared/ utils/

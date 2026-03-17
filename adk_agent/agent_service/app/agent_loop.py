@@ -53,8 +53,10 @@ class SSEEvent:
 
 def sse_event(event: str, data: Any) -> SSEEvent:
     if isinstance(data, str):
-        return SSEEvent(event=event, data=json.dumps({"text": data}))
-    return SSEEvent(event=event, data=json.dumps(data))
+        return SSEEvent(event=event, data=json.dumps({"type": event, "text": data}))
+    if isinstance(data, dict):
+        return SSEEvent(event=event, data=json.dumps({"type": event, **data}))
+    return SSEEvent(event=event, data=json.dumps({"type": event, "data": data}))
 
 
 ToolExecutor = Callable[[str, dict, RequestContext], Awaitable[Any]]

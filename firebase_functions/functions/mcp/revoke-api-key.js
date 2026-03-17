@@ -50,6 +50,6 @@ async function revokeMcpApiKeyHandler(req, res) {
   return ok(res, { revoked: true, key_id });
 }
 
-const fn = onRequest(requireFlexibleAuth(revokeMcpApiKeyHandler));
+const fn = onRequest({ invoker: 'public' }, requireFlexibleAuth(revokeMcpApiKeyHandler));
 
 module.exports = { revokeMcpApiKey: fn };

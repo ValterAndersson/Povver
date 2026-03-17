@@ -39,6 +39,6 @@ async function listMcpApiKeysHandler(req, res) {
   return ok(res, { keys });
 }
 
-const fn = onRequest(requireFlexibleAuth(listMcpApiKeysHandler));
+const fn = onRequest({ invoker: 'public' }, requireFlexibleAuth(listMcpApiKeysHandler));
 
 module.exports = { listMcpApiKeys: fn };

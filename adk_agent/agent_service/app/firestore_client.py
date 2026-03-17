@@ -29,8 +29,7 @@ def get_firestore_client() -> 'FirestoreClient':
 
 
 class FirestoreClient:
-    # Uses 'canvases' until Phase 7 coordinated rename to 'conversations'.
-    CONVERSATION_COLLECTION = os.getenv("CONVERSATION_COLLECTION", "canvases")
+    CONVERSATION_COLLECTION = os.getenv("CONVERSATION_COLLECTION", "conversations")
 
     def __init__(self):
         self.db = AsyncClient()

@@ -106,5 +106,5 @@ def test_get_exercise_summary_uses_exercise_id():
 
 
 def test_conversation_collection_default():
-    """Verify CONVERSATION_COLLECTION defaults to 'canvases'."""
-    assert FirestoreClient.CONVERSATION_COLLECTION == "canvases"
+    """Verify CONVERSATION_COLLECTION defaults to 'conversations'."""
+    assert FirestoreClient.CONVERSATION_COLLECTION == "conversations"

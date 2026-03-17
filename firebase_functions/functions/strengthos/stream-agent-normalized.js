@@ -816,34 +816,38 @@ function relayCloudRunStream(stream, sse, persistWorkspaceEntry, normalizer, use
 
           const translatedType = eventType;
 
+          // Agent service now includes all fields at top level of data JSON
+          // (type, text, tool, call_id, etc.) — no nested evt.data wrapper.
+
           // Accumulate agent text for conversation persistence
-          if (eventType === 'message' && evt.data?.text) {
-            accumulatedAgentText += evt.data.text;
+          if (eventType === 'message' && evt.text) {
+            accumulatedAgentText += evt.text;
           }
 
           // Special handling for specific event types
           if (eventType === 'tool_start') {
-            const name = evt.data?.tool_name || 'tool';
+            const name = evt.tool || 'tool';
             const label = TOOL_LABELS[name] || `Running ${name}`;
-            sse.write({ type: 'tool_started', name, args: evt.data?.args || {} });
+            sse.write({ type: 'tool_started', name, args: evt.args || {} });
           } else if (eventType === 'tool_end') {
-            const name = evt.data?.tool_name || 'tool';
-            sse.write({ type: 'tool_result', name, summary: evt.data?.result || '' });
+            const name = evt.tool || 'tool';
+            sse.write({ type: 'tool_result', name, summary: evt.result || '' });
           } else if (eventType === 'message') {
-            const text = normalizer.normalize ? normalizer.preprocess(evt.data?.text || '') : (evt.data?.text || '');
+            const rawText = evt.text || '';
+            const text = normalizer.preprocess ? normalizer.preprocess(rawText) : rawText;
             if (text) {
               sse.write({ type: 'text_delta', text });
             }
           } else if (eventType === 'artifact') {
-            sse.write({ type: 'artifact', ...evt.data });
+            sse.write({ type: 'artifact', ...evt });
           } else if (eventType === 'status') {
-            sse.write({ type: 'status', content: evt.data });
+            sse.write({ type: 'status', content: evt });
           } else if (eventType === 'heartbeat') {
             sse.write({ type: 'heartbeat' });
           } else if (eventType === 'done') {
             // Don't emit done here — handled by caller
           } else if (eventType === 'error') {
-            sse.write({ type: 'error', error: evt.data });
+            sse.write({ type: 'error', error: evt });
           }
 
           // Persist to workspace_entries
@@ -860,7 +864,7 @@ function relayCloudRunStream(stream, sse, persistWorkspaceEntry, normalizer, use
       if (accumulatedAgentText) {
         const messagesRef = db
           .collection('users').doc(userId)
-          .collection('canvases').doc(conversationId)
+          .collection('conversations').doc(conversationId)
           .collection('messages');
         messagesRef.add({
           type: 'agent_response',
@@ -884,9 +888,14 @@ function relayCloudRunStream(stream, sse, persistWorkspaceEntry, normalizer, use
 // Only runs once per conversation (skips if title already set).
 // ============================================================================
 async function generateConversationTitle(userId, conversationId, userMessage) {
-  const canvasDoc = await db.collection('users').doc(userId)
-    .collection('canvases').doc(conversationId).get();
-  if (canvasDoc.exists && canvasDoc.data()?.title) return;
+  // Check conversations first (primary), fallback to canvases
+  let existingDoc = await db.collection('users').doc(userId)
+    .collection('conversations').doc(conversationId).get();
+  if (!existingDoc.exists) {
+    existingDoc = await db.collection('users').doc(userId)
+      .collection('canvases').doc(conversationId).get();
+  }
+  if (existingDoc.exists && existingDoc.data()?.title) return;
 
   const token = await getGcpAuthToken();
   const projectId = VERTEX_AI_CONFIG.projectId;
@@ -905,7 +914,7 @@ async function generateConversationTitle(userId, conversationId, userMessage) {
   if (!title) return;
 
   const batch = db.batch();
-  if (canvasDoc.exists) {
+  if (existingDoc.exists && existingDoc.ref.path.includes('/canvases/')) {
     batch.update(db.collection('users').doc(userId).collection('canvases').doc(conversationId), { title });
   }
   batch.set(db.collection('users').doc(userId).collection('conversations').doc(conversationId), { title }, { merge: true });
@@ -1104,13 +1113,21 @@ async function streamAgentNormalizedHandler(req, res) {
       created_at: admin.firestore.FieldValue.serverTimestamp(),
     }).catch(err => logger.warn('[streamAgentNormalized] user prompt workspace entry failed', { error: String(err?.message || err) }));
 
-    // Update canvas metadata for recent-chats listing
+    // Update conversation metadata for recent-chats listing
     // (client can't update canvas doc — blocked by security rules)
+    const metadataUpdate = {
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastMessage: (message || '').slice(0, 100),
+      status: 'active',
+    };
+    // Write to conversations (primary — iOS reads this)
+    db.collection('users').doc(userId).collection('conversations').doc(conversationId)
+      .set(metadataUpdate, { merge: true })
+      .catch(err => logger.warn('[streamAgentNormalized] conversation metadata update failed', { error: String(err?.message || err) }));
+    // Write to canvases (legacy — remove after full migration)
     db.collection('users').doc(userId).collection('canvases').doc(conversationId)
-      .update({
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        lastMessage: (message || '').slice(0, 100),
-      }).catch(err => logger.warn('[streamAgentNormalized] canvas metadata update failed', { error: String(err?.message || err) }));
+      .set(metadataUpdate, { merge: true })
+      .catch(err => logger.warn('[streamAgentNormalized] canvas metadata update failed', { error: String(err?.message || err) }));
 
     // === CLOUD RUN AGENT SERVICE (Phase 3a) ===
     if (AGENT_SERVICE_URL) {
@@ -1401,8 +1418,9 @@ async function streamAgentNormalizedHandler(req, res) {
                     size: contentStr.length,
                     userId,
                   });
-                  // Skip persistence — artifact was already sent to client via SSE
-                  return;
+                  // Skip persistence only — artifact was already sent to client via SSE
+                  // continue (not return) to keep processing remaining parts in this chunk
+                  continue;
                 }
 
                 const artifactData = {

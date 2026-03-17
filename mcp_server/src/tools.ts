@@ -74,15 +74,15 @@ export function registerTools(server: McpServer, userId: string) {
     query: { type: 'string', description: 'Search query' },
     limit: { type: 'number', description: 'Max results', default: 10 }
   }, async ({ query, limit }) => {
-    const items = await exercises.searchExercises(db, query, { limit: limit || 10 });
-    return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
+    const result = await exercises.searchExercises(db, { query, limit: limit || 10 });
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
   });
 
   // --- Training Analysis ---
   server.tool('get_training_analysis', 'Get training analysis insights', {
     sections: { type: 'array', items: { type: 'string' }, description: 'Sections to include', optional: true }
   }, async ({ sections }) => {
-    const analysis = await trainingQueries.getAnalysisSummary(db, userId, { sections });
+    const analysis = await trainingQueries.getAnalysisSummary(db, userId, { sections }, admin);
     return { content: [{ type: 'text', text: JSON.stringify(analysis, null, 2) }] };
   });
 
@@ -90,7 +90,7 @@ export function registerTools(server: McpServer, userId: string) {
     group: { type: 'string', description: 'Muscle group name' },
     weeks: { type: 'number', description: 'Number of weeks', default: 8 }
   }, async ({ group, weeks }) => {
-    const data = await trainingQueries.getMuscleGroupSummary(db, userId, { group, weeks: weeks || 8 });
+    const data = await trainingQueries.getMuscleGroupSummary(db, userId, { muscle_group: group, window_weeks: weeks || 8 });
     return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
   });
 
@@ -98,7 +98,7 @@ export function registerTools(server: McpServer, userId: string) {
     exercise: { type: 'string', description: 'Exercise name' },
     weeks: { type: 'number', description: 'Number of weeks', default: 8 }
   }, async ({ exercise, weeks }) => {
-    const data = await trainingQueries.getExerciseSummary(db, userId, { exercise, weeks: weeks || 8 });
+    const data = await trainingQueries.getExerciseSummary(db, userId, { exercise_name: exercise, window_weeks: weeks || 8 });
     return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
   });
 

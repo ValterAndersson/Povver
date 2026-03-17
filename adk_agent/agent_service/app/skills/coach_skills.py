@@ -38,7 +38,10 @@ async def get_planning_context(*, ctx: RequestContext) -> dict:
 
 
 async def get_training_analysis(*, ctx: RequestContext, sections: list[str] | None = None) -> dict:
-    """Get pre-computed training analysis (insights and weekly review)."""
+    """Get pre-computed training analysis (insights and weekly review).
+
+    sections parameter accepted for future filtering but currently returns all data.
+    """
     fs = get_firestore_client()
     analysis = await fs.get_analysis_summary(ctx.user_id)
     weekly = await fs.get_weekly_review(ctx.user_id)

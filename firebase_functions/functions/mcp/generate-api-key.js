@@ -72,6 +72,6 @@ async function generateMcpApiKeyHandler(req, res) {
   });
 }
 
-const fn = onRequest(requireFlexibleAuth(generateMcpApiKeyHandler));
+const fn = onRequest({ invoker: 'public' }, requireFlexibleAuth(generateMcpApiKeyHandler));
 
 module.exports = { generateMcpApiKey: fn };

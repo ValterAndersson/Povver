@@ -64,12 +64,14 @@ async def stream_handler(request: Request) -> StreamingResponse:
         from app.router import route_request, Lane
         from app.tools.registry import execute_tool, get_tools
 
+        from datetime import date
         ctx = RequestContext(
             user_id=user_id,
             conversation_id=conversation_id,
             correlation_id=trace_id,
             workout_id=workout_id,
             workout_mode=bool(workout_id),
+            today=date.today().isoformat(),
         )
 
         fs = get_firestore_client()
@@ -136,7 +138,6 @@ async def stream_handler(request: Request) -> StreamingResponse:
         if prioritized:
             logger.info("Planner prioritized: %s", prioritized)
 
-        accumulated_text = []
         async for event in run_agent_loop(
             llm_client=llm_client,
             model=model,
@@ -148,24 +149,8 @@ async def stream_handler(request: Request) -> StreamingResponse:
             ctx=ctx,
             fs=fs,
         ):
-            # Collect agent text for persistence
-            if event.event == "message" and event.data.get("text"):
-                accumulated_text.append(event.data["text"])
             yield event.encode()
 
-        # Persist user message + agent response
-        from datetime import datetime, timezone
-        await fs.save_message(user_id, conversation_id, {
-            "type": "user_prompt",
-            "content": message,
-            "created_at": datetime.now(timezone.utc),
-        })
-        if accumulated_text:
-            await fs.save_message(user_id, conversation_id, {
-                "type": "agent_response",
-                "content": "".join(accumulated_text),
-                "created_at": datetime.now(timezone.utc),
-            })
 
     return StreamingResponse(
         event_stream(),

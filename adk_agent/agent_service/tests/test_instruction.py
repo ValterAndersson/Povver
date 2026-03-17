@@ -1,86 +1,115 @@
 # tests/test_instruction.py
-import pytest
-from unittest.mock import AsyncMock
-from app.instruction import build_instruction, CORE_INSTRUCTION, MEMORY_GUIDANCE, _format_training_snapshot
+"""Tests for SHELL_INSTRUCTION content and build_system_instruction builder."""
+
+from app.instruction import SHELL_INSTRUCTION, build_system_instruction
 from app.context import RequestContext
 
 
-def test_core_instruction_not_empty():
-    assert len(CORE_INSTRUCTION) > 100
+def _make_ctx(**overrides) -> RequestContext:
+    defaults = dict(user_id="u-123", conversation_id="c-1", correlation_id="r-1")
+    defaults.update(overrides)
+    return RequestContext(**defaults)
 
 
-def test_no_session_references():
-    """Instruction must not reference sessions or ADK."""
-    lower = CORE_INSTRUCTION.lower()
-    assert "session_id" not in lower
-    assert "agent_version" not in lower
-    assert "contextvar" not in lower
-    # "adk" as standalone word (not part of another word)
-    words = lower.split()
-    assert "adk" not in words
+# ── SHELL_INSTRUCTION content tests ──────────────────────────────────────
 
 
-def test_no_vertex_references():
-    """Instruction must not reference Vertex."""
-    lower = CORE_INSTRUCTION.lower()
-    assert "vertex" not in lower
+def test_shell_instruction_is_non_empty_string():
+    assert isinstance(SHELL_INSTRUCTION, str)
+    assert len(SHELL_INSTRUCTION) > 500
 
 
-def test_memory_guidance_included():
-    assert "save_memory" in MEMORY_GUIDANCE
-    assert "retire_memory" in MEMORY_GUIDANCE
+def test_shell_instruction_contains_key_sections():
+    """All production-critical sections must be present."""
+    required_sections = [
+        "## IDENTITY",
+        "## ABSOLUTE RULES",
+        "## RESPONSE CRAFT",
+        "## USING YOUR TOOLS",
+        "## INTERPRETING DATA",
+        "## BUILDING & MODIFYING",
+        "## WEIGHT PRESCRIPTION",
+        "## ACTIVE WORKOUT MODE",
+        "## CONVERSATION HISTORY",
+    ]
+    for section in required_sections:
+        assert section in SHELL_INSTRUCTION, f"Missing section: {section}"
 
 
-@pytest.mark.asyncio
-async def test_build_instruction_includes_core():
-    fs = AsyncMock()
-    fs.get_planning_context.return_value = {
-        "user": {"name": "Val", "attributes": {"fitness_level": "intermediate"}, "weight_unit": "kg"},
-        "active_routine": {"name": "PPL"},
-        "templates": [],
-        "recent_workouts": [{"id": "w1"}],
-        "analysis": None,
-        "weekly_stats": None,
-    }
-    ctx = RequestContext(user_id="u1", conversation_id="c1", correlation_id="r1")
-    result = await build_instruction(fs, ctx)
-    assert CORE_INSTRUCTION in result
-    assert MEMORY_GUIDANCE in result
-    assert "Val" in result
-    assert "PPL" in result
+def test_shell_instruction_no_forbidden_terms():
+    """Must not contain Gemini-specific, ContextVar, or session-state references."""
+    lower = SHELL_INSTRUCTION.lower()
+    forbidden = ["gemini", "flash", "contextvar", "context_var", "session_id", "vertex"]
+    for term in forbidden:
+        assert term not in lower, f"Forbidden term found: {term}"
 
 
-@pytest.mark.asyncio
-async def test_build_instruction_handles_missing_planning():
-    """First-time user with no planning data should still get core instruction."""
-    fs = AsyncMock()
-    fs.get_planning_context.side_effect = Exception("not found")
-    ctx = RequestContext(user_id="u1", conversation_id="c1", correlation_id="r1")
-    result = await build_instruction(fs, ctx)
-    assert CORE_INSTRUCTION in result
-    assert MEMORY_GUIDANCE in result
+def test_shell_instruction_uses_request_context_not_context_prefix():
+    """DATE AWARENESS should reference 'request context', not 'context prefix'."""
+    assert "request context" in SHELL_INSTRUCTION
+    assert "context prefix" not in SHELL_INSTRUCTION
 
 
-def test_format_training_snapshot():
-    planning = {
-        "user": {"name": "Val", "attributes": {"fitness_level": "advanced", "fitness_goal": "hypertrophy"}, "weight_unit": "kg"},
-        "active_routine": {"name": "Upper Lower"},
-        "recent_workouts": [{"id": "w1"}, {"id": "w2"}],
-    }
-    result = _format_training_snapshot(planning)
-    assert "Val" in result
-    assert "advanced" in result
-    assert "hypertrophy" in result
-    assert "Upper Lower" in result
-    assert "Recent workouts: 2" in result
-    assert "Weight unit: kg" in result
+def test_shell_instruction_has_conversation_history_section():
+    """Memory guidance: conversation history section must exist with key advice."""
+    assert "## CONVERSATION HISTORY" in SHELL_INSTRUCTION
+    assert "conversation history" in SHELL_INSTRUCTION.lower()
+    # Should mention referencing earlier messages
+    assert "earlier" in SHELL_INSTRUCTION.lower()
 
 
-def test_format_training_snapshot_empty_user():
-    """Snapshot with minimal data should not crash."""
-    planning = {"user": {}, "active_routine": None, "recent_workouts": []}
-    result = _format_training_snapshot(planning)
-    assert "## Current Training Snapshot" in result
-    # Should not contain user-specific lines
-    assert "User:" not in result
-    assert "Active routine:" not in result
+# ── build_system_instruction tests ───────────────────────────────────────
+
+
+def test_build_includes_today_date():
+    ctx = _make_ctx(today="2026-03-17")
+    result = build_system_instruction(ctx)
+    assert "today=2026-03-17" in result
+
+
+def test_build_includes_user_id():
+    ctx = _make_ctx(user_id="u-abc")
+    result = build_system_instruction(ctx)
+    assert "user_id=u-abc" in result
+
+
+def test_build_with_workout_id_includes_it():
+    ctx = _make_ctx(workout_id="w-xyz")
+    result = build_system_instruction(ctx)
+    assert "workout_id=w-xyz" in result
+
+
+def test_build_without_workout_id_omits_it():
+    ctx = _make_ctx(workout_id=None)
+    result = build_system_instruction(ctx)
+    assert "workout_id=" not in result
+
+
+def test_build_with_planning_prompt_appends_it():
+    ctx = _make_ctx(today="2026-03-17")
+    prompt = "Focus on progressive overload for bench press."
+    result = build_system_instruction(ctx, planning_prompt=prompt)
+    assert prompt in result
+    assert "## PLANNING PROMPT" in result
+    # Planning prompt should come after the main instruction
+    main_end = result.index("## PLANNING PROMPT")
+    assert main_end > len(SHELL_INSTRUCTION) // 2  # sanity: it's near the end
+
+
+def test_build_without_planning_prompt_omits_section():
+    ctx = _make_ctx()
+    result = build_system_instruction(ctx)
+    assert "## PLANNING PROMPT" not in result
+
+
+def test_build_today_unknown_when_none():
+    ctx = _make_ctx(today=None)
+    result = build_system_instruction(ctx)
+    assert "today=unknown" in result
+
+
+def test_build_contains_shell_instruction():
+    """The full SHELL_INSTRUCTION must be embedded in the output."""
+    ctx = _make_ctx(today="2026-01-01")
+    result = build_system_instruction(ctx)
+    assert SHELL_INSTRUCTION in result

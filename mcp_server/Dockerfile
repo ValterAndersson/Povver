@@ -7,7 +7,8 @@ RUN npm ci --production
 
 COPY dist/ dist/
 
-# Import shared modules from Firebase Functions
+# Import shared modules and utils from Firebase Functions
 COPY shared/ shared/
+COPY utils/ utils/
 
 CMD ["node", "dist/index.js"]
