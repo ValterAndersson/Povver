@@ -45,7 +45,7 @@ class GeminiClient:
             tools=gemini_tools,
         )
 
-        async for response in self.client.aio.models.generate_content_stream(
+        async for response in await self.client.aio.models.generate_content_stream(
             model=model,
             contents=gemini_contents,
             config=gen_config,
