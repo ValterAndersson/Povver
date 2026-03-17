@@ -10,6 +10,13 @@
 
 **Spec:** `docs/plans/2026-03-17-architecture-redesign-design.md`
 
+**Required reading before starting any task:**
+1. This plan (the current task + its `Read first` / `Reference` files)
+2. `docs/FIRESTORE_SCHEMA.md` — canonical field names and collection paths
+3. `docs/SECURITY.md` — auth, IDOR, premium gates
+
+Each task lists a `**Read first:**` section with the specific source files the agent must read before writing code. Tasks that create net-new files without extracting from existing code omit this section.
+
 ---
 
 ## File Structure
@@ -328,6 +335,11 @@ git commit -m "feat(shared): add typed error classes with mapErrorToResponse"
 ---
 
 ### Task 3: Shared Routines Module
+
+**Read first:**
+- `firebase_functions/functions/routines/*.js` (all 10 handler files — extract business logic from these)
+- `firebase_functions/functions/utils/firestore-helper.js` (shared Firestore patterns)
+- `firebase_functions/functions/utils/validators.js` (validation patterns to reuse)
 
 **Files:**
 - Create: `firebase_functions/functions/shared/routines.js`
@@ -677,6 +689,11 @@ git commit -m "refactor(routines): extract business logic into shared/routines.j
 
 ### Task 4: Shared Templates Module
 
+**Read first:**
+- `firebase_functions/functions/templates/*.js` (all 7 handler files)
+- `firebase_functions/functions/utils/plan-to-template-converter.js` (template creation helper)
+- `firebase_functions/functions/utils/template-diff-generator.js` (patch diffing)
+
 **Files:**
 - Create: `firebase_functions/functions/shared/templates.js`
 - Test: `firebase_functions/functions/tests/shared.templates.test.js`
@@ -687,7 +704,7 @@ git commit -m "refactor(routines): extract business logic into shared/routines.j
 - Modify: `firebase_functions/functions/templates/patch-template.js`
 - Modify: `firebase_functions/functions/templates/delete-template.js`
 
-Follow the identical pattern from Task 3. Read each handler file before extracting:
+Follow the identical pattern from Task 3:
 
 - [ ] **Step 1: Write tests for shared/templates.js**
 
@@ -806,6 +823,11 @@ git commit -m "refactor(templates): extract business logic into shared/templates
 
 ### Task 5: Shared Workouts Module
 
+**Read first:**
+- `firebase_functions/functions/workouts/*.js` (all 4 handler files)
+- `firebase_functions/functions/utils/workout-seed-mapper.js` (workout creation helper)
+- `firebase_functions/functions/utils/idempotency.js` (idempotency patterns used by upsert)
+
 **Files:**
 - Create: `firebase_functions/functions/shared/workouts.js`
 - Test: `firebase_functions/functions/tests/shared.workouts.test.js`
@@ -890,6 +912,12 @@ git commit -m "refactor(workouts): extract business logic into shared/workouts.j
 
 ### Task 6: Shared Exercises Module
 
+**Read first:**
+- `firebase_functions/functions/exercises/search-exercises.js` (382 lines — most complex)
+- `firebase_functions/functions/exercises/resolve-exercise.js` (name→ID resolution)
+- `firebase_functions/functions/exercises/get-exercise.js`, `get-exercises.js`
+- `firebase_functions/functions/utils/aliases.js` (alias matching used by search)
+
 **Files:**
 - Create: `firebase_functions/functions/shared/exercises.js`
 - Test: `firebase_functions/functions/tests/shared.exercises.test.js`
@@ -959,6 +987,13 @@ git commit -m "refactor(exercises): extract business logic into shared/exercises
 
 ### Task 7: Shared Training Queries Module
 
+**Read first:**
+- `firebase_functions/functions/training/query-sets.js` (436 lines — set-level queries)
+- `firebase_functions/functions/training/series-endpoints.js` (336 lines — time series)
+- `firebase_functions/functions/training/get-analysis-summary.js` (188 lines)
+- `firebase_functions/functions/training/progress-summary.js` (514 lines — progress aggregation)
+- `firebase_functions/functions/utils/analytics-calculator.js` (volume/intensity calculations)
+
 **Files:**
 - Create: `firebase_functions/functions/shared/training-queries.js`
 - Test: `firebase_functions/functions/tests/shared.training-queries.test.js`
@@ -1000,6 +1035,10 @@ git commit -m "refactor(training): extract query logic into shared/training-quer
 ---
 
 ### Task 8: Shared Planning Context Module
+
+**Read first:**
+- `firebase_functions/functions/agents/get-planning-context.js` (307 lines — the main planning context builder)
+- `firebase_functions/functions/training/context-pack.js` (321 lines — training context packing)
 
 **Files:**
 - Create: `firebase_functions/functions/shared/planning-context.js`
@@ -1044,6 +1083,9 @@ git commit -m "refactor(planning): extract getPlanningContext into shared module
 ---
 
 ### Task 8b: Shared Artifacts Module
+
+**Read first:**
+- `firebase_functions/functions/artifacts/artifact-action.js` (401 lines — artifact accept/dismiss/save)
 
 **Files:**
 - Create: `firebase_functions/functions/shared/artifacts.js`
@@ -1114,6 +1156,9 @@ git commit -m "refactor(artifacts): extract artifact actions into shared module"
 ---
 
 ### Task 8c: Shared Progressions Module
+
+**Read first:**
+- `firebase_functions/functions/agents/apply-progression.js` (327 lines — progression apply logic)
 
 **Files:**
 - Create: `firebase_functions/functions/shared/progressions.js`
@@ -1514,6 +1559,9 @@ git commit -m "feat(agent): add RequestContext dataclass"
 ---
 
 ### Task 12: LLM Client Protocol + Gemini Implementation
+
+**Read first:**
+- `adk_agent/canvas_orchestrator/app/libs/llm.py` (84 lines — existing LLM wrapper)
 
 **Files:**
 - Create: `adk_agent/agent_service/app/llm/__init__.py`
@@ -2184,6 +2232,11 @@ git commit -m "feat(agent): implement core agent loop with tool execution"
 ---
 
 ### Task 14: Firestore Client (AsyncClient)
+
+**Read first:**
+- `docs/FIRESTORE_SCHEMA.md` — canonical field names (CRITICAL — all methods must match these exactly)
+- `adk_agent/canvas_orchestrator/app/libs/tools_canvas/client.py` (871 lines — existing Firestore client)
+- `firebase_functions/functions/agents/get-planning-context.js` (307 lines — planning context shape)
 
 **Files:**
 - Create: `adk_agent/agent_service/app/firestore_client.py`
@@ -3559,6 +3612,11 @@ git commit -m "feat(agent): wire full lane support in /stream endpoint"
 ---
 
 ### Task 25: SSE Proxy Update
+
+**Read first:**
+- `firebase_functions/functions/strengthos/stream-agent-normalized.js` (1,528 lines — the SSE proxy being modified)
+- `firebase_functions/functions/utils/subscription-gate.js` (premium gate logic)
+- `firebase_functions/functions/utils/rate-limiter.js` (rate limiting)
 
 **Files:**
 - Modify: `firebase_functions/functions/strengthos/stream-agent-normalized.js`
@@ -5025,6 +5083,16 @@ git commit -m "feat: complete Phase 4 — MCP server for external LLM access"
 
 > **AD-1:** The workout completion pipeline stays in JavaScript. The existing 2,960 lines across 6 files, writing to 11 Firestore collections through 7 transaction patterns with 4 idempotency mechanisms, is battle-tested JS. The problem was *trigger reliability* (silent failures, no observability), not the language. This task replaces Firestore triggers with Cloud Tasks for reliable, observable, retryable processing.
 
+**Read first:**
+- `firebase_functions/functions/triggers/weekly-analytics.js` (1,026 lines — the trigger cascade being refactored)
+- `firebase_functions/functions/triggers/workout-routine-cursor.js` (142 lines — absorbed into processor)
+- `firebase_functions/functions/training/set-facts-generator.js` (629 lines — set_facts logic)
+- `firebase_functions/functions/utils/analytics-writes.js` (197 lines — series/rollup writes)
+- `firebase_functions/functions/utils/muscle-taxonomy.js` (572 lines — exercise→muscle mapping)
+- `firebase_functions/functions/utils/caps.js` (392 lines — volume caps)
+- `firebase_functions/functions/workouts/upsert-workout.js` (288 lines — where to add enqueue)
+- `firebase_functions/functions/workouts/complete-active-workout.js` — where to add enqueue
+
 **Files:**
 - Create: `firebase_functions/functions/training/process-workout-completion.js`
 - Create: `firebase_functions/functions/triggers/workout-completion-task.js`
@@ -5461,6 +5529,11 @@ git commit -m "refactor: move post_workout_analyst from canvas_orchestrator to t
 
 ### Task 40: Training Analyst — New Analysis Sections (Phase 6)
 
+**Read first:**
+- `adk_agent/training_analyst/app/analyzers/post_workout.py` (724 lines — existing analyzer pattern)
+- `adk_agent/training_analyst/app/analyzers/weekly_review.py` (786 lines — existing analyzer pattern)
+- `adk_agent/training_analyst/app/analyzers/base.py` (343 lines — base class)
+
 **Files:**
 - Modify: `adk_agent/training_analyst/app/analyzers/post_workout.py`
 - Modify: `adk_agent/training_analyst/app/analyzers/weekly_review.py`
@@ -5469,7 +5542,7 @@ git commit -m "refactor: move post_workout_analyst from canvas_orchestrator to t
 
 - [ ] **Step 1: Read existing analyzers**
 
-Read `adk_agent/training_analyst/app/analyzers/post_workout.py` and `weekly_review.py` to understand the pattern.
+Read the files listed in "Read first" above to understand the analyzer pattern.
 
 - [ ] **Step 2: Add plateau_detector.py**
 
@@ -5555,8 +5628,21 @@ git commit -m "feat(analyst): Phase 6 — add plateau, volume, periodization, co
 
 ### Task 41: iOS Cleanup (Phase 7)
 
+**Read first:**
+- `Povver/Povver/ViewModels/CanvasViewModel.swift` (943 lines — rename to ConversationViewModel)
+- `Povver/Povver/Services/DirectStreamingService.swift` (1,138 lines — SSE client)
+- `Povver/Povver/Models/StreamEvent.swift` (120 lines — event types to update)
+- `Povver/Povver/Services/CanvasService.swift` (355 lines — remove no-op callers)
+- `Povver/Povver/Services/ThinkingProcessState.swift` (602 lines — replace)
+- `Povver/Povver/UI/FocusMode/FocusModeWorkoutScreen.swift` (1,904 lines — split)
+- `Povver/Povver/Views/Tabs/CoachTabView.swift` (329 lines — collection path rename)
+- `Povver/Povver/Views/Coach/AllConversationsSheet.swift` (295 lines — collection path rename)
+- `firebase_functions/functions/strengthos/stream-agent-normalized.js` — remove EVENT_COMPAT
+- `firebase_functions/functions/index.js` — remove no-op stubs
+- `firebase_functions/firestore.rules` — rename canvases→conversations
+
 **Files:**
-- Modify: Various iOS files (see steps below)
+- Modify: Various iOS + backend files (see steps below)
 
 - [ ] **Step 0: Coordinated rename — all layers switch simultaneously**
 
