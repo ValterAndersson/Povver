@@ -1397,7 +1397,7 @@ deploy:
 		--timeout 300 \
 		--concurrency 1 \
 		--service-account ai-agents@$(PROJECT_ID).iam.gserviceaccount.com \
-		--set-env-vars "PROJECT_ID=$(PROJECT_ID),GOOGLE_CLOUD_PROJECT=$(PROJECT_ID)"
+		--set-env-vars "PROJECT_ID=$(PROJECT_ID),GOOGLE_CLOUD_PROJECT=$(PROJECT_ID),ENABLE_USAGE_TRACKING=true,CONVERSATION_COLLECTION=canvases,FIREBASE_API_KEY=$${FIREBASE_API_KEY:?Set FIREBASE_API_KEY env var},MYON_API_KEY=$${MYON_API_KEY:?Set MYON_API_KEY env var},MYON_FUNCTIONS_BASE_URL=$${MYON_FUNCTIONS_BASE_URL:-https://us-central1-myon-53d85.cloudfunctions.net}"
 ```
 
 - [ ] **Step 3: Create Dockerfile**
