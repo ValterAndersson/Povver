@@ -9,7 +9,7 @@
  *   - set_facts              (per-user)
  *   - analytics_series_exercise       (per-user, keyed by exercise_id)
  *   - analytics_series_muscle_group   (per-user, keyed by muscle_group)
- *   - series_muscles          (per-user, keyed by muscle)
+ *   - series_muscles           (per-user, keyed by muscle — note: analytics-writes.js uses analytics_series_muscle separately)
  *   - analysis_insights       (per-user)
  *   - weekly_reviews          (per-user)
  *   - agent_recommendations   (per-user)
