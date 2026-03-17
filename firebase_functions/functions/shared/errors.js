@@ -28,6 +28,16 @@ class PermissionError extends AppError {
   }
 }
 
+// Alias for modules that import as PermissionDeniedError
+const PermissionDeniedError = PermissionError;
+
+class ConflictError extends AppError {
+  constructor(message, details) {
+    super(message, 'ABORTED', 409);
+    this.details = details;
+  }
+}
+
 function mapErrorToResponse(res, err) {
   if (err instanceof AppError) {
     return res.status(err.httpStatus).json({
@@ -42,4 +52,4 @@ function mapErrorToResponse(res, err) {
   });
 }
 
-module.exports = { AppError, ValidationError, NotFoundError, PermissionError, mapErrorToResponse };
+module.exports = { AppError, ValidationError, NotFoundError, PermissionError, PermissionDeniedError, ConflictError, mapErrorToResponse };
