@@ -184,7 +184,7 @@ struct AllConversationsSheet: View {
 
         let db = Firestore.firestore()
         do {
-            let snapshot = try await db.collection("users").document(uid).collection("canvases")
+            let snapshot = try await db.collection("users").document(uid).collection("conversations")
                 .whereField("status", isEqualTo: "active")
                 .order(by: "updatedAt", descending: true)
                 .limit(to: pageSize)
@@ -214,7 +214,7 @@ struct AllConversationsSheet: View {
 
         let db = Firestore.firestore()
         do {
-            let snapshot = try await db.collection("users").document(uid).collection("canvases")
+            let snapshot = try await db.collection("users").document(uid).collection("conversations")
                 .whereField("status", isEqualTo: "active")
                 .order(by: "updatedAt", descending: true)
                 .start(afterDocument: last)

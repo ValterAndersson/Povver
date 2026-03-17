@@ -70,12 +70,19 @@ class PostWorkoutAnalyzer(BaseAnalyzer):
             db, user_id, weeks=4
         )
 
+        # 6c. Compute progression candidates from workout exercises
+        progression_candidates = self._compute_progression_candidates(
+            workout, series
+        )
+
         # 7. Build LLM input (~20KB total)
         llm_input_data = {
             "workout": workout,
             "recent_rollups": rollups_list,
             "exercise_series": series,
         }
+        if progression_candidates:
+            llm_input_data["progression_candidates"] = progression_candidates
         if routine_context:
             llm_input_data["routine_context"] = routine_context
         if exercise_catalog:
@@ -95,7 +102,10 @@ class PostWorkoutAnalyzer(BaseAnalyzer):
         )
 
         # 9. Write to analysis_insights
-        insight_id = self._write_insight(db, user_id, workout_id, workout, result)
+        insight_id = self._write_insight(
+            db, user_id, workout_id, workout, result,
+            progression_candidates=progression_candidates,
+        )
 
         self.log_event(
             "post_workout_completed",
@@ -493,9 +503,102 @@ class PostWorkoutAnalyzer(BaseAnalyzer):
             )
             return []
 
+    def _compute_progression_candidates(
+        self, workout: Dict[str, Any], series: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Identify exercises ready for weight increase.
+
+        An exercise is a progression candidate if:
+        1. It hit target reps (rep_range upper bound) in this workout
+        2. Average RIR >= 2 (indicating reserve capacity)
+        3. Recent series confirms the trend (not a one-off)
+
+        Returns list of:
+        { exercise_name, current_weight, suggested_weight,
+          reason: "Hit X reps at RPE Y for N consecutive sessions" }
+        """
+        candidates = []
+        series_by_id = {s["exercise_id"]: s for s in series}
+
+        for ex in workout.get("exercises", []):
+            ex_name = ex.get("name")
+            ex_id = ex.get("exercise_id")
+            top_weight = ex.get("top_weight_kg")
+            avg_rir = ex.get("avg_rir")
+            rep_range = ex.get("rep_range")
+
+            if not all([ex_name, top_weight, top_weight > 0]):
+                continue
+
+            # Check RIR >= 2 (reserve capacity)
+            if avg_rir is None or avg_rir < 2.0:
+                continue
+
+            # Check target reps hit — use upper bound of rep range
+            if not rep_range:
+                continue
+            try:
+                if "-" in str(rep_range):
+                    target_reps = int(str(rep_range).split("-")[1])
+                else:
+                    target_reps = int(rep_range)
+            except (ValueError, IndexError):
+                continue
+
+            # Only consider meaningful rep counts
+            if target_reps < 3 or target_reps > 20:
+                continue
+
+            # Confirm trend: check if recent series shows consistent performance
+            ex_series = series_by_id.get(ex_id)
+            consecutive_sessions = 1  # This workout counts as 1
+
+            if ex_series and ex_series.get("weeks"):
+                recent_weeks = ex_series["weeks"][:3]  # Last 3 weeks
+                for wk in recent_weeks:
+                    wk_rir = wk.get("avg_rir")
+                    if wk_rir is not None and wk_rir >= 2.0:
+                        consecutive_sessions += 1
+                    else:
+                        break
+
+            # Need at least 2 consecutive sessions with RIR >= 2
+            if consecutive_sessions < 2:
+                continue
+
+            # Compute suggested weight
+            # +2.5% for compounds (>40kg), +5% for isolation, rounded to 2.5kg
+            if top_weight > 40:
+                increment = top_weight * 0.025
+            else:
+                increment = top_weight * 0.05
+
+            # Round to nearest 1.25kg, minimum 1.25kg increment
+            increment = max(1.25, round(increment / 1.25) * 1.25)
+            # Cap at +5kg
+            increment = min(increment, 5.0)
+            suggested_weight = round(top_weight + increment, 2)
+
+            # RPE = 10 - RIR
+            rpe = round(10 - avg_rir, 1)
+
+            candidates.append({
+                "exercise_name": ex_name,
+                "exercise_id": ex_id,
+                "current_weight": top_weight,
+                "suggested_weight": suggested_weight,
+                "reason": (
+                    f"Hit {target_reps} reps at RPE {rpe} "
+                    f"for {consecutive_sessions} consecutive sessions"
+                ),
+            })
+
+        return candidates
+
     def _write_insight(
         self, db, user_id: str, workout_id: str,
-        workout: Dict[str, Any], result: Dict[str, Any]
+        workout: Dict[str, Any], result: Dict[str, Any],
+        progression_candidates: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         """Write insight to analysis_insights with plan-specified schema."""
         now = datetime.now(timezone.utc)
@@ -512,6 +615,10 @@ class PostWorkoutAnalyzer(BaseAnalyzer):
             "flags": result.get("flags", []),
             "recommendations": result.get("recommendations", []),
         }
+
+        # Include algorithmically-computed progression candidates
+        if progression_candidates:
+            doc_data["progression_candidates"] = progression_candidates
 
         # Include template_diff summary if the workout had user modifications
         template_diff = workout.get("template_diff")

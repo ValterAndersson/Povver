@@ -200,13 +200,7 @@ const TOOL_LABELS = {
   tool_publish_cards: 'Publishing',
 };
 
-// Backward compatibility — new Cloud Run event names → iOS-expected names
-// Removed in Phase 7 when iOS is updated
-const EVENT_COMPAT = {
-  'tool_start': 'toolRunning',
-  'tool_end': 'toolComplete',
-  'clarification': 'clarification.request',
-};
+// EVENT_COMPAT removed in Phase 7 — iOS now uses tool_start/tool_end/clarification directly.
 
 const TELEMETRY_LABELS = {
   'route.workout_planning': 'Routing to workout planner',
@@ -516,7 +510,7 @@ function transformToIOSEvent(adkEvent) {
       
       return {
         ...base,
-        type: 'toolRunning',
+        type: 'tool_start',
         content: {
           tool: toolName,
           tool_name: toolName,
@@ -555,7 +549,7 @@ function transformToIOSEvent(adkEvent) {
       
       return {
         ...base,
-        type: 'toolComplete',
+        type: 'tool_end',
         content: {
           tool: toolName,
           tool_name: toolName,
@@ -581,7 +575,7 @@ function transformToIOSEvent(adkEvent) {
     case 'text_commit':
       return {
         ...base,
-        type: 'agentResponse',
+        type: 'message',
         content: {
           text: adkEvent.text || '',
           role: 'assistant',
@@ -593,9 +587,10 @@ function transformToIOSEvent(adkEvent) {
       // Track thinking start time
       eventStartTimes.set('thinking', timestamp);
       
+      // thinking/thought events mapped to status (no longer separate event types)
       return {
         ...base,
-        type: 'thinking',
+        type: 'status',
         content: {
           text: adkEvent.text || 'Analyzing...'
         },
@@ -603,20 +598,15 @@ function transformToIOSEvent(adkEvent) {
           start_time: timestamp
         }
       };
-    
+
     case 'thought':
-      // Calculate thinking duration
-      const thinkingStartTime = eventStartTimes.get('thinking');
-      const thinkingMeta = thinkingStartTime ? { start_time: thinkingStartTime } : {};
       eventStartTimes.delete('thinking');
-      
       return {
         ...base,
-        type: 'thought',
+        type: 'status',
         content: {
-          text: adkEvent.text || ''
-        },
-        metadata: thinkingMeta
+          text: adkEvent.text || 'Done thinking'
+        }
       };
     
     case 'session':
@@ -824,8 +814,7 @@ function relayCloudRunStream(stream, sse, persistWorkspaceEntry, normalizer, use
           const evt = JSON.parse(jsonStr);
           const eventType = evt.type || 'unknown';
 
-          // Translate event types for iOS backward compatibility
-          const translatedType = EVENT_COMPAT[eventType] || eventType;
+          const translatedType = eventType;
 
           // Accumulate agent text for conversation persistence
           if (eventType === 'message' && evt.data?.text) {

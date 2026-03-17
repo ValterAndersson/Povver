@@ -27,7 +27,7 @@ Before writing any code:
 1. **Read central docs.** Start with `docs/SYSTEM_ARCHITECTURE.md` and `docs/SECURITY.md`. Then read the module-specific doc for the layer you are working in:
    - iOS: `docs/IOS_ARCHITECTURE.md`
    - Firebase Functions: `docs/FIREBASE_FUNCTIONS_ARCHITECTURE.md`
-   - Agent system: `docs/SHELL_AGENT_ARCHITECTURE.md`
+   - Agent system: `docs/SHELL_AGENT_ARCHITECTURE.md` (covers `adk_agent/agent_service/`)
    - Catalog orchestrator: `docs/CATALOG_ORCHESTRATOR_ARCHITECTURE.md`
 2. **Read directory-level `ARCHITECTURE.md`** files in the directories you will modify.
 3. **Read the source files** you intend to change, and the adjacent files that call into or are called by them.
@@ -156,12 +156,24 @@ npm run serve   # emulators: functions:5001, firestore:8085, UI:4000
 npm run deploy
 ```
 
-### Agent System (Canvas Orchestrator)
+### Agent Service (Cloud Run)
+```bash
+cd adk_agent/agent_service
+make install | deploy | dev | test | lint | format | check | chat
+```
+`make deploy` resolves the GCP SA key from `$GOOGLE_APPLICATION_CREDENTIALS` → `$GCP_SA_KEY` → hardcoded fallback. The SA (`ai-agents@myon-53d85.iam.gserviceaccount.com`) must have `roles/aiplatform.user`.
+
+### MCP Server (Cloud Run)
+```bash
+cd mcp_server
+make build | deploy | dev
+```
+
+### Agent System — Legacy (Canvas Orchestrator, DEPRECATED)
 ```bash
 cd adk_agent/canvas_orchestrator
 make install | deploy | dev | test | lint | format | check | chat
 ```
-`make deploy` resolves the GCP SA key from `$GOOGLE_APPLICATION_CREDENTIALS` → `$GCP_SA_KEY` → hardcoded fallback. The SA (`ai-agents@myon-53d85.iam.gserviceaccount.com`) must have `roles/aiplatform.user`.
 
 ### Training Analyst
 ```bash
@@ -206,3 +218,10 @@ When adding a new field or data shape, update all affected layers:
 | Field `templateIds` | `template_ids` (snake_case everywhere) |
 | Field `weight` in workout sets | `weight_kg` (templates still use `weight` as a prescription value) |
 | `docs/platformvision.md` | `SYSTEM_ARCHITECTURE.md`, `IOS_ARCHITECTURE.md`, `SHELL_AGENT_ARCHITECTURE.md` |
+| `adk_agent/canvas_orchestrator/` | `adk_agent/agent_service/` (Cloud Run) |
+| Vertex AI Agent Engine | Cloud Run agent service |
+| `getServiceToken` / `exchange-token.js` | Removed (no sessions) |
+| `invokeCanvasOrchestrator` | Direct Cloud Run call via SSE proxy |
+| `openCanvas` / `bootstrapCanvas` / `initializeSession` / `preWarmSession` | Removed (sessions eliminated) |
+| `canvases` collection | `conversations` collection |
+| `triggers/workout-routine-cursor.js` | `training/process-workout-completion.js` (Cloud Tasks) |

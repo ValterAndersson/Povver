@@ -246,30 +246,8 @@ exports.proposeCards = functions.https.onRequest((req, res) => withApiKey(propos
 exports.expireProposals = functions.https.onRequest((req, res) => withApiKey(expireProposals)(req, res));
 exports.emitEvent = functions.https.onRequest((req, res) => withApiKey(emitEvent)(req, res));
 exports.purgeCanvas = functions.https.onRequest((req, res) => requireFlexibleAuth(purgeCanvas)(req, res));
-// No-op stubs — iOS calls these until Phase 7 coordinated cleanup (AD-4).
-exports.initializeSession = onRequestV2(requireFlexibleAuth(async (req, res) => {
-  const { ok } = require('./utils/response');
-  return ok(res, { sessionId: null, isReused: false });
-}));
-exports.openCanvas = onRequestV2(requireFlexibleAuth(async (req, res) => {
-  const { ok } = require('./utils/response');
-  const { v4: uuidv4 } = require('uuid');
-  return ok(res, {
-    canvasId: req.body.canvasId || uuidv4(),
-    sessionId: null,
-    isNewSession: true,
-    resumeState: { cards: [], cardCount: 0 },
-  });
-}));
-exports.bootstrapCanvas = onRequestV2(requireFlexibleAuth(async (req, res) => {
-  const { ok } = require('./utils/response');
-  const { v4: uuidv4 } = require('uuid');
-  return ok(res, { canvasId: req.body.canvasId || uuidv4(), bootstrapped: true });
-}));
-exports.preWarmSession = onRequestV2(requireFlexibleAuth(async (req, res) => {
-  const { ok } = require('./utils/response');
-  return ok(res, { preWarmed: true });
-}));
+// No-op stubs removed in Phase 7 (openCanvas, bootstrapCanvas, initializeSession, preWarmSession).
+// Conversation ID is now generated client-side; agent service creates docs on first message.
 exports.runAnalyticsForUser = functions.https.onRequest((req, res) => requireFlexibleAuth(runAnalyticsForUser)(req, res));
 exports.compactAnalyticsForUser = functions.https.onRequest((req, res) => requireFlexibleAuth(compactAnalyticsForUser)(req, res));
 exports.publishWeeklyJob = functions.https.onRequest((req, res) => requireFlexibleAuth(publishWeeklyJob)(req, res));

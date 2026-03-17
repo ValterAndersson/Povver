@@ -18,7 +18,7 @@ import SwiftUI
 //
 // USAGE:
 //   @StateObject private var thinkingState = ThinkingProcessState()
-//   thinkingState.handleEvent(event)  // Called from CanvasViewModel
+//   thinkingState.handleEvent(event)  // Called from ConversationViewModel
 //   ThinkingBubble(state: thinkingState)  // Used in UI
 //
 // =============================================================================
@@ -237,27 +237,18 @@ public final class ThinkingProcessState: ObservableObject {
         guard let eventType = event.eventType else { return }
         
         switch eventType {
-        case .pipeline:
-            handlePipelineEvent(event)
-            
-        case .thinking:
-            handleThinkingStart(event)
-            
-        case .thought:
-            handleThoughtComplete(event)
-            
-        case .toolRunning:
+        case .toolStart:
             handleToolStart(event)
-            
-        case .toolComplete:
+
+        case .toolEnd:
             handleToolComplete(event)
-            
+
         case .done:
             handleDone()
-            
+
         case .error:
             handleError(event)
-            
+
         default:
             break
         }
@@ -310,102 +301,7 @@ public final class ThinkingProcessState: ObservableObject {
     }
     
     // MARK: - Private Event Handlers
-    
-    private func handlePipelineEvent(_ event: StreamEvent) {
-        guard let step = event.content?["step"]?.value as? String else { return }
-        
-        switch step.lowercased() {
-        case "router":
-            // Router decision - update planning step with lane info
-            let lane = event.content?["lane"]?.value as? String ?? "slow"
-            let intent = event.content?["intent"]?.value as? String
-            
-            updateStep(forPhase: .planning) { step in
-                step.detail = intent != nil ? "Intent: \(intent!)" : "Lane: \(lane)"
-                step.status = .complete
-            }
-            
-        case "planner":
-            // Planner output - show the plan summary with readable steps
-            let planIntent = event.content?["intent"]?.value as? String
-            let rationale = event.content?["rationale"]?.value as? String
-            let tools = event.content?["suggested_tools"]?.value as? [String] ?? []
-            
-            // Build a readable plan from suggested tools
-            var planDetail = ""
-            if let intent = planIntent {
-                planDetail = intent
-            }
-            
-            // If we have tools, add a numbered plan
-            if !tools.isEmpty {
-                let planSteps = tools.enumerated().map { index, tool in
-                    "\(index + 1). \(humanReadableToolName(tool))"
-                }
-                let planList = planSteps.joined(separator: "\n")
-                if planDetail.isEmpty {
-                    planDetail = "Plan:\n\(planList)"
-                } else {
-                    planDetail = "\(planDetail)\n\nPlan:\n\(planList)"
-                }
-            }
-            
-            // If we have rationale, append it
-            if let rationale = rationale, !rationale.isEmpty {
-                if planDetail.isEmpty {
-                    planDetail = rationale
-                }
-            }
-            
-            // Complete the planning step with the full plan
-            updateStep(forPhase: .planning) { step in
-                step.detail = planDetail.isEmpty ? nil : planDetail
-                step.status = .complete
-            }
-            
-            // Track expected steps for progress indicator
-            if !tools.isEmpty {
-                totalExpectedSteps = tools.count
 
-                currentPhase = .gathering
-                steps.append(ThinkingStep(
-                    phase: .gathering,
-                    title: "Gathering information",
-                    detail: "\(tools.count) steps to complete",
-                    status: .active
-                ))
-            }
-            
-        case "critic":
-            // Critic validation
-            let passed = event.content?["passed"]?.value as? Bool ?? true
-            
-            steps.append(ThinkingStep(
-                phase: .finalizing,
-                title: "Validating response",
-                detail: passed ? "Passed" : "Issues found",
-                status: .complete
-            ))
-            
-        default:
-            break
-        }
-    }
-    
-    private func handleThinkingStart(_ event: StreamEvent) {
-        // If we don't have a start time, this is the beginning
-        if startTime == nil {
-            start()
-        }
-    }
-    
-    private func handleThoughtComplete(_ event: StreamEvent) {
-        // Complete any active thinking step
-        updateActiveStep { step in
-            step.status = .complete
-        }
-    }
-    
     private func handleToolStart(_ event: StreamEvent) {
         let toolName = (event.content?["tool"]?.value as? String) ??
                        (event.content?["tool_name"]?.value as? String) ?? "tool"

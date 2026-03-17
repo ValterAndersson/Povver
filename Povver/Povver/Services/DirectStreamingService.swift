@@ -23,15 +23,15 @@ import Combine
 //   SSE endpoint that normalizes Agent Engine events into structured stream
 //
 // STREAM EVENT FLOW:
-// 1. User sends message → CanvasViewModel.sendMessage()
-// 2. CanvasViewModel calls DirectStreamingService.streamQuery()
+// 1. User sends message → ConversationViewModel.sendMessage()
+// 2. ConversationViewModel calls DirectStreamingService.streamQuery()
 // 3. DirectStreamingService POSTs to streamAgentNormalized with SSE Accept header
 // 4. Firebase Function proxies to Agent Engine and normalizes events
 // 5. Agent Engine emits _pipeline events (router, planner, critic) for CoT visibility
 // 6. Agent calls tools which emit _display metadata (see response_helpers.py)
 // 7. Firebase extracts _pipeline/_display and emits structured SSE events
 // 8. DirectStreamingService parses SSE → StreamEvent objects
-// 9. CanvasViewModel.handleIncomingStreamEvent() forwards to ThinkingProcessState
+// 9. ConversationViewModel.handleIncomingStreamEvent() forwards to ThinkingProcessState
 // 10. ThinkingBubble renders Gemini-style collapsible thought process
 //
 // EVENT TYPES RECEIVED:
@@ -48,10 +48,10 @@ import Combine
 //
 // RELATED IOS FILES:
 // - ChatService.swift: Manages chat sessions, uses this for streaming
-// - CanvasViewModel.swift: Uses streamQuery, forwards events to ThinkingProcessState
+// - ConversationViewModel.swift: Uses streamQuery, forwards events to ThinkingProcessState
 // - ThinkingProcessState.swift: Groups events into phases (Planning → Gathering → Building)
 // - ThinkingBubble.swift: Gemini-style collapsible thought process UI
-// - StreamEvent.swift (Models): Event data model with .pipeline case
+// - StreamEvent.swift (Models): Event data model (9-event contract)
 // - WorkspaceTimelineView.swift: Timeline with ThinkingBubble at top
 //
 // RELATED AGENT FILES:

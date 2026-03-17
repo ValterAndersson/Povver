@@ -1,7 +1,7 @@
 import SwiftUI
 
-struct CanvasScreen: View {
-    @StateObject private var vm = CanvasViewModel()
+struct ConversationScreen: View {
+    @StateObject private var vm = ConversationViewModel()
     let userId: String
     let canvasId: String?
     let purpose: String?
@@ -53,7 +53,7 @@ struct CanvasScreen: View {
         .environment(\.cardActionHandler, handleCardAction)
         .sheet(isPresented: $showRefine) { RefineSheet(text: $refineText) { _ in showRefine = false } }
         .sheet(isPresented: $showSwap) { SwapSheet { _, _ in showSwap = false } }
-        .navigationTitle("Canvas")
+        .navigationTitle("Conversation")
         .onAppear {
             if let cid = canvasId {
                 vm.start(userId: userId, canvasId: cid)
@@ -119,7 +119,7 @@ private extension Optional where Wrapped == String {
 }
 
 // MARK: - Compose Bar
-extension CanvasScreen {
+extension ConversationScreen {
     /// Check if there's any session plan card
     private var hasSessionPlanCard: Bool {
         vm.cards.contains { $0.type == .session_plan }
@@ -305,7 +305,7 @@ extension CanvasScreen {
                                     showFocusMode = true
                                 }
                             } catch {
-                                print("[CanvasScreen] Failed to start workout from plan: \(error)")
+                                print("[ConversationScreen] Failed to start workout from plan: \(error)")
                                 // Fallback: pass plan directly (client-side parsing)
                                 await MainActor.run {
                                     planBlocksForFocusMode = blocks
@@ -356,7 +356,7 @@ extension CanvasScreen {
                             _ = try await CloudFunctionService().createTemplate(template: template)
                             await MainActor.run { toastText = "Template saved" }
                         } catch {
-                            print("[CanvasScreen] Failed to save template: \(error)")
+                            print("[ConversationScreen] Failed to save template: \(error)")
                             await MainActor.run { toastText = "Failed to save template" }
                         }
                     }
@@ -400,7 +400,7 @@ extension CanvasScreen {
                    let field = action.payload?["field"],
                    let currentValue = action.payload?["current_value"] {
                     // For now, just log - TODO: implement inline number picker
-                    print("[CanvasScreen] edit_set: \(exerciseName) \(field)=\(currentValue)")
+                    print("[ConversationScreen] edit_set: \(exerciseName) \(field)=\(currentValue)")
                 }
                 
             case "adjust_workout":
@@ -435,7 +435,7 @@ extension CanvasScreen {
                                 }
                             }
                         } catch {
-                            print("[CanvasScreen] save_routine failed: \(error)")
+                            print("[ConversationScreen] save_routine failed: \(error)")
                             await MainActor.run { vm.errorMessage = "Failed to save routine: \(error.localizedDescription)" }
                         }
                     }
@@ -479,7 +479,7 @@ extension CanvasScreen {
     }
 }
 
-private extension CanvasScreen {
+private extension ConversationScreen {
     /// Filter and deduplicate cards:
     /// - Session plans that are part of a routine (have groupId matching a routine_summary) are HIDDEN
     ///   because they will be accessed via RoutineSummaryCard expansion, not as standalone cards
@@ -544,7 +544,7 @@ private extension CanvasScreen {
     
     private var workspaceClarificationPrompt: ClarificationPrompt? {
         for entry in vm.workspaceEvents.reversed() {
-            guard entry.event.eventType == .clarificationRequest,
+            guard entry.event.eventType == .clarification,
                   let id = entry.event.content?["id"]?.value as? String,
                   answeredClarifications.contains(id) == false,
                   let question = entry.event.content?["question"]?.value as? String else { continue }

@@ -80,6 +80,12 @@ class WeeklyReviewAnalyzer(BaseAnalyzer):
         rollups_map = {r["week_id"]: r for r in rollups}
         fatigue_metrics = self._compute_fatigue_metrics(rollups_map)
 
+        # 7a. Compute periodization status (ACWR-based)
+        periodization_status = self._compute_periodization_status(rollups)
+
+        # 7b2. Compute consistency trends (session frequency over time)
+        consistency_trends = self._compute_consistency_trends(rollups)
+
         # 7b. Read recommendation history for lifecycle tracking
         recommendation_history = self._read_recommendation_history(
             db, user_id, weeks=8
@@ -103,6 +109,10 @@ class WeeklyReviewAnalyzer(BaseAnalyzer):
             llm_input_data["fatigue_metrics"] = fatigue_metrics
         if recommendation_history:
             llm_input_data["recommendation_history"] = recommendation_history
+        if periodization_status:
+            llm_input_data["periodization_status"] = periodization_status
+        if consistency_trends:
+            llm_input_data["consistency_trends"] = consistency_trends
         llm_input = json.dumps(llm_input_data, indent=2, default=str)
 
         # 9. Call LLM (Pro for comprehensive analysis)
@@ -115,7 +125,11 @@ class WeeklyReviewAnalyzer(BaseAnalyzer):
 
         # 10. Write to weekly_reviews/{YYYY-WNN}
         iso_week = self._date_to_iso_week(week_ending)
-        self._write_review(db, user_id, iso_week, week_ending, result)
+        self._write_review(
+            db, user_id, iso_week, week_ending, result,
+            periodization_status=periodization_status,
+            consistency_trends=consistency_trends,
+        )
 
         self.log_event(
             "weekly_review_completed",
@@ -509,13 +523,171 @@ class WeeklyReviewAnalyzer(BaseAnalyzer):
             )
             return []
 
+    def _compute_periodization_status(
+        self, rollups: List[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """Compute Acute:Chronic Workload Ratio (ACWR) for periodization.
+
+        Uses weekly volume (total_sets * avg intensity proxy) over:
+        - 4-week acute window (most recent 4 weeks)
+        - 8-week chronic window (all available, up to 8 weeks before acute)
+
+        Flags:
+        - ACWR > 1.3: injury risk, suggest deload
+        - ACWR < 0.8: detraining risk
+        - ACWR > 1.2 for 2+ consecutive weeks: suggest deload
+
+        References: Gabbett 2016; Hulin et al. 2014
+        """
+        if len(rollups) < 4:
+            return None
+
+        # Sort rollups chronologically (oldest first)
+        sorted_rollups = sorted(rollups, key=lambda r: r["week_id"])
+
+        # Use total_sets as the workload proxy (hard_sets preferred if available)
+        def _weekly_load(r: Dict[str, Any]) -> float:
+            return r.get("hard_sets_total") or r.get("total_sets", 0)
+
+        # Acute = last 4 weeks average
+        acute_weeks = sorted_rollups[-4:]
+        acute_avg = sum(_weekly_load(r) for r in acute_weeks) / len(acute_weeks)
+
+        # Chronic = weeks before the acute window (up to 8 weeks)
+        chronic_weeks = sorted_rollups[:-4][-8:] if len(sorted_rollups) > 4 else []
+
+        if not chronic_weeks:
+            # Not enough data for chronic baseline — use all available
+            chronic_weeks = sorted_rollups[:-1]
+
+        if not chronic_weeks:
+            return None
+
+        chronic_avg = sum(_weekly_load(r) for r in chronic_weeks) / len(chronic_weeks)
+
+        acwr = round(acute_avg / chronic_avg, 2) if chronic_avg > 0 else None
+
+        # Determine status
+        if acwr is None:
+            status = "unknown"
+        elif acwr > 1.5:
+            status = "overreached"
+        elif acwr > 1.3:
+            status = "high_risk"
+        elif acwr > 1.2:
+            status = "elevated"
+        elif acwr < 0.8:
+            status = "detraining"
+        else:
+            status = "optimal"
+
+        # Check for sustained elevation (ACWR > 1.2 for 2+ consecutive weeks)
+        # Compute rolling ACWR for last few weeks
+        suggest_deload = False
+        if len(sorted_rollups) >= 6:
+            # Check last 2 individual week ACWRs
+            consecutive_elevated = 0
+            for i in range(-2, 0):
+                week_load = _weekly_load(sorted_rollups[i])
+                if chronic_avg > 0 and (week_load / chronic_avg) > 1.2:
+                    consecutive_elevated += 1
+            if consecutive_elevated >= 2:
+                suggest_deload = True
+
+        result = {
+            "acwr": acwr,
+            "acute_avg": round(acute_avg, 1),
+            "chronic_avg": round(chronic_avg, 1),
+            "status": status,
+            "suggest_deload": suggest_deload,
+            "acute_window_weeks": len(acute_weeks),
+            "chronic_window_weeks": len(chronic_weeks),
+        }
+
+        if suggest_deload:
+            result["deload_reason"] = (
+                "ACWR > 1.2 for 2+ consecutive weeks — "
+                "elevated injury risk (Gabbett 2016)"
+            )
+
+        return result
+
+    def _compute_consistency_trends(
+        self, rollups: List[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """Count training sessions per week over 4/8/12 week windows.
+
+        Flags "dropout risk" if frequency has declined for 3+ consecutive weeks.
+
+        Returns:
+            { weeks_4, weeks_8, weeks_12, trend, risk }
+        """
+        if len(rollups) < 4:
+            return None
+
+        # Sort chronologically (oldest first)
+        sorted_rollups = sorted(rollups, key=lambda r: r["week_id"])
+
+        def _avg_sessions(weeks_data: List[Dict[str, Any]]) -> float:
+            if not weeks_data:
+                return 0
+            sessions = [w.get("workouts", 0) for w in weeks_data]
+            return round(sum(sessions) / len(sessions), 1)
+
+        weeks_4 = _avg_sessions(sorted_rollups[-4:])
+        weeks_8 = _avg_sessions(sorted_rollups[-8:]) if len(sorted_rollups) >= 8 else None
+        weeks_12 = _avg_sessions(sorted_rollups[-12:]) if len(sorted_rollups) >= 12 else None
+
+        # Determine trend by comparing recent vs older windows
+        if weeks_8 is not None:
+            if weeks_4 > weeks_8 + 0.3:
+                trend = "increasing"
+            elif weeks_4 < weeks_8 - 0.3:
+                trend = "declining"
+            else:
+                trend = "stable"
+        else:
+            trend = "insufficient_data"
+
+        # Check for 3+ consecutive weeks of declining frequency
+        risk = "low"
+        if len(sorted_rollups) >= 4:
+            recent = sorted_rollups[-4:]
+            declining_streak = 0
+            for i in range(1, len(recent)):
+                if recent[i].get("workouts", 0) < recent[i - 1].get("workouts", 0):
+                    declining_streak += 1
+                else:
+                    declining_streak = 0
+
+            if declining_streak >= 3:
+                risk = "high"
+            elif declining_streak >= 2 or trend == "declining":
+                risk = "moderate"
+
+        result = {
+            "weeks_4": weeks_4,
+            "trend": trend,
+            "risk": risk,
+        }
+
+        if weeks_8 is not None:
+            result["weeks_8"] = weeks_8
+        if weeks_12 is not None:
+            result["weeks_12"] = weeks_12
+
+        return result
+
     def _write_review(
         self, db, user_id: str, iso_week: str,
-        week_ending: str, result: Dict[str, Any]
+        week_ending: str, result: Dict[str, Any],
+        periodization_status: Optional[Dict[str, Any]] = None,
+        consistency_trends: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Write review to weekly_reviews/{YYYY-WNN} with plan-specified schema.
 
-        Includes new optional fields: periodization, routine_recommendations, fatigue_status.
+        Includes new optional fields: periodization, routine_recommendations,
+        fatigue_status, periodization_status, consistency_trends.
         """
         now = datetime.now(timezone.utc)
         expires_at = now + timedelta(days=TTL_REVIEWS)
@@ -535,6 +707,12 @@ class WeeklyReviewAnalyzer(BaseAnalyzer):
             "routine_recommendations": result.get("routine_recommendations", []),
             "fatigue_status": result.get("fatigue_status"),
         }
+
+        # Algorithmically computed fields (not from LLM)
+        if periodization_status:
+            doc_data["periodization_status"] = periodization_status
+        if consistency_trends:
+            doc_data["consistency_trends"] = consistency_trends
 
         ref = (
             db.collection("users").document(user_id)

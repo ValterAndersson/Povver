@@ -251,11 +251,8 @@ final class OnboardingViewModel: ObservableObject {
             """
 
             do {
-                let canvasService = CanvasService()
-                let (canvasId, _) = try await canvasService.openCanvas(
-                    userId: uid,
-                    purpose: "onboarding"
-                )
+                // Generate conversation ID client-side (agent service creates doc on first message)
+                let canvasId = UUID().uuidString
 
                 let correlationId = UUID().uuidString
 

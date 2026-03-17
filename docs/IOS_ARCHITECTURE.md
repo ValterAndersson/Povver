@@ -14,7 +14,7 @@
 6. [Models](#models)
 7. [ViewModels](#viewmodels)
 8. [Views and UI](#views-and-ui)
-9. [Canvas System](#canvas-system)
+9. [Conversation System](#conversation-system)
 10. [Design System](#design-system)
 11. [Directory Structure](#directory-structure)
 
@@ -23,7 +23,7 @@
 ## Application Overview
 
 Povver is a SwiftUI-based iOS fitness coaching application. The app provides:
-- AI-powered workout planning via the Canvas system
+- AI-powered workout planning via the Conversation system
 - Routine and template management
 - Active workout tracking
 - Real-time agent streaming with thinking/tool visualization
@@ -41,7 +41,7 @@ Povver is a SwiftUI-based iOS fitness coaching application. The app provides:
 - Firebase Firestore for data persistence
 - Firebase Functions for backend API
 - Firebase Crashlytics for crash reporting (tagged with userId)
-- Vertex AI Agent Engine for AI agents (via streaming)
+- Agent Service on Cloud Run for AI agents (via SSE streaming)
 
 ---
 
@@ -206,18 +206,19 @@ Navigation entry points use `conversationId` instead of `canvasId`:
 - UUID v5 generation uses DNS namespace (RFC 4122) — same constant used in webhook for deterministic matching
 
 #### `DirectStreamingService`
-- Streams to Vertex AI Agent Engine via Firebase Function proxy (`streamAgentNormalized`)
+- Streams to Agent Service (Cloud Run) via Firebase Function proxy (`streamAgentNormalized`)
 - **Premium gate**: checks `SubscriptionService.shared.isPremium` before opening SSE connection; throws `StreamingError.premiumRequired` if false
 - Parses SSE events into `StreamEvent` objects (maps `error` JSON field to `content` for uniform downstream handling)
 - Handles markdown sanitization and deduplication
 - Returns `AsyncThrowingStream<StreamEvent, Error>`
-- Parameter `conversationId` passed to backend (also sends `canvasId` for backward compatibility during migration)
+- Parameter `conversationId` passed to backend
+- SSE contract uses 9 event types: `thinking`, `thought`, `tool_start`, `tool_end`, `message_start`, `text`, `artifact`, `message_end`, `error`
 
-#### `CanvasService`
-- `bootstrapCanvas(userId, purpose)` - Create new canvas
-- `openCanvas(userId, purpose)` - Open or resume canvas with session
-- `initializeSession(canvasId, purpose)` - Initialize agent session
-- `purgeCanvas(userId, canvasId)` - Delete canvas
+#### `CanvasService` (Partially DEPRECATED)
+- ~~`bootstrapCanvas(userId, purpose)`~~ - (REMOVED — canvas system replaced by conversations)
+- ~~`openCanvas(userId, purpose)`~~ - (REMOVED — no session init needed)
+- ~~`initializeSession(canvasId, purpose)`~~ - (REMOVED — sessions eliminated)
+- ~~`purgeCanvas(userId, canvasId)`~~ - (REMOVED)
 
 #### `ActiveWorkoutManager`
 - Manages live workout state (`ActiveWorkout`)
@@ -392,31 +393,30 @@ func withRetry<T>(
 
 ---
 
-## Canvas System
+## Conversation System
 
-The Canvas is the primary AI interaction surface. It displays cards organized by lanes and manages agent streaming. Cards are now delivered via SSE artifact events instead of Firestore listeners.
+The Conversation system is the primary AI interaction surface (renamed from "Canvas" system). It displays messages and inline artifacts, managing agent SSE streaming. Artifacts (workout plans, routines, analyses) are delivered via SSE events.
 
-### Canvas Lifecycle (Conversation-Based)
+### Conversation Lifecycle
 
 ```
-1. User opens Canvas tab
-2. CanvasScreen.onAppear → CanvasViewModel.bootstrap()
-3. bootstrap() calls openCanvas(userId, purpose)
-4. Backend returns canvasId + sessionId
-5. ViewModel attaches minimal Firestore listeners (workspace events, active workout)
-6. User sends message → sendMessage()
-7. Agent streams SSE response → artifact events contain card data
-8. handleIncomingStreamEvent() detects .artifact case
-9. buildCardFromArtifact() converts artifact data to CanvasCardModel
-10. Card appended to local cards array → UI refreshes
+1. User opens Coach tab or starts new conversation
+2. User sends first message → sendMessage()
+3. Conversation doc created lazily on first message (no session init needed)
+4. Agent streams SSE response → 9 event types
+5. handleIncomingStreamEvent() processes events
+6. Artifact events converted to CanvasCardModel (reuses renderers)
+7. Cards appended to local state → UI refreshes
 ```
 
-### Pre-Warming (SessionPreWarmer)
+### Session Management (REMOVED)
 
-`SessionPreWarmer` (singleton) pre-warms Vertex AI sessions on app appear to reduce cold-start latency:
-- Triggered by `CoachTabView.onAppear` and `MainTabsView.onAppear`
-- Calls backend pre-warm endpoint with `conversationId` and `canvasId`
-- No user-visible UI — runs silently in background
+Session pre-warming and initialization have been eliminated. The agent service is fully stateless. Conversations are created on first message — no `initializeSession`, `preWarmSession`, or `SessionPreWarmer` calls needed.
+
+**Removed components**:
+- `SessionPreWarmer.swift` (REMOVED)
+- `CanvasService.initializeSession()` (REMOVED)
+- `CanvasService.openCanvas()` (REMOVED)
 
 ### Card Actions
 
@@ -832,7 +832,7 @@ Povver/Povver/
 │   ├── Idempotency.swift           # Idempotency keys
 │   ├── RecommendationService.swift # Accept/reject recommendations via API
 │   ├── SessionManager.swift        # Session state
-│   ├── SessionPreWarmer.swift      # Vertex AI session pre-warming
+│   ├── SessionPreWarmer.swift      # (REMOVED — sessions eliminated)
 │   ├── SubscriptionService.swift   # StoreKit 2 subscription management
 │   ├── FocusModeWorkoutService.swift # Active workout API
 │   ├── WorkoutSessionLogger.swift  # On-device event log

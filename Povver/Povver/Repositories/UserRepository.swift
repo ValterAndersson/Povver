@@ -89,7 +89,7 @@ class UserRepository {
         // Matches Firestore security rules — "workout_templates" was wrong (collection is "templates")
         let subcollections = [
             "user_attributes", "linked_devices", "workouts", "templates",
-            "routines", "active_workouts", "canvases", "progress_reports",
+            "routines", "active_workouts", "conversations", "progress_reports",
             "weekly_stats", "analytics_series_exercise", "analytics_series_muscle",
             "analytics_rollups", "analytics_state"
         ]

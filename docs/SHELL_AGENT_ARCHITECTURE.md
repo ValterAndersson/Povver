@@ -20,20 +20,21 @@ Whether the user is chatting, clicking a button, or sleeping while a background 
 
 ---
 
-## Production Environment: Vertex AI Agent Engine
+## Production Environment: Cloud Run (Stateless Agent Service)
 
 ### Runtime Characteristics (CRITICAL FOR AI AGENTS TO UNDERSTAND)
 
-This system deploys to **Google Vertex AI Agent Engine**, a serverless, highly concurrent runtime environment. Understanding the runtime constraints is essential for any AI agent that will modify, extend, or debug this codebase.
+This system deploys to **Google Cloud Run** as a stateless container service (`adk_agent/agent_service/`). The previous Vertex AI Agent Engine deployment (`adk_agent/canvas_orchestrator/`) is DEPRECATED. Understanding the runtime constraints is essential for any AI agent that will modify, extend, or debug this codebase.
 
 **Key Runtime Properties:**
 
 | Property | Implication | Solution Applied |
 |----------|-------------|------------------|
-| **Serverless** | No persistent process state between cold starts | All state derived from message/database |
+| **Serverless** | No persistent process state between cold starts | All state derived from request/database |
 | **Highly Concurrent** | Multiple requests may hit the same warm instance simultaneously | Thread-safe ContextVars, not module globals |
-| **Async/Await** | ADK uses async generators for streaming | All handlers support async patterns |
+| **Async/Await** | FastAPI uses async handlers for streaming | All handlers support async patterns |
 | **Auto-scaled** | Instances spawn/die unpredictably | No instance-level caching of user state |
+| **No sessions** | Fully stateless — no session init, no pre-warming | Per-request context via ContextVar |
 
 ### The Concurrency Bug (CONTEXT FOR WHY WE USE CONTEXTVARS)
 
@@ -61,10 +62,12 @@ Timeline:
 
 | File | Responsibility | Concurrency Safety |
 |------|----------------|-------------------|
-| `shell/context.py` | Define ContextVar storage and accessors | ✅ Uses `ContextVar[SessionContext]` |
-| `agent_engine_app.py` | Set context BEFORE any routing | ✅ Calls `set_current_context()` first |
-| `shell/tools.py` | Retrieve context from ContextVar; workout-mode tool gating | ✅ Calls `get_current_context()`; `_check_workout_ban()` |
-| Legacy `coach_agent.py` | ❌ DEPRECATED - Uses module globals | ⛔ DO NOT USE |
+| `context.py` | Define ContextVar storage and accessors | ✅ Uses `ContextVar[SessionContext]` |
+| `main.py` | Set context BEFORE any routing | ✅ Calls `set_current_context()` first |
+| `tools/` | Retrieve context from ContextVar; workout-mode tool gating | ✅ Calls `get_current_context()`; `_check_workout_ban()` |
+| `context_builder.py` | Build per-request context from Firestore | ✅ Reads user profile, conversation history, agent memory |
+| `memory.py` | 4-tier memory system | ✅ Tier 3 (agent_memory) + Tier 4 (conversation summaries) |
+| Legacy `coach_agent.py` (canvas_orchestrator) | ❌ DEPRECATED - Uses module globals | ⛔ DO NOT USE |
 
 ---
 
@@ -73,7 +76,7 @@ Timeline:
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                              ENTRY POINT                                        │
-│                         agent_engine_app.py                                     │
+│                            main.py                                              │
 │                                                                                 │
 │   REQUEST (str or JSON)                                                         │
 │          │                                                                      │
@@ -127,39 +130,50 @@ Timeline:
 ## File Structure
 
 ```
-adk_agent/canvas_orchestrator/
+adk_agent/agent_service/            # CURRENT — Cloud Run deployment
 ├── app/
-│   ├── agent_engine_app.py       # Entry point - routes to 4 lanes
-│   ├── agent_multi.py            # Feature flag (USE_SHELL_AGENT)
+│   ├── main.py                     # Entry point (FastAPI, Cloud Run)
+│   ├── context.py                  # Per-request SessionContext (ContextVar, immutable)
+│   ├── context_builder.py          # Builds per-request context from Firestore
+│   ├── router.py                   # 4-Lane routing with route_request()
+│   ├── agent_loop.py               # Agent execution loop
+│   ├── memory.py                   # 4-tier memory (Tier 3 agent_memory, Tier 4 summaries)
+│   ├── instruction.py              # Unified Coach + Planner voice (includes WEIGHT PRESCRIPTION)
+│   ├── planner.py                  # Intent-specific tool planning
+│   ├── safety_gate.py              # Write operation confirmation
+│   ├── critic.py                   # Response validation
+│   ├── functional_handler.py       # Functional Lane (Flash, JSON)
+│   ├── firestore_client.py         # Firestore SDK singleton
+│   ├── observability.py            # Logging and tracing
 │   │
-│   ├── shell/                    # Shell Agent module
-│   │   ├── __init__.py
-│   │   ├── context.py            # Per-request SessionContext (immutable)
-│   │   ├── router.py             # 4-Lane routing with route_request()
-│   │   ├── instruction.py        # Unified Coach + Planner voice (includes WEIGHT PRESCRIPTION)
-│   │   ├── agent.py              # ShellAgent (gemini-2.5-flash)
-│   │   ├── tools.py              # Tool definitions from pure skills
-│   │   ├── planner.py            # Intent-specific tool planning
-│   │   ├── safety_gate.py        # Write operation confirmation
-│   │   ├── critic.py             # Response validation
-│   │   └── functional_handler.py # Functional Lane (Flash, JSON)
+│   ├── skills/                     # SHARED BRAIN - Pure logic
+│   │   ├── copilot_skills.py       # Lane 1: log_set, get_next_set
+│   │   ├── coach_skills.py         # Analytics, user data
+│   │   ├── planner_skills.py       # Artifact creation (returns data, not cards)
+│   │   ├── workout_skills.py       # Workout brief + mutation skills
+│   │   └── gated_planner.py        # Safety Gate wrapper
 │   │
-│   ├── skills/                   # SHARED BRAIN - Pure logic
-│   │   ├── __init__.py
-│   │   ├── copilot_skills.py     # Lane 1: log_set, get_next_set
-│   │   ├── coach_skills.py       # Analytics, user data
-│   │   ├── planner_skills.py     # Artifact creation (returns data, not cards)
-│   │   ├── workout_skills.py     # Workout brief + mutation skills
-│   │   └── gated_planner.py      # Safety Gate wrapper
-│   │
-│   └── agents/                   # LEGACY (deprecated)
-│       ├── coach_agent.py
-│       ├── planner_agent.py
-│       └── orchestrator.py
+│   ├── tools/                      # Tool wrappers (context-aware)
+│   └── llm/                        # LLM client abstraction
 │
-└── workers/                      # Lane 4: Background workers
-    └── post_workout_analyst.py   # Post-workout insight generation
+├── tests/                          # Test suite
+├── Dockerfile                      # Cloud Run container
+├── Makefile                        # Build, deploy, dev commands
+└── requirements.txt
+
+adk_agent/canvas_orchestrator/      # DEPRECATED — Vertex AI Agent Engine (do not use)
 ```
+
+### Memory System (4 Tiers)
+
+| Tier | Name | Storage | Scope | Purpose |
+|------|------|---------|-------|---------|
+| 1 | Session variables | ContextVar | Per-request | workout_mode, today, correlation_id |
+| 2 | Conversation history | Firestore | Per-conversation | `conversations/{id}/messages` |
+| 3 | Agent memory | Firestore | Per-user, persistent | `users/{uid}/agent_memory/{auto-id}` — facts remembered across conversations |
+| 4 | Conversation summaries | Firestore | Per-conversation | Compressed context from long conversations |
+
+Tier 3 (`agent_memory`) allows the agent to remember user preferences, injury notes, and other facts across conversations. Documents have fields: `content`, `category`, `active`, `created_at`, `source_conversation_id`, `retired_at`, `retire_reason`.
 
 ---
 
@@ -432,7 +446,7 @@ def set_current_context(ctx: "SessionContext", message: str = "") -> None:
     Set the context for the current request.
     
     CRITICAL: This MUST be called at the start of stream_query() in 
-    agent_engine_app.py, BEFORE any routing or tool execution.
+    main.py, BEFORE any routing or tool execution.
     
     The ContextVar.set() method returns a Token, but we don't use it here
     because asyncio automatically handles context isolation per-task.
@@ -474,6 +488,17 @@ def get_current_message() -> str:
     return _message_context_var.get()
 ```
 
+### File: `context_builder.py` - Per-Request Context Assembly
+
+**Purpose:** Builds the full context for each request by reading from Firestore. This is the Tier 1-3 memory assembly point.
+
+**Responsibilities:**
+- Reads user profile and preferences
+- Fetches conversation history (Tier 2)
+- Loads active agent_memory entries (Tier 3)
+- Loads conversation summary if available (Tier 4)
+- Assembles everything into the system prompt context
+
 ### Why ContextVar and Not Threading.Local?
 
 | Storage Type | Works in Asyncio? | Works Across Threads? | Correct Choice? |
@@ -492,7 +517,7 @@ def get_current_message() -> str:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  agent_engine_app.py :: stream_query()                                      │
+│  main.py (agent_service) :: SSE request handler                             │
 │                                                                             │
 │  1. Parse context from message prefix                                       │
 │     Format: "(context: conversation_id=X user_id=Y corr=Z [workout_id=W]   │
@@ -512,7 +537,7 @@ def get_current_message() -> str:
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  shell/tools.py :: tool_get_training_context()                              │
+│  tools/ :: tool_get_training_context()                                      │
 │                                                                             │
 │  def tool_get_training_context() -> Dict[str, Any]:                         │
 │      # NOTICE: No user_id in function signature!                            │
@@ -866,12 +891,12 @@ if let artifact = try? JSONDecoder().decode(Artifact.self, from: data) {
 
 ## Verification Checklist (PRODUCTION READINESS)
 
-### Concurrency Safety (Vertex Agent Engine)
+### Concurrency Safety (Cloud Run)
 
 | Check | Expected | Verified |
 |-------|----------|----------|
-| Are module-level globals (`_current_context = {}`) removed from `tools.py`? | YES | ✅ |
-| Does `agent_engine_app.py` call `set_current_context()` BEFORE routing? | YES | ✅ |
+| Are module-level globals (`_current_context = {}`) removed from tools? | YES | ✅ |
+| Does `main.py` call `set_current_context()` BEFORE routing? | YES | ✅ |
 | Do tool functions use `get_current_context()` to retrieve user_id? | YES | ✅ |
 | Is `user_id` EXCLUDED from tool function signatures (LLM-facing)? | YES | ✅ |
 | Does `get_current_context()` raise RuntimeError if called outside request? | YES | ✅ |
@@ -947,7 +972,7 @@ Set logged: 8 reps @ 100kg
 
 ### Test Functional Lane
 ```python
-# In agent_engine_app.py context
+# In main.py context
 result = await execute_functional_lane(
     routing=RoutingResult(lane=Lane.FUNCTIONAL, intent="SWAP_EXERCISE"),
     payload={"target": "Barbell Bench", "constraint": "machine"},
@@ -969,7 +994,7 @@ python workers/post_workout_analyst.py \
 ## Next Steps
 
 ### High Priority
-1. **Wire Functional Lane to agent_engine_app.py** - Currently defined, needs integration
+1. **Wire Functional Lane to main.py** - Currently defined, needs integration
 2. **Add telemetry** - Track lane usage, latency, errors
 
 ### Medium Priority
@@ -996,12 +1021,12 @@ python workers/post_workout_analyst.py \
 | 2026-01-04 | **Token-Safe Analytics v2**: Removed `tool_get_analytics_features` and `tool_get_recent_workouts` from agent tools. Replaced with bounded, paginated endpoints: `tool_get_muscle_group_progress`, `tool_get_muscle_progress`, `tool_get_exercise_progress`, and `tool_query_training_sets` (drilldown only). All summaries guaranteed under 15KB. |
 | 2026-02-14 | **Pre-computed Analysis + Instruction Rewrite**: Consolidated 3 pre-computed tools (`tool_get_recent_insights`, `tool_get_latest_weekly_review`) + `tool_get_coaching_context` into single `tool_get_training_analysis`. Switched Slow Lane model from `gemini-2.5-pro` to `gemini-2.5-flash` (temp 0.3, thinking enabled). Rewrote system instruction from 190→140 lines: principles over rules, removed schema duplication, added 7 rich examples with Think/Tool/Response chains. Added hallucination guardrails via data-claim principles and no-data examples. Increased streaming timeout to 300s/180s. |
 | 2026-02-15 | **Canvas → Conversations Migration**: Changed context prefix from `canvas_id=X` to `conversation_id=X`. Planner skills (`propose_workout`, `propose_routine`, `propose_routine_update`, `propose_template_update`) now return artifact data directly in SkillResult.data with keys: `artifact_type`, `content`, `actions`, `status`. Removed `CanvasFunctionsClient` methods `propose_cards()`, `bootstrap_canvas()`, `emit_event()`. Removed `canvas_id` parameter from tool validation (now only checks `user_id`). Added HTTP connection pooling via `HttpClient` with `requests.Session()` and `HTTPAdapter(pool_connections=10, pool_maxsize=20)`. Changed `workout_skills.py` client to singleton pattern. |
+| 2026-03-17 | **Architecture Redesign**: Migrated from Vertex AI Agent Engine to Cloud Run (`adk_agent/agent_service/`). Fully stateless — no sessions, no pre-warming. Added 4-tier memory system (Tier 3 `agent_memory`, Tier 4 conversation summaries). Added `context_builder.py` for per-request context assembly. Removed ADK framework dependency. |
 | 2026-02-24 | **Workout Mode Overhaul**: Code-enforced tool gating via `WORKOUT_BANNED_TOOLS` dict and `_check_workout_ban()` in `tools.py` — 7 tools (get_training_context, query_training_sets, get_training_analysis, propose_workout/routine, update_routine/template) return structured `TOOL_NOT_AVAILABLE_WORKOUT` error with recovery guidance during workout mode. Instruction rewrite: removed comment-based tool bans, replaced with positive available-tool list; changed response constraint from "MAXIMUM 2 sentences" to "1-2 sentences, 3 max"; removed deferral behavior ("I can check that after your workout") except for multi-week retrospective analysis; added progressive overload weight advice logic and error recovery examples. Self-contextualizing tool responses in `workout_skills.py` — log_set/swap/add messages now include LLM guidance for next action. iOS: per-workout session isolation (`conversationId = "workout-{workoutId}"` instead of shared `"workout-coach"`), tool activity pill UI, enhanced toolRunning/toolComplete event handling. |
 
 ---
 
 ## Contact
 
-Branch: `refactor/single-shell-agent`
-Source: `adk_agent/canvas_orchestrator/app/shell/`
+Source: `adk_agent/agent_service/app/` (current), `adk_agent/canvas_orchestrator/` (deprecated)
 Documentation: `docs/SHELL_AGENT_ARCHITECTURE.md`

@@ -3,7 +3,7 @@ import Foundation
 /// ViewModel for workout coach chat during active workout.
 /// Chat is ephemeral (in-memory only, not persisted to Firestore).
 ///
-/// Streaming pattern mirrors CanvasViewModel:
+/// Streaming pattern mirrors ConversationViewModel:
 /// - .message events: accumulate text deltas via displayText
 /// - .done event: flush messageBuffer as final agent response
 /// - .status events: extract session_id for conversation continuity
@@ -74,7 +74,7 @@ final class WorkoutCoachViewModel: ObservableObject {
             status: .streaming
         ))
 
-        // Accumulate text deltas (same pattern as CanvasViewModel.messageBuffer)
+        // Accumulate text deltas (same pattern as ConversationViewModel.messageBuffer)
         var messageBuffer = ""
 
         do {
@@ -87,7 +87,7 @@ final class WorkoutCoachViewModel: ObservableObject {
             )
 
             for try await event in stream {
-                // Forward all events to thinking state (same pattern as CanvasViewModel)
+                // Forward all events to thinking state (same pattern as ConversationViewModel)
                 thinkingState.handleEvent(event)
 
                 switch event.eventType {
@@ -116,9 +116,7 @@ final class WorkoutCoachViewModel: ObservableObject {
                     let errorText = event.displayText
                     updateAgentMessage(id: agentMsgId, text: errorText.isEmpty ? "Error" : errorText, status: .failed)
 
-                case .pipeline, .thinking, .thought, .toolRunning, .toolComplete,
-                     .heartbeat, .card, .artifact,
-                     .agentResponse, .userPrompt, .userResponse, .clarificationRequest:
+                case .toolStart, .toolEnd, .heartbeat, .artifact, .clarification:
                     // Handled by thinkingState.handleEvent() above
                     break
 

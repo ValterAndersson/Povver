@@ -53,9 +53,11 @@ async def build_system_context(
         ctx.user_id, ctx.conversation_id, limit=20
     )
     summaries_task = _load_recent_summaries(fs, ctx.user_id, limit=5)
+    alerts_task = _load_active_alerts(fs, ctx.user_id)
 
-    planning, memories, history, summaries = await asyncio.gather(
+    planning, memories, history, summaries, alerts = await asyncio.gather(
         planning_task, memories_task, history_task, summaries_task,
+        alerts_task,
         return_exceptions=True,
     )
 
@@ -72,6 +74,9 @@ async def build_system_context(
     if isinstance(summaries, Exception):
         logger.warning("Failed to load summaries: %s", summaries)
         summaries = []
+    if isinstance(alerts, Exception):
+        logger.warning("Failed to load active alerts: %s", alerts)
+        alerts = {}
 
     # Lazy summary generation for previous conversation
     if llm_client and isinstance(summaries, list):
@@ -97,6 +102,9 @@ async def build_system_context(
     if isinstance(planning, dict):
         extra_sections.append(_format_snapshot(planning))
 
+    if isinstance(alerts, dict) and alerts:
+        extra_sections.append(_format_active_alerts(alerts))
+
     # Session vars
     try:
         session_vars = await _get_session_vars(fs, ctx)
@@ -112,6 +120,58 @@ async def build_system_context(
     formatted_history = _format_history(history)
 
     return instruction, formatted_history
+
+
+async def _load_active_alerts(
+    fs: FirestoreClient, user_id: str
+) -> dict:
+    """Load the latest plateau_report, volume_optimization, and periodization_status
+    from analysis_insights for the Active Alerts context section.
+
+    Queries recent insights (last 7 days) filtered by section type.
+    Returns dict keyed by section name with the latest data for each.
+    """
+    alerts = {}
+    target_sections = {"plateau_report", "volume_optimization", "periodization_status"}
+
+    try:
+        from datetime import datetime, timedelta, timezone
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+
+        query = (
+            fs.db.collection(f"users/{user_id}/analysis_insights")
+            .where("created_at", ">=", cutoff)
+            .order_by("created_at", direction="DESCENDING")
+            .limit(20)
+        )
+
+        async for doc in query.stream():
+            data = doc.to_dict()
+            section = data.get("section") or data.get("type")
+            if section in target_sections and section not in alerts:
+                alerts[section] = data
+                if len(alerts) >= len(target_sections):
+                    break
+
+        # Also check weekly_reviews for periodization_status if not found in insights
+        if "periodization_status" not in alerts:
+            review_query = (
+                fs.db.collection(f"users/{user_id}/weekly_reviews")
+                .order_by("created_at", direction="DESCENDING")
+                .limit(1)
+            )
+            async for doc in review_query.stream():
+                data = doc.to_dict()
+                if data.get("periodization_status"):
+                    alerts["periodization_status"] = {
+                        "section": "periodization_status",
+                        **data["periodization_status"],
+                    }
+
+    except Exception as e:
+        logger.warning("Failed to load active alerts for user %s: %s", user_id, e)
+
+    return alerts
 
 
 async def _load_recent_summaries(
@@ -170,6 +230,62 @@ async def _get_session_vars(
     if doc.exists:
         return doc.to_dict().get("session_vars")
     return None
+
+
+def _format_active_alerts(alerts: dict) -> str:
+    """Format active alerts (plateau, volume, periodization) as instruction section."""
+    sections = ["## Active Alerts"]
+
+    plateau = alerts.get("plateau_report")
+    if plateau:
+        exercises = plateau.get("plateaued_exercises", [])
+        if exercises:
+            lines = []
+            for ex in exercises[:5]:
+                lines.append(
+                    f"  - {ex.get('exercise_name', 'Unknown')}: "
+                    f"stalled {ex.get('weeks_stalled', '?')} weeks at "
+                    f"e1RM {ex.get('last_e1rm', '?')}kg "
+                    f"(suggested: {ex.get('suggested_action', 'review')})"
+                )
+            sections.append("**Plateaued Exercises:**\n" + "\n".join(lines))
+
+    volume = alerts.get("volume_optimization")
+    if volume:
+        volume_data = volume.get("volume_by_muscle", {})
+        deficits = [
+            f"{k} ({v.get('actual_sets', 0)}/{v.get('mev', '?')} MEV)"
+            for k, v in volume_data.items()
+            if v.get("status") == "deficit"
+        ]
+        surpluses = [
+            f"{k} ({v.get('actual_sets', 0)}/{v.get('mrv', '?')} MRV)"
+            for k, v in volume_data.items()
+            if v.get("status") == "surplus"
+        ]
+        if deficits:
+            sections.append(f"**Volume Deficits:** {', '.join(deficits[:5])}")
+        if surpluses:
+            sections.append(f"**Volume Surpluses:** {', '.join(surpluses[:5])}")
+
+    period = alerts.get("periodization_status")
+    if period:
+        acwr = period.get("acwr")
+        status = period.get("status", "unknown")
+        if acwr is not None:
+            sections.append(
+                f"**Workload Ratio (ACWR):** {acwr} ({status})"
+            )
+        if period.get("suggest_deload"):
+            sections.append(
+                f"**Deload Recommended:** {period.get('deload_reason', 'ACWR elevated')}"
+            )
+
+    # Only return if we have actual alert content beyond the header
+    if len(sections) <= 1:
+        return ""
+
+    return "\n".join(sections)
 
 
 def _format_snapshot(planning: dict) -> str:

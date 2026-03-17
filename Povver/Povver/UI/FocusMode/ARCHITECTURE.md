@@ -6,7 +6,9 @@ Focus Mode is the active workout UI. It provides a distraction-free interface fo
 
 | File | Purpose |
 |------|---------|
-| `FocusModeWorkoutScreen.swift` | Main workout screen: exercise list, hero header, scroll tracking, finish/discard flow, exercise reordering. Contains `FocusModeExerciseSection`, `FocusModeExerciseSectionNew`, `WorkoutAlertsModifier`, `WorkoutCompletionSummary`. |
+| `FocusModeWorkoutScreen.swift` | Main workout screen: exercise list, hero header, scroll tracking, finish/discard flow, exercise reordering. (~1430 lines after extraction.) |
+| `FocusModeExerciseSection.swift` | Exercise section views: `FocusModeExerciseSection` (legacy), `FocusModeExerciseSectionNew` (with ActionRail), `FocusModeGridCell` enum. Extracted from FocusModeWorkoutScreen. |
+| `FocusModeWorkoutHelpers.swift` | Supporting types: `CompletedWorkoutRef`, `WorkoutCompletionSummary`, `WorkoutAlertsModifier`. Extracted from FocusModeWorkoutScreen. |
 | `FocusModeSetGrid.swift` | Set grid for logging reps, weight, and RIR per exercise. Contains `FocusModeEditingDock` (inline editor with stepper/keyboard/RIR pills), `FocusModeEditScope` enum (this/remaining/all). |
 | `FocusModeComponents.swift` | Shared UI components: `WorkoutHero`, `TimerPill`, `SwipeToDeleteRow`, `WarmupDivider`, `ExerciseCardContainer`, `CoachButton`, `ReorderModeBanner`, `ActionRail`. Also contains `FocusModeActiveSheet` enum (centralized sheet state machine). |
 | `FocusModeExerciseSearch.swift` | Exercise search for adding/swapping exercises mid-workout. Includes `ExerciseSortOption` enum (Recent/Frequent/A–Z) and `ExerciseFilters` model. Sort chips UI wired to `ExercisesViewModel.setSortOption()`. |
@@ -17,7 +19,7 @@ Focus Mode is the active workout UI. It provides a distraction-free interface fo
 
 Navigation enters Focus Mode via two paths:
 1. **TrainTabView** (primary): `FocusModeWorkoutScreen` is embedded inline in the Train tab. The tab bar remains visible during workouts so users can browse other tabs. A `FloatingWorkoutBanner` overlay on `MainTabsView` shows the workout name and elapsed time on non-Train tabs, tapping it returns to the Train tab.
-2. **CanvasScreen** (secondary): Presented as a `.fullScreenCover` when starting a workout from a chat-generated plan. In this context `dismiss()` correctly closes the cover on discard/complete.
+2. **ConversationScreen** (secondary): Presented as a `.fullScreenCover` when starting a workout from a chat-generated plan. In this context `dismiss()` correctly closes the cover on discard/complete.
 
 ## Key Relationships
 

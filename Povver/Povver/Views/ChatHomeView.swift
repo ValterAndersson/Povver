@@ -78,7 +78,7 @@ struct ChatHomeView: View {
 
     @ViewBuilder private var canvasDestination: some View {
         if let uid = userId {
-            CanvasScreen(userId: uid, canvasId: nil, purpose: purposeForEntryContext(entryContext), entryContext: entryContext)
+            ConversationScreen(userId: uid, canvasId: nil, purpose: purposeForEntryContext(entryContext), entryContext: entryContext)
         } else {
             EmptyState(title: "Not signed in", message: "Login to view canvas.")
         }

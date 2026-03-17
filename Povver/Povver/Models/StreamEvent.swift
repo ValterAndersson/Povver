@@ -3,24 +3,15 @@ import Foundation
 /// Represents a streaming event from the agent
 public struct StreamEvent: Codable {
     public enum EventType: String, Codable {
-        case thinking = "thinking"
-        case thought = "thought"
-        case toolRunning = "toolRunning"
-        case toolComplete = "toolComplete"
         case message = "message"
-        case agentResponse = "agentResponse"
-        case userPrompt = "user_prompt"
-        case userResponse = "user_response"
-        case clarificationRequest = "clarification.request"
-        case card = "card"
+        case toolStart = "tool_start"
+        case toolEnd = "tool_end"
+        case artifact = "artifact"
+        case clarification = "clarification"
         case status = "status"
-        case error = "error"
         case heartbeat = "heartbeat"
         case done = "done"
-        // Pipeline events for thought process visibility (router, planner, critic)
-        case pipeline = "pipeline"
-        // Artifact events carry proposed cards from agent tools
-        case artifact = "artifact"
+        case error = "error"
     }
     
     public let type: String  // Keep as string for flexibility
@@ -56,16 +47,10 @@ extension StreamEvent {
     
     public var iconName: String {
         switch eventType {
-        case .userPrompt:
-            return "person"
-        case .thinking:
-            return "brain"
-        case .toolRunning:
+        case .toolStart:
             return "gearshape"
-        case .toolComplete:
+        case .toolEnd:
             return "checkmark.circle"
-        case .agentResponse:
-            return "text.bubble"
         case .message:
             return "message"
         case .status:
@@ -78,7 +63,7 @@ extension StreamEvent {
     }
     
     public var shouldAnimate: Bool {
-        return eventType == .thinking || eventType == .toolRunning
+        return eventType == .toolStart
     }
     
     // Optional human readable duration for events carrying duration metadata
@@ -100,18 +85,18 @@ extension StreamEvent {
     public var isInProgress: Bool {
         guard let t = eventType else { return false }
         switch t {
-        case .thinking, .toolRunning:
+        case .toolStart:
             return true
         default:
             return false
         }
     }
-    
+
     // Whether this event represents a completed action/step
     public var isCompleted: Bool {
         guard let t = eventType else { return false }
         switch t {
-        case .toolComplete, .agentResponse, .thought, .done:
+        case .toolEnd, .done:
             return true
         default:
             return false

@@ -202,7 +202,7 @@ struct WorkspaceTimelineView: View {
     private var workspaceHeader: some View {
         HStack {
             VStack(alignment: .leading, spacing: Space.xxs) {
-                Text("Canvas")
+                Text("Conversation")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(Color.textPrimary)
                 Text("Your AI coaching session")
@@ -224,15 +224,13 @@ struct WorkspaceTimelineView: View {
         
         // Check if last few events indicate active work
         let recentEvents = events.suffix(5)
-        let hasRecentThinking = recentEvents.contains { $0.event.eventType == .thinking }
-        let hasRecentToolRunning = recentEvents.contains { $0.event.eventType == .toolRunning }
-        let hasRecentCompletion = recentEvents.contains { 
-            $0.event.eventType == .thought || 
-            $0.event.eventType == .toolComplete ||
-            $0.event.eventType == .agentResponse
+        let hasRecentToolStart = recentEvents.contains { $0.event.eventType == .toolStart }
+        let hasRecentCompletion = recentEvents.contains {
+            $0.event.eventType == .toolEnd ||
+            $0.event.eventType == .done
         }
-        
-        return (hasRecentThinking || hasRecentToolRunning) && !hasRecentCompletion
+
+        return hasRecentToolStart && !hasRecentCompletion
     }
     
     private var thinkingIndicator: some View {
@@ -668,15 +666,12 @@ struct WorkspaceTimelineView: View {
     private func mapEventToKind(_ entry: WorkspaceEvent) -> TimelineItemKind? {
         let eventType = entry.event.type
         
-        switch entry.event.eventType {
-        case .userPrompt, .userResponse:
+        // User messages (legacy types that don't map to new enum)
+        if entry.event.type == "user_prompt" || entry.event.type == "user_response" {
             let text = entry.event.content?["text"]?.value as? String ?? ""
             return .userMessage(text: text)
-            
-        default:
-            break
         }
-        
+
         // Handle synthetic thought_track / thinking_track events
         if eventType == "thought_track" || eventType == "thinking_track" {
             let isInProgress = entry.event.content?["is_in_progress"]?.value as? Bool ?? (eventType == "thinking_track")
@@ -734,71 +729,20 @@ struct WorkspaceTimelineView: View {
         
         // Legacy thinking/thought handling (for backward compat with old events)
         switch entry.event.eventType {
-        case .thinking, .thought:
-            if hideThinkingEvents { return nil }
-            let text = entry.event.content?["text"]?.value as? String ?? ""
-            let duration = entry.event.content?["duration_s"]?.value as? Double ?? 0
-            let tools = entry.event.content?["tools"]?.value as? [String] ?? []
-            let isInProgress = entry.event.content?["is_in_progress"]?.value as? Bool ?? (entry.event.eventType == .thinking)
-            
-            var steps: [ThoughtStep] = []
-            let timestamp = entry.createdAt ?? Date()
-            
-            if duration > 0.5 {
-                steps.append(ThoughtStep(
-                    id: "\(entry.id)-thought",
-                    kind: .insight,
-                    text: String(format: "Thought for %.1fs", duration),
-                    detail: nil,
-                    duration: duration,
-                    isComplete: !isInProgress,
-                    timestamp: timestamp
-                ))
-            }
-            
-            for (index, tool) in tools.enumerated() {
-                steps.append(ThoughtStep(
-                    id: "\(entry.id)-\(tool)-\(index)",
-                    kind: .tool,
-                    text: humanReadableToolName(tool),
-                    detail: nil,
-                    duration: nil,
-                    isComplete: !isInProgress,
-                    timestamp: timestamp
-                ))
-            }
-            
-            if steps.isEmpty {
-                steps.append(ThoughtStep(
-                    id: entry.id,
-                    kind: .thinking,
-                    text: isInProgress ? "Working..." : text,
-                    detail: nil,
-                    duration: isInProgress ? nil : duration,
-                    isComplete: !isInProgress,
-                    timestamp: timestamp
-                ))
-            }
-            
-            if isInProgress {
-                return .liveThoughtTrack(steps)
-            } else {
-                let track = ThoughtTrack(
-                    id: entry.id,
-                    steps: steps,
-                    isComplete: true,
-                    summary: nil,
-                    totalDuration: duration
-                )
-                return .thoughtTrack(track)
-            }
-            
-        case .agentResponse, .message:
+        case .toolStart:
+            // tool_start events are handled in renderedEvents as AgentStep grouping
+            return nil
+
+        case .toolEnd:
+            // tool_end events are handled in renderedEvents as AgentStep grouping
+            return nil
+
+        case .message:
             let text = entry.event.content?["text"]?.value as? String ?? ""
             guard !text.isEmpty else { return nil }
             return .agentResponse(text: text)
             
-        case .clarificationRequest:
+        case .clarification:
             guard let id = entry.event.content?["id"]?.value as? String,
                   let question = entry.event.content?["question"]?.value as? String else { return nil }
             return .clarification(TimelineClarificationPrompt(id: id, question: question))
@@ -833,7 +777,10 @@ struct WorkspaceTimelineView: View {
             }
             
             // User messages - flush any pending thought track and add
-            if eventType == .userPrompt || eventType == .userResponse {
+            // (user_prompt / user_response are legacy type strings that won't match new enum,
+            //  so also check the raw type string)
+            let isUserMsg = entry.event.type == "user_prompt" || entry.event.type == "user_response"
+            if isUserMsg {
                 // Flush pending steps as completed track
                 if !activeSteps.isEmpty {
                     let trackEvent = createStepTrackEvent(steps: activeSteps, isComplete: true, timestamp: entry.createdAt)
@@ -852,8 +799,8 @@ struct WorkspaceTimelineView: View {
                 continue
             }
             
-            // Thinking start - add thinking step
-            if eventType == .thinking {
+            // Thinking start / tool_start - add step
+            if eventType == .toolStart || entry.event.type == "thinking" {
                 if sessionStartTime == nil {
                     sessionStartTime = ts
                 }
@@ -871,8 +818,8 @@ struct WorkspaceTimelineView: View {
                 continue
             }
             
-            // Thought complete - close the last thinking step
-            if eventType == .thought {
+            // Thought complete (legacy) - close the last thinking step
+            if entry.event.type == "thought" {
                 if let idx = activeSteps.lastIndex(where: { $0.kind == .thinking && !$0.isComplete }) {
                     let duration = ts - activeSteps[idx].startTime
                     let resultText = entry.event.content?["text"]?.value as? String
@@ -889,8 +836,8 @@ struct WorkspaceTimelineView: View {
                 continue
             }
             
-            // Tool running - add tool step
-            if eventType == .toolRunning {
+            // Tool start - add tool step
+            if eventType == .toolStart || entry.event.type == "toolRunning" {
                 if sessionStartTime == nil {
                     sessionStartTime = ts
                 }
@@ -918,8 +865,8 @@ struct WorkspaceTimelineView: View {
                 continue
             }
             
-            // Tool complete - update the tool step with result
-            if eventType == .toolComplete {
+            // Tool end - update the tool step with result
+            if eventType == .toolEnd || entry.event.type == "toolComplete" {
                 let toolName = entry.event.content?["tool"]?.value as? String ?? "tool"
                 if let idx = activeSteps.lastIndex(where: {
                     if case .tool(let name) = $0.kind, name == toolName, !$0.isComplete {
@@ -949,7 +896,7 @@ struct WorkspaceTimelineView: View {
             //   - type "agentResponse" (text_commit): authoritative sentence-boundary commits
             // Both get persisted as workspace_entries. Without merging, each renders
             // as a separate chat bubble. We merge them into a single entry here.
-            if eventType == .agentResponse || eventType == .message {
+            if eventType == .message || entry.event.type == "agentResponse" {
                 let text = entry.event.content?["text"]?.value as? String ?? ""
                 guard !text.isEmpty else { continue }
                 let isDelta = eventType == .message
@@ -965,7 +912,7 @@ struct WorkspaceTimelineView: View {
                 // Merge with previous agent response if consecutive
                 if let lastIdx = result.indices.last,
                    let lastType = result[lastIdx].event.eventType,
-                   (lastType == .agentResponse || lastType == .message) {
+                   lastType == .message {
                     let existingText = result[lastIdx].event.content?["text"]?.value as? String ?? ""
                     let prevIsDelta = lastType == .message
 
@@ -1003,7 +950,7 @@ struct WorkspaceTimelineView: View {
                         "text": AnyCodable(mergedText)
                     ]
                     let mergedStreamEvent = StreamEvent(
-                        type: isDelta ? result[lastIdx].event.type : "agentResponse",
+                        type: isDelta ? result[lastIdx].event.type : "message",
                         agent: result[lastIdx].event.agent,
                         content: mergedContent,
                         timestamp: result[lastIdx].event.timestamp,
@@ -1022,7 +969,7 @@ struct WorkspaceTimelineView: View {
             }
             
             // Clarification
-            if eventType == .clarificationRequest {
+            if eventType == .clarification {
                 if !activeSteps.isEmpty {
                     let trackEvent = createStepTrackEvent(steps: activeSteps, isComplete: true, timestamp: entry.createdAt)
                     result.append(trackEvent)

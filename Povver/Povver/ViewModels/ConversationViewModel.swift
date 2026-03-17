@@ -1,58 +1,54 @@
 /**
  =============================================================================
- CanvasViewModel.swift - Central Canvas State Management
+ ConversationViewModel.swift - Central Conversation State Management
  =============================================================================
- 
+
  PURPOSE:
- The central ViewModel for the canvas experience. Manages canvas state, card
- collections, SSE streaming from agent, and user actions.
- 
+ The central ViewModel for the conversation experience. Manages conversation
+ state, card collections, SSE streaming from agent, and user actions.
+
  ARCHITECTURE CONTEXT:
  ┌─────────────────────────────────────────────────────────────────────────────┐
- │ iOS CANVAS DATA FLOW                                                        │
+ │ iOS CONVERSATION DATA FLOW                                                  │
  │                                                                             │
- │ CanvasScreen.swift (UI)                                                     │
+ │ ConversationScreen.swift (UI)                                               │
  │   │                                                                         │
  │   ▼                                                                         │
- │ CanvasViewModel (THIS FILE)                                                 │
+ │ ConversationViewModel (THIS FILE)                                           │
  │   │                                                                         │
- │   ├──▶ CanvasRepository.subscribe() ──▶ Firestore Listener                 │
+ │   ├──▶ ConversationRepository.subscribe() ──▶ Firestore Listener            │
  │   │      cards collection, state doc                                        │
  │   │                                                                         │
- │   ├──▶ CanvasService.applyAction() ──▶ apply-action.js                     │
+ │   ├──▶ ConversationService.applyAction() ──▶ apply-action.js                │
  │   │      user actions (accept, dismiss, edit)                               │
  │   │                                                                         │
- │   ├──▶ DirectStreamingService.streamQuery() ──▶ stream-agent-normalized.js │
- │   │      SSE events during agent work                                       │
- │   │                                                                         │
- │   └──▶ CanvasService.openCanvas() ──▶ open-canvas.js                       │
- │          canvas + session initialization                                    │
+ │   └──▶ DirectStreamingService.streamQuery() ──▶ stream-agent-normalized.js  │
+ │          SSE events during agent work                                       │
  └─────────────────────────────────────────────────────────────────────────────┘
- 
+
  KEY STATE:
- - cards: [CanvasCardModel] - All canvas cards from Firestore listener
+ - cards: [CanvasCardModel] - All cards from Firestore listener
  - streamEvents: [StreamEvent] - SSE events for workspace timeline
- - workspaceEvents: [WorkspaceEvent] - Persisted conversation history
+ - workspaceEvents: [WorkspaceEvent] - Persisted conversation history (messages)
  - thinkingState: ThinkingProcessState - Gemini-style collapsible thought process
  - pendingClarificationCue: ClarificationCue? - Pending agent question
- 
+
  METHODS:
- - start(userId:canvasId:) - Open existing canvas with session reuse
- - start(userId:purpose:) - Create new canvas with combined openCanvas call
+ - start(userId:conversationId:) - Open existing conversation
+ - start(userId:purpose:) - Create new conversation (client-side ID generation)
  - startSSEStream() - Begin agent streaming with correlation ID
  - applyAction() - Send user action to apply-action.js
- - handleIncomingStreamEvent() - Process SSE events and update UI
- 
+ - handleIncomingStreamEvent() - Process SSE events (9-event contract)
+
  FIRESTORE LISTENERS:
- - Canvas cards: users/{uid}/canvases/{canvasId}/cards
- - Canvas state: users/{uid}/canvases/{canvasId}/state
- - Workspace entries: users/{uid}/canvases/{canvasId}/workspace_entries
- - Events (telemetry): users/{uid}/canvases/{canvasId}/events
+ - Cards: users/{uid}/conversations/{conversationId}/cards
+ - State: users/{uid}/conversations/{conversationId}/state
+ - Messages: users/{uid}/conversations/{conversationId}/messages
  
  RELATED FILES:
- - CanvasScreen.swift: UI layer that uses this ViewModel
- - CanvasRepository.swift: Firestore subscription logic
- - CanvasService.swift: HTTP calls to Firebase Functions
+ - ConversationScreen.swift: UI layer that uses this ViewModel
+ - ConversationRepository.swift: Firestore subscription logic
+ - ConversationService.swift: HTTP calls to Firebase Functions
  - DirectStreamingService.swift: SSE streaming client
  
  =============================================================================
@@ -68,7 +64,7 @@ struct ClarificationCue: Identifiable, Equatable {
 }
 
 @MainActor
-final class CanvasViewModel: ObservableObject {
+final class ConversationViewModel: ObservableObject {
     @Published var cards: [CanvasCardModel] = []
     @Published var upNext: [String] = []
     @Published var version: Int = 0
@@ -93,8 +89,8 @@ final class CanvasViewModel: ObservableObject {
     // Paywall state
     @Published var showingPaywall: Bool = false
 
-    private let repo: CanvasRepositoryProtocol
-    private let service: CanvasServiceProtocol
+    private let repo: ConversationRepositoryProtocol
+    private let service: ConversationServiceProtocol
     private var streamTask: Task<Void, Never>?
     private var sseStreamTask: Task<Void, Never>?
     private var cancellables: Set<AnyCancellable> = []
@@ -115,7 +111,7 @@ final class CanvasViewModel: ObservableObject {
     private var artifactsAccepted: Int = 0
     private var didFireConversationEnded: Bool = false
 
-    init(repo: CanvasRepositoryProtocol = CanvasRepository(), service: CanvasServiceProtocol = CanvasService()) {
+    init(repo: ConversationRepositoryProtocol = ConversationRepository(), service: ConversationServiceProtocol = ConversationService()) {
         self.repo = repo
         self.service = service
     }
@@ -132,7 +128,7 @@ final class CanvasViewModel: ObservableObject {
         didFireConversationEnded = false
 
         AppLogger.shared.nav("canvas:\(canvasId)")
-        AppLogger.shared.info(.app, "Canvas start BEGIN (existing canvas) canvas_id=\(canvasId)")
+        AppLogger.shared.info(.app, "Conversation start BEGIN (existing) conversation_id=\(canvasId)")
         AnalyticsService.shared.conversationStarted(entryPoint: "existing_canvas")
         
         streamTask = Task { [weak self] in
@@ -140,7 +136,7 @@ final class CanvasViewModel: ObservableObject {
             do {
                 self.currentUserId = userId
                 self.canvasId = canvasId
-                await MainActor.run { CanvasRepository.shared.currentCanvasId = canvasId }
+                await MainActor.run { ConversationRepository.shared.currentCanvasId = canvasId }
                 
                 // PHASE 1 OPTIMIZATION: Clear UI state and attach listeners IMMEDIATELY
                 await MainActor.run {
@@ -151,17 +147,14 @@ final class CanvasViewModel: ObservableObject {
                 
                 // Attach listeners right away (don't wait for session)
                 self.attachEventsListener(userId: userId, canvasId: canvasId)
-                self.attachWorkspaceEntriesListener(userId: userId, canvasId: canvasId)
+                self.attachMessagesListener(userId: userId, canvasId: canvasId)
                 let elapsed = String(format: "%.2f", Date().timeIntervalSince(startTime))
                 AppLogger.shared.info(.app, "Listeners attached elapsed_s=\(elapsed)")
                 
-                // Sessions eliminated (Phase 3c) — backend creates ephemeral sessions per request.
-                // No initializeSession call needed.
-
                 let subElapsed = String(format: "%.2f", Date().timeIntervalSince(startTime))
                 AppLogger.shared.info(.app, "Starting subscription elapsed_s=\(subElapsed)")
-                
-                // Subscribe to canvas updates
+
+                // Subscribe to conversation updates
                 var firstSnapshotReceived = false
                 for try await snap in self.repo.subscribe(userId: userId, canvasId: canvasId) {
                     if !firstSnapshotReceived {
@@ -171,7 +164,7 @@ final class CanvasViewModel: ObservableObject {
                     }
 
                     // Log canvas state snapshot
-                    self.logCanvasSnapshot(snap: snap, trigger: "firestore_update")
+                    self.logConversationSnapshot(snap: snap, trigger: "firestore_update")
 
                     self.version = snap.version
                     self.mergeFirestoreCards(snap.cards)
@@ -182,13 +175,13 @@ final class CanvasViewModel: ObservableObject {
                     if self.isReady == false {
                         self.isReady = true
                         let readyElapsed = String(format: "%.2f", Date().timeIntervalSince(startTime))
-                        AppLogger.shared.info(.app, "Canvas READY elapsed_s=\(readyElapsed)")
+                        AppLogger.shared.info(.app, "Conversation READY elapsed_s=\(readyElapsed)")
                     }
                 }
                 
             } catch {
                 self.errorMessage = error.localizedDescription
-                AppLogger.shared.error(.app, "Canvas subscribe error", error)
+                AppLogger.shared.error(.app, "Conversation subscribe error", error)
             }
         }
     }
@@ -205,23 +198,21 @@ final class CanvasViewModel: ObservableObject {
         didFireConversationEnded = false
 
         AppLogger.shared.nav("canvas:new")
-        AppLogger.shared.info(.app, "Canvas start BEGIN (new canvas) purpose=\(purpose)")
+        AppLogger.shared.info(.app, "Conversation start BEGIN (new) purpose=\(purpose)")
         AnalyticsService.shared.conversationStarted(entryPoint: purpose)
         
         streamTask = Task { [weak self] in
             guard let self = self else { return }
             do {
                 self.currentUserId = userId
-                
-                // openCanvas returns canvasId (sessionId is now always nil — sessions eliminated Phase 3c)
-                let openStart = Date()
-                let (cid, _) = try await self.service.openCanvas(userId: userId, purpose: purpose)
-                let openDuration = Date().timeIntervalSince(openStart)
 
-                AppLogger.shared.info(.app, "openCanvas completed canvas_id=\(cid) duration_s=\(String(format: "%.2f", openDuration))")
+                // Generate conversation ID client-side (no backend call needed;
+                // the agent service creates the Firestore doc on first message)
+                let cid = UUID().uuidString
+                AppLogger.shared.info(.app, "New conversation id=\(cid)")
 
                 self.canvasId = cid
-                await MainActor.run { CanvasRepository.shared.currentCanvasId = cid }
+                await MainActor.run { ConversationRepository.shared.currentCanvasId = cid }
                 
                 // Clear UI state and attach listeners IMMEDIATELY
                 await MainActor.run {
@@ -232,7 +223,7 @@ final class CanvasViewModel: ObservableObject {
                 
                 // Attach listeners right away
                 self.attachEventsListener(userId: userId, canvasId: cid)
-                self.attachWorkspaceEntriesListener(userId: userId, canvasId: cid)
+                self.attachMessagesListener(userId: userId, canvasId: cid)
                 let elapsed = String(format: "%.2f", Date().timeIntervalSince(startTime))
                 AppLogger.shared.info(.app, "Listeners attached elapsed_s=\(elapsed)")
 
@@ -249,7 +240,7 @@ final class CanvasViewModel: ObservableObject {
                     }
 
                     // Log canvas state snapshot
-                    self.logCanvasSnapshot(snap: snap, trigger: "firestore_update")
+                    self.logConversationSnapshot(snap: snap, trigger: "firestore_update")
 
                     self.version = snap.version
                     self.mergeFirestoreCards(snap.cards)
@@ -260,13 +251,13 @@ final class CanvasViewModel: ObservableObject {
                     if self.isReady == false {
                         self.isReady = true
                         let readyElapsed = String(format: "%.2f", Date().timeIntervalSince(startTime))
-                        AppLogger.shared.info(.app, "Canvas READY elapsed_s=\(readyElapsed)")
+                        AppLogger.shared.info(.app, "Conversation READY elapsed_s=\(readyElapsed)")
                     }
                 }
 
             } catch {
                 self.errorMessage = error.localizedDescription
-                AppLogger.shared.error(.app, "openCanvas/subscribe error", error)
+                AppLogger.shared.error(.app, "conversation/subscribe error", error)
             }
         }
     }
@@ -459,34 +450,22 @@ final class CanvasViewModel: ObservableObject {
         thinkingState.handleEvent(event)
         
         switch type {
-        case .pipeline:
-            // Pipeline events (router, planner, critic) are handled by thinkingState
-            // Just log for debugging
-            if let step = event.content?["step"]?.value as? String {
-                AppLogger.shared.info(.app, "Pipeline: \(step)")
-            }
-            
-        case .thinking:
+        case .toolStart:
             currentAgentStatus = event.displayText
             isAgentThinking = true
             if thoughtStartAt == nil { thoughtStartAt = event.timestamp ?? now }
-            streamEvents.append(event)
-            
-        case .toolRunning:
-            currentAgentStatus = event.displayText
-            isAgentThinking = true
             let toolName = (event.content?["tool"]?.value as? String) ?? (event.content?["tool_name"]?.value as? String) ?? "tool"
             toolStartByName[toolName] = event.timestamp ?? now
             streamEvents.append(event)
-            
-        case .toolComplete:
+
+        case .toolEnd:
             isAgentThinking = false
             let toolName = (event.content?["tool"]?.value as? String) ?? (event.content?["tool_name"]?.value as? String) ?? "tool"
             let start = toolStartByName.removeValue(forKey: toolName) ?? (event.timestamp ?? now)
             let end = event.timestamp ?? now
             let secs = max(0, end - start)
             let formatted = StreamEvent(
-                type: "toolComplete",
+                type: "tool_end",
                 agent: event.agent,
                 content: [
                     "text": AnyCodable(event.displayText),
@@ -498,30 +477,24 @@ final class CanvasViewModel: ObservableObject {
                 metadata: event.metadata
             )
             streamEvents.append(formatted)
-            
+
         case .message:
             let delta = event.displayText
             if !delta.isEmpty {
                 messageBuffer += delta
             }
-            
+
         case .status:
             currentAgentStatus = event.displayText
             streamEvents.append(event)
-            
-        case .userPrompt:
-            streamEvents.append(event)
-            
-        case .userResponse:
-            streamEvents.append(event)
-            
-        case .clarificationRequest:
+
+        case .clarification:
             streamEvents.append(event)
             if let id = event.content?["id"]?.value as? String,
                let question = event.content?["question"]?.value as? String {
                 pendingClarificationCue = ClarificationCue(id: id, question: question)
             }
-            
+
         case .error:
             // Check for server-side premium gate (defense-in-depth: client gate catches most cases,
             // but if client cache is stale the server emits PREMIUM_REQUIRED via SSE error event)
@@ -533,14 +506,14 @@ final class CanvasViewModel: ObservableObject {
             }
             showStreamOverlay = false
             isAgentThinking = false
-            
+
         case .done:
             thinkingState.complete()
             if let start = thoughtStartAt {
                 let secs = max(0, (event.timestamp ?? now) - start)
                 let text = String(format: "Thought for %.1fs", secs)
                 let thoughtEvt = StreamEvent(
-                    type: "thought",
+                    type: "done",
                     agent: event.agent,
                     content: [
                         "text": AnyCodable(text),
@@ -556,7 +529,7 @@ final class CanvasViewModel: ObservableObject {
             let response = messageBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
             if !response.isEmpty {
                 let responseEvt = StreamEvent(
-                    type: "agent_response",
+                    type: "message",
                     agent: event.agent,
                     content: ["text": AnyCodable(response)],
                     timestamp: event.timestamp ?? now,
@@ -566,15 +539,8 @@ final class CanvasViewModel: ObservableObject {
             }
             messageBuffer = ""
             showStreamOverlay = false
-            
-        case .agentResponse:
-            streamEvents.append(event)
-            
-        case .thought:
-            streamEvents.append(event)
-            
+
         case .artifact:
-            // Build a CanvasCardModel from artifact SSE event data
             guard let artifactType = event.content?["artifact_type"]?.value as? String else { break }
 
             let artifactId = event.content?["artifact_id"]?.value as? String
@@ -597,7 +563,7 @@ final class CanvasViewModel: ObservableObject {
                 AppLogger.shared.info(.app, "Artifact card added type=\(artifactType) id=\(card.id) artifactId=\(artifactId ?? "nil")")
             }
 
-        case .card, .heartbeat:
+        case .heartbeat:
             break
         }
 
@@ -771,7 +737,7 @@ final class CanvasViewModel: ObservableObject {
     private func attachEventsListener(userId: String, canvasId: String) {
         eventsListener?.remove()
         let db = Firestore.firestore()
-        let eventsRef = db.collection("users").document(userId).collection("canvases").document(canvasId).collection("events").order(by: "created_at", descending: true).limit(to: 50)
+        let eventsRef = db.collection("users").document(userId).collection("conversations").document(canvasId).collection("events").order(by: "created_at", descending: true).limit(to: 50)
         eventsListener = eventsRef.addSnapshotListener { snap, _ in
             guard let docs = snap?.documents else { return }
             for doc in docs {
@@ -782,7 +748,7 @@ final class CanvasViewModel: ObservableObject {
         }
     }
 
-    private func attachWorkspaceEntriesListener(userId: String, canvasId: String) {
+    private func attachMessagesListener(userId: String, canvasId: String) {
         workspaceListener?.remove()
         let db = Firestore.firestore()
         // Query newest 200 entries (descending) so recent messages are always included.
@@ -790,28 +756,38 @@ final class CanvasViewModel: ObservableObject {
         // all recent messages once a conversation exceeded ~200 total entries.
         let ref = db.collection("users")
             .document(userId)
-            .collection("canvases")
+            .collection("conversations")
             .document(canvasId)
-            .collection("workspace_entries")
+            .collection("messages")
             .order(by: "created_at", descending: true)
             .limit(to: 200)
         let decoder = JSONDecoder()
         workspaceListener = ref.addSnapshotListener { [weak self] snapshot, error in
             guard let self, let snapshot = snapshot else {
                 if let error {
-                    AppLogger.shared.error(.store, "workspace_entries listener error", error)
+                    AppLogger.shared.error(.store, "messages listener error", error)
                 }
                 return
             }
             let docs = snapshot.documents
             let events: [WorkspaceEvent] = docs.compactMap { doc in
-                guard let entry = doc.data()["entry"] as? [String: Any],
-                      JSONSerialization.isValidJSONObject(entry),
+                let docData = doc.data()
+                // Messages collection: type/content at root level
+                // Fall back to legacy workspace_entries format (nested "entry") for compat
+                let entry: [String: Any]
+                if let nested = docData["entry"] as? [String: Any] {
+                    entry = nested
+                } else if docData["type"] is String {
+                    entry = docData
+                } else {
+                    return nil
+                }
+                guard JSONSerialization.isValidJSONObject(entry),
                       let data = try? JSONSerialization.data(withJSONObject: entry),
                       let streamEvent = try? decoder.decode(StreamEvent.self, from: data) else {
                     return nil
                 }
-                let timestamp = (doc.data()["created_at"] as? Timestamp)?.dateValue()
+                let timestamp = (docData["created_at"] as? Timestamp)?.dateValue()
                 return WorkspaceEvent(id: doc.documentID, event: streamEvent, createdAt: timestamp)
             }
             Task { @MainActor in
@@ -874,9 +850,9 @@ final class CanvasViewModel: ObservableObject {
         let db = Firestore.firestore()
         let ref = db.collection("users")
             .document(userId)
-            .collection("canvases")
+            .collection("conversations")
             .document(canvasId)
-            .collection("workspace_entries")
+            .collection("messages")
             .document()
         let entry: [String: Any] = [
             "entry": [
@@ -904,9 +880,9 @@ final class CanvasViewModel: ObservableObject {
         }
     }
     
-    // MARK: - Canvas State Snapshot Logging
+    // MARK: - Conversation State Snapshot Logging
 
-    private func logCanvasSnapshot(snap: CanvasSnapshot, trigger: String) {
+    private func logConversationSnapshot(snap: ConversationSnapshot, trigger: String) {
         let phase = snap.state.phase?.rawValue ?? "unknown"
         let cardCount = snap.cards.count
         let cardSummary = snap.cards.map { "\($0.type.rawValue)(\($0.status.rawValue))" }.joined(separator: ", ")

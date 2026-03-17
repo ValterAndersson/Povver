@@ -11,7 +11,7 @@
 Each module doc maintains its own file map:
 - **iOS**: `docs/IOS_ARCHITECTURE.md` → "Directory Structure" section
 - **Firebase Functions**: `docs/FIREBASE_FUNCTIONS_ARCHITECTURE.md` → "Directory Structure" section
-- **Shell Agent**: `docs/SHELL_AGENT_ARCHITECTURE.md` → "File Structure" section
+- **Agent Service**: `docs/SHELL_AGENT_ARCHITECTURE.md` → "File Structure" section (covers both legacy canvas_orchestrator and current agent_service)
 - **Catalog Orchestrator**: `docs/CATALOG_ORCHESTRATOR_ARCHITECTURE.md` → "File Index" section
 
 **Cross-cutting paths** (not owned by a single module):
@@ -46,8 +46,13 @@ Each module doc maintains its own file map:
 │                    HTTP              │  Service Account                         │
 │                                      │                                          │
 │  ┌─────────────────────────────────────────────────────────────────────────┐   │
-│  │ Agent System (adk_agent/)                                               │   │
-│  │  Vertex AI → Orchestrator → Sub-agents → Tools → Firebase Functions    │   │
+│  │ Agent Service (adk_agent/agent_service/) — Cloud Run                    │   │
+│  │  4-Lane Router → Skills → Firestore (stateless, per-request context)   │   │
+│  └─────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                 │
+│  ┌─────────────────────────────────────────────────────────────────────────┐   │
+│  │ MCP Server (mcp_server/) — Cloud Run, Node.js/TypeScript               │   │
+│  │  Premium-gated API key auth, imports shared Firebase Functions logic    │   │
 │  └─────────────────────────────────────────────────────────────────────────┘   │
 │                                                                                 │
 │  ┌─────────────────────────────────────────────────────────────────────────┐   │
@@ -73,7 +78,7 @@ iOS: DirectStreamingService.streamQuery()
         ▼
 Firebase: stream-agent-normalized.js
         │ Writes message to conversations/{id}/messages
-        │ Opens SSE to Vertex AI
+        │ Opens SSE to Agent Service (Cloud Run)
         │ (At stream end: fire-and-forget title generation via Gemini Flash
         │  → writes `title` to canvases/{id} + conversations/{id})
         ▼
@@ -98,8 +103,8 @@ iOS: UI renders artifact inline with messages
 **Files involved** (CURRENT PATHS):
 - `Povver/Povver/Services/DirectStreamingService.swift` ← iOS streaming
 - `firebase_functions/functions/strengthos/stream-agent-normalized.js`
-- `adk_agent/canvas_orchestrator/app/shell/router.py` ← Routes intent
-- `adk_agent/canvas_orchestrator/app/skills/planner_skills.py` ← Returns artifacts
+- `adk_agent/agent_service/app/router.py` ← Routes intent
+- `adk_agent/agent_service/app/skills/planner_skills.py` ← Returns artifacts
 - `Povver/Povver/ViewModels/ConversationViewModel.swift`
 - `Povver/Povver/Views/ConversationView.swift`
 
@@ -193,24 +198,40 @@ Firestore: workouts/{newId} created
     template_diff: {...}  // Deviations from source template
   }
         │
-        ▼ (onCreate trigger fires)
-Firebase: workout-routine-cursor.js
-        │ Updates routine cursor
+        ▼ (Cloud Tasks enqueue via enqueue-workout-task.js)
+Cloud Tasks: workout-completion queue
+        │ At-least-once delivery with retries
         ▼
-Firestore: routines/{id} updated
+Firebase: training/process-workout-completion.js
+        │ Unified pipeline: weekly stats, analytics series,
+        │ routine cursor, training analysis enqueue
+        │ Idempotent via completion_watermark field
+        ▼
+Firestore: routines/{id} updated (cursor)
   {
     last_completed_template_id: "...",
     last_completed_at: ...
   }
+Firestore: workouts/{id} updated (watermark)
+  {
+    completion_watermark: Timestamp
+  }
         │
         ▼
 Next get-next-workout.js call uses cursor for O(1) lookup
+
+Watchdog: workout-completion-watchdog.js (daily scheduled)
+        │ Scans 48h for workouts missing completion_watermark
+        │ Re-enqueues to Cloud Tasks for reprocessing
 ```
 
 **Files involved** (CURRENT PATHS):
 - `Povver/Povver/Services/FocusModeWorkoutService.swift` ← finishWorkout()
 - `firebase_functions/functions/active_workout/complete-active-workout.js`
-- `firebase_functions/functions/triggers/workout-routine-cursor.js`
+- `firebase_functions/functions/utils/enqueue-workout-task.js` ← Cloud Tasks enqueue
+- `firebase_functions/functions/triggers/workout-completion-task.js` ← Cloud Tasks handler
+- `firebase_functions/functions/training/process-workout-completion.js` ← unified pipeline
+- `firebase_functions/functions/triggers/workout-completion-watchdog.js` ← safety net
 - `firebase_functions/functions/routines/get-next-workout.js`
 
 ---
@@ -229,9 +250,9 @@ iOS: WorkoutCoachViewModel.send()
         ▼
 Firebase: stream-agent-normalized.js
         │ Builds context prefix: (context: conversation_id=X user_id=Y corr=Z workout_id=W today=YYYY-MM-DD)
-        │ Opens SSE to Vertex AI
+        │ Opens SSE to Agent Service (Cloud Run)
         ▼
-Agent: agent_engine_app.py::stream_query()
+Agent: main.py (agent_service) via SSE proxy
         │ 1. Parses workout_id from context → ctx.workout_mode = true
         │ 2. Routes message (Fast/Functional/Slow)
         │ 3. If Slow Lane: front-loads Workout Brief (~1350 tokens)
@@ -259,14 +280,14 @@ iOS: FocusModeWorkoutService receives updated workout state
 - `Povver/Povver/ViewModels/WorkoutCoachViewModel.swift` ← Ephemeral chat VM
 - `Povver/Povver/Services/DirectStreamingService.swift` ← streamQuery(workoutId:)
 - `firebase_functions/functions/strengthos/stream-agent-normalized.js` ← workout_id in context
-- `adk_agent/canvas_orchestrator/app/agent_engine_app.py` ← Workout Brief injection
-- `adk_agent/canvas_orchestrator/app/shell/context.py` ← SessionContext (workout_mode, today)
-- `adk_agent/canvas_orchestrator/app/skills/workout_skills.py` ← Brief builder + mutations
-- `adk_agent/canvas_orchestrator/app/shell/tools.py` ← 6 workout tool wrappers
-- `adk_agent/canvas_orchestrator/app/shell/instruction.py` ← ACTIVE WORKOUT MODE section
+- `adk_agent/agent_service/app/main.py` ← Entry point, Workout Brief injection
+- `adk_agent/agent_service/app/context.py` ← SessionContext (workout_mode, today)
+- `adk_agent/agent_service/app/skills/workout_skills.py` ← Brief builder + mutations
+- `adk_agent/agent_service/app/tools/` ← Workout tool wrappers
+- `adk_agent/agent_service/app/instruction.py` ← ACTIVE WORKOUT MODE section
 
 **Design decisions**:
-- Same Vertex AI deployment, mode-based switching (no second agent)
+- Same Cloud Run deployment, mode-based switching (no second agent)
 - Workout Brief front-loaded once per request (not per LLM turn)
 - Fast Lane still works in workout mode (bypasses brief fetch for <500ms)
 - Chat is ephemeral (in-memory, not persisted to Firestore)
@@ -286,7 +307,7 @@ The conversation system is a lightweight replacement for the previous canvas arc
 | **Artifact Delivery** | Firestore subcollection → listener | SSE events → in-memory |
 | **Persistence** | 5 subcollections (cards, workspace, actions, drafts, events) | 2 subcollections (messages, artifacts - optional) |
 | **Complexity** | apply-action reducer, undo stack, phase state machine | Direct writes, no state machine |
-| **Session Init** | openCanvas → bootstrapCanvas → propose initial cards | initialize-session → returns sessionId |
+| **Session Init** | openCanvas → bootstrapCanvas → propose initial cards | No init needed — conversation created on first message |
 
 ### Conversation Schema
 
@@ -329,39 +350,32 @@ The conversation system is a lightweight replacement for the previous canvas arc
 5. **Persistence**: `stream-agent-normalized.js` writes artifact to Firestore with the pre-generated ID via `set()`
 6. **Action**: User taps Accept/Save/Dismiss → iOS routes through `AgentsApi.artifactAction()` using `CardMeta.artifactId` + `conversationId`. Falls back to legacy `applyAction` when `artifactId` is absent.
 
-### SSE Event Types
+### SSE Event Types (9-Event Contract)
 
 | Event Type | Data | Purpose |
 |------------|------|---------|
+| `thinking` | `{}` | Agent processing indicator |
+| `thought` | `{content}` | Agent reasoning content |
+| `tool_start` | `{tool}` | Tool execution begins |
+| `tool_end` | `{tool, result}` | Tool execution completes |
 | `message_start` | `{messageId}` | Begin new assistant message |
 | `text` | `{delta}` | Streaming text chunk |
 | `artifact` | `{type, content, meta, artifactId}` | Inline artifact (routine, workout, etc.) |
 | `message_end` | `{}` | Complete assistant message |
 | `error` | `{code, message}` | Error during streaming |
 
-### Session Management
+### Session Management (REMOVED — Phase 7)
 
-```
-iOS: ConversationViewModel.init()
-        │
-        ▼
-iOS: initializeSession()
-        │ POST /initializeSession
-        ▼
-Firebase: initialize-session.js
-        │ Creates conversation doc if needed
-        │ Returns sessionId + conversationId
-        ▼
-iOS: SessionPreWarmer preloads context
-        │ Parallel fetch: routines, templates, recent workouts
-        ▼
-iOS: Ready to stream
-```
+Sessions have been eliminated. Conversations are created on first message — no session initialization, pre-warming, or exchange-token flow needed. The agent service is fully stateless with per-request context via ContextVar.
 
-**Files involved**:
-- `firebase_functions/functions/sessions/initialize-session.js`
-- `Povver/Povver/Services/SessionPreWarmer.swift`
-- `Povver/Povver/ViewModels/ConversationViewModel.swift`
+**Removed components**:
+- `firebase_functions/functions/sessions/initialize-session.js` (REMOVED)
+- `firebase_functions/functions/sessions/pre-warm-session.js` (REMOVED)
+- `firebase_functions/functions/sessions/cleanup-sessions.js` (REMOVED)
+- `firebase_functions/functions/auth/exchange-token.js` (REMOVED)
+- `Povver/Povver/Services/SessionPreWarmer.swift` (REMOVED)
+
+**Current flow**: iOS sends first message via `streamAgentNormalized` → conversation doc created lazily if needed → agent responds.
 
 ### Migration Notes
 
@@ -621,9 +635,8 @@ All weight values are stored in **kilograms (kg)** across every layer (Firestore
 | iOS | `Povver/Povver/UI/Components/Domain/SetTable.swift` | Read-only set table — header shows `UserService.shared.weightUnit.label` |
 | Firebase | `firebase_functions/functions/user/update-preferences.js` | Writes `weight_format`/`height_format` to `user_attributes/{uid}` (v2 onRequest with `requireFlexibleAuth`) |
 | Firebase | `firebase_functions/functions/agents/get-planning-context.js` | Derives `weight_unit` field (`"kg"` or `"lbs"`) from `weight_format` for agent consumption |
-| Agent | `adk_agent/canvas_orchestrator/app/utils/weight_formatting.py` | Shared `format_weight()` and `get_weight_unit()` used by all skill modules |
-| Agent | `adk_agent/canvas_orchestrator/app/skills/workout_skills.py` | Weight unit cache (`set_weight_unit`/`get_weight_unit`) with timestamp-based eviction |
-| Agent | `adk_agent/canvas_orchestrator/app/shell/instruction.py` | Unit-aware progression rules, defaults, and rounding — agent reasons in user's unit system, converts to kg only for tool parameters |
+| Agent | `adk_agent/agent_service/app/skills/workout_skills.py` | Weight unit cache (`set_weight_unit`/`get_weight_unit`) with timestamp-based eviction |
+| Agent | `adk_agent/agent_service/app/instruction.py` | Unit-aware progression rules, defaults, and rounding — agent reasons in user's unit system, converts to kg only for tool parameters |
 
 ### Preference Loading on App Launch
 `UserService.init()` calls `loadUserPreferences()`, but Firebase Auth may not have initialized yet (`currentUser` is nil). To handle this:
@@ -653,7 +666,7 @@ The agent does not merely convert kg to lbs for display. It **thinks in the user
 | `Povver/Povver/Repositories/CanvasRepository.swift` | Canvas system removed | `ConversationRepository.swift` |
 | `canvas/apply-action.js` | Canvas reducer removed | `conversations/artifact-action.js` |
 | `canvas/propose-cards.js` | Canvas cards removed | Artifacts via SSE |
-| `canvas/bootstrap-canvas.js` | Canvas bootstrap removed | `sessions/initialize-session.js` |
+| `canvas/bootstrap-canvas.js` | Canvas bootstrap removed | Conversation created on first message |
 | `canvas/open-canvas.js` | Canvas open removed | Direct conversation creation |
 | `canvas/emit-event.js` | Canvas events removed | SSE from agent |
 | `canvas/purge-canvas.js` | Canvas purge removed | N/A |
@@ -663,6 +676,13 @@ The agent does not merely convert kg to lbs for display. It **thinks in the user
 | `routines/create-routine.js` | Manual routine creation | `create-routine-from-draft.js` |
 | `routines/update-routine.js` | Direct update | `patch-routine.js` |
 | `templates/update-template.js` | Direct update | `patch-template.js` |
+| `adk_agent/canvas_orchestrator/` | Vertex AI Agent Engine deployment | `adk_agent/agent_service/` (Cloud Run) |
+| `sessions/initialize-session.js` | Session init removed | Conversations created on first message |
+| `sessions/pre-warm-session.js` | Session pre-warming removed | No session management needed |
+| `sessions/cleanup-sessions.js` | Session cleanup removed | No sessions to clean |
+| `auth/exchange-token.js` | Token exchange removed | No sessions |
+| `Povver/Povver/Services/SessionPreWarmer.swift` | Session pre-warming removed | No session management needed |
+| `triggers/workout-routine-cursor.js` | Firestore trigger for cursor | `training/process-workout-completion.js` (Cloud Tasks) |
 
 ### Legacy Field Names
 
@@ -691,8 +711,8 @@ The Training Analyst is an **asynchronous background service** that pre-computes
 ```
 Workout Completed
         │
-        ▼ (Firestore trigger: onWorkoutCompleted)
-Firebase: weekly-analytics.js
+        ▼ (Cloud Tasks: workout-completion queue)
+Firebase: process-workout-completion.js
         │ Writes job to training_analysis_jobs collection
         ▼
 Firestore: training_analysis_jobs/{jobId}
@@ -733,7 +753,9 @@ adk_agent/training_analyst/
 │   ├── analyzers/
 │   │   ├── base.py                ← Shared LLM client (google.genai + Vertex AI)
 │   │   ├── post_workout.py        ← Post-workout insights
-│   │   └── weekly_review.py       ← Weekly progression
+│   │   ├── weekly_review.py       ← Weekly progression
+│   │   ├── plateau_detector.py    ← Plateau detection analysis
+│   │   └── volume_optimizer.py    ← Volume optimization analysis
 │   └── jobs/
 │       ├── models.py              ← Job, JobPayload, JobStatus, JobType
 │       ├── queue.py               ← Create, poll, lease, complete, fail
@@ -806,11 +828,11 @@ This calls the `getAnalysisSummary` Firebase Function, which reads from Firestor
 
 ---
 
-## Agent Architecture: 4-Lane Shell Agent (CURRENT)
+## Agent Architecture: 4-Lane Agent Service (CURRENT)
 
-> **CRITICAL**: The old multi-agent architecture (CoachAgent, PlannerAgent, Orchestrator) 
-> is DEPRECATED and moved to `adk_agent/canvas_orchestrator/_archived/`. 
-> DO NOT import from that folder. All new code uses the Shell Agent.
+> **CRITICAL**: The agent runs on **Cloud Run** as a stateless service (`adk_agent/agent_service/`).
+> The old Vertex AI Agent Engine deployment (`adk_agent/canvas_orchestrator/`) is DEPRECATED.
+> DO NOT import from the old folder. All new code uses `adk_agent/agent_service/`.
 
 ### Architecture Decision Record
 
@@ -821,33 +843,45 @@ This calls the `getAnalysisSummary` Firebase Function, which reads from Firestor
 | Skills as Modules | Pure functions, not chat agents |
 | ContextVars for State | Thread-safe in async serverless |
 
-### Shell Agent File Map
+### Agent Service File Map
 
 ```
-adk_agent/canvas_orchestrator/
+adk_agent/agent_service/
 ├── app/
-│   ├── agent_engine_app.py     ← ENTRY POINT (Vertex AI)
-│   ├── shell/                   ← 4-LANE PIPELINE
-│   │   ├── router.py            ← Determines lane
-│   │   ├── context.py           ← Per-request SessionContext
-│   │   ├── agent.py             ← ShellAgent (gemini-2.5-flash)
-│   │   ├── tools.py             ← Tool wrappers
-│   │   ├── planner.py           ← Intent-based planning
-│   │   ├── critic.py            ← Response validation
-│   │   ├── safety_gate.py       ← Write confirmation
-│   │   ├── functional_handler.py ← JSON/Flash lane
-│   │   └── instruction.py       ← System prompt
+│   ├── main.py                  ← ENTRY POINT (Cloud Run, FastAPI)
+│   ├── router.py                ← 4-Lane routing (determines lane)
+│   ├── context.py               ← Per-request SessionContext (ContextVar)
+│   ├── context_builder.py       ← Builds context from Firestore for agent
+│   ├── agent_loop.py            ← Agent execution loop
+│   ├── memory.py                ← 4-tier memory system (Tier 3 agent_memory, Tier 4 summaries)
+│   ├── instruction.py           ← System prompt
+│   ├── planner.py               ← Intent-based planning
+│   ├── critic.py                ← Response validation
+│   ├── safety_gate.py           ← Write confirmation
+│   ├── functional_handler.py    ← JSON/Flash lane
+│   ├── firestore_client.py      ← Firestore SDK singleton
+│   ├── observability.py         ← Logging and tracing
 │   ├── skills/                  ← PURE LOGIC (Shared Brain)
 │   │   ├── coach_skills.py      ← Analytics, user data
 │   │   ├── planner_skills.py    ← Artifact creation
 │   │   ├── copilot_skills.py    ← Set logging, workout
 │   │   ├── workout_skills.py    ← Workout Brief + active workout mutations
 │   │   └── gated_planner.py     ← Safety-gated writes
-│   └── libs/                    ← Utilities
-├── workers/                     ← BACKGROUND JOBS
-│   └── post_workout_analyst.py  ← Post-workout insights
-└── _archived/                   ← DEPRECATED (do not use)
+│   ├── tools/                   ← Tool wrappers
+│   └── llm/                     ← LLM client abstraction
+├── tests/                       ← Test suite
+├── Dockerfile                   ← Cloud Run container
+├── Makefile                     ← Build, deploy, dev commands
+└── requirements.txt
 ```
+
+**Memory System** (4 tiers):
+| Tier | Storage | Scope | Purpose |
+|------|---------|-------|---------|
+| 1 | Session variables | Per-request | Workout mode, today, correlation_id |
+| 2 | Conversation history | Per-conversation | Messages in `conversations/{id}/messages` |
+| 3 | Agent memory | Per-user, persistent | `users/{uid}/agent_memory/{auto-id}` — facts the agent remembers across conversations |
+| 4 | Conversation summaries | Per-conversation | Compressed context from long conversations |
 
 ### 4-Lane Routing Decision Table
 
@@ -887,9 +921,9 @@ Note: "Returns Artifact" means the tool returns artifact data in SkillResult, wh
 ### Context Flow (SECURITY CRITICAL)
 
 ```
-agent_engine_app.py::stream_query()
+main.py (agent_service) handles SSE request
     │
-    ├─→ 1. Parse context: ctx = SessionContext.from_message(message)
+    ├─→ 1. Parse context: ctx = SessionContext from request
     │
     ├─→ 2. Set context: set_current_context(ctx, message)  ← MUST BE FIRST
     │

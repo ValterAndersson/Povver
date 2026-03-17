@@ -1,6 +1,6 @@
 import Foundation
 
-struct CanvasActions {
+struct ConversationActions {
     static func acceptProposal(canvasId: String, cardId: String) -> ApplyActionRequestDTO {
         ApplyActionRequestDTO(canvasId: canvasId, expected_version: nil, action: CanvasActionDTO(type: "ACCEPT_PROPOSAL", card_id: cardId, payload: nil, by: "user", idempotency_key: UUID().uuidString))
     }

@@ -75,7 +75,7 @@ struct MainTabsView: View {
         TabView(selection: selectedTab) {
             // Coach Tab
             NavigationStack {
-                CoachTabView(switchToTab: switchToTab, initialCanvasContext: adjustWithCoachContext)
+                CoachTabView(switchToTab: switchToTab, initialConversationContext: adjustWithCoachContext)
             }
             .tabItem { Label(MainTab.coach.label, systemImage: MainTab.coach.iconName) }
             .tag(MainTab.coach)

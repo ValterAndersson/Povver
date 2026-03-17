@@ -1,36 +1,36 @@
 /**
  =============================================================================
- CanvasRepository.swift - Firestore Canvas Subscription
+ ConversationRepository.swift - Firestore Conversation Subscription
  =============================================================================
  
  PURPOSE:
- Provides real-time Firestore listeners for canvas state, cards, and up_next.
- Returns an AsyncThrowingStream that emits CanvasSnapshot on any change.
+ Provides real-time Firestore listeners for conversation state, cards, and up_next.
+ Returns an AsyncThrowingStream that emits ConversationSnapshot on any change.
  
  ARCHITECTURE CONTEXT:
  ┌─────────────────────────────────────────────────────────────────────────────┐
  │ FIRESTORE LISTENER SETUP                                                    │
  │                                                                             │
- │ CanvasViewModel.start()                                                     │
+ │ ConversationViewModel.start()                                                     │
  │   │                                                                         │
  │   ▼ repo.subscribe(userId, canvasId)                                       │
  │   │                                                                         │
- │   ▼ CanvasRepository (THIS FILE)                                           │
+ │   ▼ ConversationRepository (THIS FILE)                                           │
  │   │                                                                         │
  │   ├──▶ stateListener: users/{uid}/canvases/{canvasId} (doc)                │
  │   │      → state.phase, state.version, state.purpose                       │
  │   │                                                                         │
  │   ├──▶ cardsListener: users/{uid}/canvases/{canvasId}/cards (collection)   │
- │   │      → All card documents, mapped via CanvasMapper                     │
+ │   │      → All card documents, mapped via ConversationMapper                     │
  │   │                                                                         │
  │   └──▶ upNextListener: users/{uid}/canvases/{canvasId}/up_next (collection)│
  │          → Priority-ordered list of card_ids for "suggested next"          │
  │                                                                             │
- │ Any listener change → emit(CanvasSnapshot) → CanvasViewModel receives      │
+ │ Any listener change → emit(ConversationSnapshot) → ConversationViewModel receives      │
  └─────────────────────────────────────────────────────────────────────────────┘
  
  SNAPSHOT STRUCTURE:
- CanvasSnapshot {
+ ConversationSnapshot {
    version: Int              // Incremented on every apply-action
    state: CanvasStateDTO     // Phase, purpose, lanes
    cards: [CanvasCardModel]  // All active cards
@@ -43,10 +43,10 @@
  - This prevents showing stale cards on fresh open
  
  RELATED FILES:
- - CanvasViewModel.swift: Consumes this stream
- - CanvasMapper.swift: Maps Firestore docs to CanvasCardModel
- - CanvasService.swift: HTTP calls (apply-action, open-canvas)
- - Models.swift: CanvasCardModel, CanvasSnapshot definitions
+ - ConversationViewModel.swift: Consumes this stream
+ - ConversationMapper.swift: Maps Firestore docs to CanvasCardModel
+ - ConversationService.swift: HTTP calls (apply-action, open-canvas)
+ - Models.swift: CanvasCardModel, ConversationSnapshot definitions
  
  UNUSED CODE CHECK: ✅ No unused code in this file
  
@@ -57,17 +57,17 @@ import Foundation
 import FirebaseFirestore
 import FirebaseAuth
 
-protocol CanvasRepositoryProtocol {
-    func subscribe(userId: String, canvasId: String) -> AsyncThrowingStream<CanvasSnapshot, Error>
+protocol ConversationRepositoryProtocol {
+    func subscribe(userId: String, canvasId: String) -> AsyncThrowingStream<ConversationSnapshot, Error>
 }
 
-final class CanvasRepository: CanvasRepositoryProtocol {
-    static let shared = CanvasRepository()
+final class ConversationRepository: ConversationRepositoryProtocol {
+    static let shared = ConversationRepository()
     @MainActor var currentCanvasId: String?
     private let db = Firestore.firestore()
 
-    func subscribe(userId: String, canvasId: String) -> AsyncThrowingStream<CanvasSnapshot, Error> {
-        let stateRef = db.collection("users").document(userId).collection("canvases").document(canvasId)
+    func subscribe(userId: String, canvasId: String) -> AsyncThrowingStream<ConversationSnapshot, Error> {
+        let stateRef = db.collection("users").document(userId).collection("conversations").document(canvasId)
         let cardsRef = stateRef.collection("cards")
         let upNextRef = stateRef.collection("up_next")
 
@@ -78,7 +78,7 @@ final class CanvasRepository: CanvasRepositoryProtocol {
 
             func emit() {
                 let version = state.version ?? 0
-                let snapshot = CanvasSnapshot(version: version, state: state, cards: Array(cards.values), upNext: upNext)
+                let snapshot = ConversationSnapshot(version: version, state: state, cards: Array(cards.values), upNext: upNext)
                 continuation.yield(snapshot)
             }
 
@@ -126,7 +126,7 @@ final class CanvasRepository: CanvasRepositoryProtocol {
                 let docs = snap.documents
                 var nextCards: [String: CanvasCardModel] = [:]
                 for doc in docs {
-                    if let model = CanvasMapper.mapCard(from: doc) {
+                    if let model = ConversationMapper.mapCard(from: doc) {
                         nextCards[model.id] = model
                     }
                 }

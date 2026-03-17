@@ -72,16 +72,6 @@ service cloud.firestore {
         allow write: if false;
       }
 
-      // Canvas: read-only for owner, Functions-only writes
-      match /canvases/{canvasId} {
-        allow read: if request.auth != null && request.auth.uid == uid;
-        allow write: if false;
-      }
-      match /canvases/{canvasId}/{document=**} {
-        allow read: if request.auth != null && request.auth.uid == uid;
-        allow write: if false;
-      }
-
       // Conversations: owner read; root doc + artifacts are function-only
       match /conversations/{conversationId} {
         allow read: if request.auth != null && request.auth.uid == uid;
@@ -124,13 +114,14 @@ service cloud.firestore {
       match /{collection}/{document=**} {
         allow read: if request.auth != null && request.auth.uid == uid;
         allow write: if request.auth != null && request.auth.uid == uid
-          && collection != "canvases"
           && collection != "exercise_usage_stats"
           && collection != "conversations"
           && collection != "agent_sessions"
           && collection != "agent_recommendations"
           && collection != "subscription_events"
-          && collection != "agent_memory";
+          && collection != "agent_memory"
+          && collection != "analysis_insights"
+          && collection != "weekly_reviews";
       }
     }
 

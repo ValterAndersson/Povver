@@ -1,6 +1,6 @@
 import SwiftUI
 
-public struct CanvasGridView: View {
+public struct ConversationGridView: View {
     private let cards: [CanvasCardModel]
     private let onAccept: (String) -> Void
     private let onReject: (String) -> Void
@@ -118,7 +118,7 @@ private struct EquatableCardHost: View, Equatable {
 }
 
 #if DEBUG
-struct CanvasGridView_Previews: PreviewProvider {
+struct ConversationGridView_Previews: PreviewProvider {
     static var previews: some View {
         let lineChartSpec = VisualizationSpec(
             chartType: .line,
@@ -155,7 +155,7 @@ struct CanvasGridView_Previews: PreviewProvider {
             ])),
             CanvasCardModel(type: .coach_proposal, title: "Increase load +2.5kg", data: .suggestion(title: "Adjust Load", rationale: "RIR ≤ 1 last set"))
         ]
-        ScrollView { CanvasGridView(cards: demo, columns: 2).padding(InsetsToken.screen) }
+        ScrollView { ConversationGridView(cards: demo, columns: 2).padding(InsetsToken.screen) }
     }
 }
 #endif

@@ -50,7 +50,7 @@ public struct ActionErrorDTO: Codable { public let code: String; public let mess
 
 // MARK: - Aggregated Snapshot for UI
 
-public struct CanvasSnapshot {
+public struct ConversationSnapshot {
     public let version: Int
     public let state: CanvasStateDTO
     public let cards: [CanvasCardModel]
@@ -59,7 +59,7 @@ public struct CanvasSnapshot {
 
 // MARK: - Firestore Mappers
 
-public enum CanvasMapper {
+public enum ConversationMapper {
     public static func mapCard(from doc: DocumentSnapshot) -> CanvasCardModel? {
         let data = doc.data() ?? [:]
         guard let statusStr = data["status"] as? String else { return nil }

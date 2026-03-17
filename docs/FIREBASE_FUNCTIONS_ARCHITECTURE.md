@@ -26,7 +26,7 @@ Firebase Functions serve as the backend API layer for the Povver fitness platfor
 
 - RESTful HTTP endpoints for CRUD operations
 - Conversation and artifact lifecycle management
-- Agent streaming proxy to Vertex AI Agent Engine
+- Agent streaming proxy to Agent Service (Cloud Run)
 - Firestore triggers for real-time data processing
 - Scheduled jobs for analytics and maintenance
 
@@ -48,7 +48,8 @@ Firebase Functions serve as the backend API layer for the Povver fitness platfor
 | **Routines** | `getUserRoutines`, `getRoutine`, `createRoutine`, `updateRoutine`, `deleteRoutine`, `getActiveRoutine`, `setActiveRoutine`, `getNextWorkout`, `patchRoutine` | API Key / Flexible |
 | **Exercises** | `getExercises`, `getExercise`, `searchExercises`, `upsertExercise`, `approveExercise`, `ensureExerciseExists`, `resolveExercise`, `mergeExercises` | API Key |
 | **Conversations** | `artifactAction` | Flexible Auth |
-| **Sessions** | `initializeSession`, `preWarmSession`, `cleanupSessions` | Flexible Auth / Scheduled |
+| **Sessions** | ~~`initializeSession`~~, ~~`preWarmSession`~~, ~~`cleanupSessions`~~ | **(REMOVED — sessions eliminated)** |
+| **MCP API Keys** | `generateMcpApiKey`, `listMcpApiKeys`, `revokeMcpApiKey` | Flexible Auth |
 | **Active Workout** | `startActiveWorkout`, `getActiveWorkout`, `logSet`, `completeCurrentSet`, `addExercise`, `swapExercise`, `completeActiveWorkout`, `cancelActiveWorkout`, `proposeSession`, `patchActiveWorkout`, `autofillExercise` | Flexible Auth |
 | **Agents** | `invokeAgent`, `getPlanningContext`, `streamAgentNormalized` | Flexible Auth |
 | **Subscriptions** | `appStoreWebhook`, `syncSubscriptionStatus` | None (webhook) / Flexible (sync) |
@@ -108,29 +109,31 @@ Conversations are the primary AI interaction surface. The agent streams messages
 }
 ```
 
-### Session Management
+### Session Management (REMOVED)
 
-**`initializeSession`** - Create agent session for conversation:
+Sessions have been eliminated. The agent service is fully stateless with per-request context. Conversations are created lazily on first message via `streamAgentNormalized`.
 
-**Location**: `sessions/initialize-session.js`
+**Removed functions**:
+- `initializeSession` — `sessions/initialize-session.js` (REMOVED)
+- `preWarmSession` — `sessions/pre-warm-session.js` (REMOVED)
+- `cleanupSessions` — `sessions/cleanup-sessions.js` (REMOVED)
+
+### MCP API Key Management
+
+**`generateMcpApiKey`** - Generate API key for MCP Server access:
+
+**Location**: `mcp/generate-api-key.js`
+**Auth**: `requireFlexibleAuth` (Bearer lane, premium-gated)
+
+**`listMcpApiKeys`** - List user's MCP API keys:
+
+**Location**: `mcp/list-api-keys.js`
 **Auth**: `requireFlexibleAuth`
 
-**Input**: `conversationId`, `purpose`
-**Output**: `{sessionId}`
+**`revokeMcpApiKey`** - Revoke an MCP API key:
 
-**`preWarmSession`** - Pre-warm agent session (reduce cold-start latency):
-
-**Location**: `sessions/pre-warm-session.js`
+**Location**: `mcp/revoke-api-key.js`
 **Auth**: `requireFlexibleAuth`
-
-**Input**: `userId`
-**Output**: `{success, sessionId}`
-
-**`cleanupSessions`** - Scheduled function to purge stale sessions:
-
-**Location**: `sessions/cleanup-sessions.js`
-**Trigger**: Scheduled (every 6 hours)
-**Purpose**: Deletes sessions older than 24 hours
 
 ---
 
@@ -138,11 +141,11 @@ Conversations are the primary AI interaction surface. The agent streams messages
 
 ### Streaming Architecture
 
-`streamAgentNormalized` proxies SSE streams from Vertex AI Agent Engine:
+`streamAgentNormalized` proxies SSE streams from the Agent Service on Cloud Run:
 
 ```
-iOS App → Firebase Function → Vertex AI Agent Engine
-           (SSE proxy)         (Shell Agent)
+iOS App → Firebase Function → Agent Service (Cloud Run)
+           (SSE proxy)         (4-Lane Router)
 ```
 
 **Location**: `strengthos/stream-agent-normalized.js`
@@ -315,21 +318,26 @@ Completed workout history management. Auth: `requireFlexibleAuth` (Bearer lane).
 | `onTemplateUpdated` | Template update | Recalculate muscle volumes |
 | `onWorkoutCreated` | Workout create | Calculate actual muscle volumes |
 
-### Weekly Analytics
+### Workout Completion Pipeline (Cloud Tasks)
+
+Workout creation/completion now uses **Cloud Tasks** instead of Firestore triggers for reliability, retries, and observability.
+
+| Component | Type | Purpose |
+|-----------|------|---------|
+| `enqueue-workout-task.js` | Utility | Enqueues workout to `workout-completion` Cloud Tasks queue |
+| `workout-completion-task.js` | HTTP (Cloud Tasks) | Receives `{userId, workoutId}`, delegates to `process-workout-completion.js` |
+| `process-workout-completion.js` | Pipeline | Unified handler: weekly stats, analytics series, routine cursor, training analysis enqueue. Idempotent via `completion_watermark`. |
+| `workout-completion-watchdog.js` | Scheduled (daily) | Scans 48h for workouts missing `completion_watermark`, re-enqueues |
+
+Enqueue points: `complete-active-workout.js`, `upsert-workout.js`
+
+### Weekly Analytics (Remaining Triggers)
 
 | Trigger | Event | Purpose |
 |---------|-------|---------|
-| `onWorkoutCompleted` | Workout complete | Update weekly stats, exercise usage stats |
-| `onWorkoutCreatedWithEnd` | Workout with endTime | Finalize workout analytics, exercise usage stats |
 | `onWorkoutDeleted` | Workout delete | Adjust weekly totals, decrement exercise usage stats |
-| `onWorkoutCreatedWeekly` | Workout create | Increment weekly counters |
-| `onWorkoutFinalizedForUser` | Workout finalized | User-level analytics |
 
-### Routine Cursor
-
-| Trigger | Event | Purpose |
-|---------|-------|---------|
-| `onWorkoutCreatedUpdateRoutineCursor` | Workout create | Advance routine cursor |
+Note: `onWorkoutCompleted`, `onWorkoutCreatedWithEnd`, `onWorkoutCreatedWeekly`, `onWorkoutFinalizedForUser`, and `onWorkoutCreatedUpdateRoutineCursor` have been replaced by the Cloud Tasks workout completion pipeline above.
 
 ---
 
@@ -478,7 +486,7 @@ firebase_functions/functions/
 ├── artifacts/                  # Artifact lifecycle
 │   └── artifact-action.js      # Accept, dismiss, save_routine, start_workout
 ├── auth/                       # Authentication middleware
-│   ├── exchange-token.js
+│   ├── exchange-token.js       # (REMOVED — sessions eliminated)
 │   └── middleware.js
 ├── exercises/                  # Exercise catalog
 │   ├── approve-exercise.js
@@ -518,10 +526,14 @@ firebase_functions/functions/
 │   └── update-routine.js
 ├── scripts/                    # Dev scripts
 │   └── weekly_publisher.js
-├── sessions/                   # Session management
-│   ├── cleanup-sessions.js     # Scheduled: purge stale sessions
-│   ├── initialize-session.js   # Create agent session
-│   └── pre-warm-session.js     # Pre-warm session (reduce cold-start)
+├── mcp/                        # MCP API key management
+│   ├── generate-api-key.js     # Generate API key for MCP Server
+│   ├── list-api-keys.js        # List user's MCP API keys
+│   └── revoke-api-key.js       # Revoke an MCP API key
+├── sessions/                   # (REMOVED — sessions eliminated)
+│   ├── cleanup-sessions.js     # (REMOVED)
+│   ├── initialize-session.js   # (REMOVED)
+│   └── pre-warm-session.js     # (REMOVED)
 ├── shared/                     # Shared utilities
 │   └── active_workout/
 │       └── reorder_sets_core.js
@@ -543,11 +555,13 @@ firebase_functions/functions/
 │   └── update-template.js
 ├── tests/                      # Test files
 │   └── (test files)
-├── triggers/                   # Firestore triggers
+├── triggers/                   # Firestore triggers + Cloud Tasks handlers
 │   ├── muscle-volume-calculations.js
 │   ├── process-recommendations.js  # Analysis → recommendation pipeline
-│   ├── weekly-analytics.js
-│   └── workout-routine-cursor.js
+│   ├── weekly-analytics.js         # Workout deletion handler + scheduled recalculation
+│   ├── workout-completion-task.js  # Cloud Tasks handler for workout completion
+│   ├── workout-completion-watchdog.js  # Daily safety net for missed completions
+│   └── workout-routine-cursor.js   # (DEPRECATED — replaced by process-workout-completion.js)
 ├── user/                       # User operations
 │   ├── delete-account.js       # Server-side account deletion (Admin SDK, App Store 5.1.1(v))
 │   ├── get-preferences.js
@@ -556,15 +570,17 @@ firebase_functions/functions/
 │   ├── update-user.js
 │   └── upsert-attributes.js
 ├── utils/                      # Shared utilities
+│   ├── enqueue-workout-task.js # Cloud Tasks workout completion enqueue
 │   ├── plan-to-template-converter.js
 │   ├── response.js             # ok() / fail() response helpers
 │   ├── subscription-gate.js    # isPremiumUser() shared premium check
 │   ├── validation-response.js
 │   └── validators.js
-├── training/                   # Training analysis endpoints
+├── training/                   # Training analysis endpoints + workout completion pipeline
 │   ├── active-events.js
 │   ├── context-pack.js
 │   ├── get-analysis-summary.js
+│   ├── process-workout-completion.js  # Unified workout completion pipeline (Cloud Tasks)
 │   ├── progress-summary.js
 │   ├── query-sets.js
 │   ├── series-endpoints.js

@@ -16,9 +16,9 @@ Codable structs that mirror Firestore document schemas. All models use `decodeIf
 | `ActiveWorkout.swift` | — | In-memory active workout state (exercises, sets, duration) |
 | `ActiveWorkoutDoc.swift` | `users/{uid}/active_workouts/{id}` | Firestore-synced active workout document |
 | `FocusModeModels.swift` | `users/{uid}/active_workouts/{id}` | `FocusModeWorkout` and related types for Focus Mode UI |
-| `StreamEvent.swift` | — | SSE event model (`text_delta`, `tool_started`, `done`, etc.) |
+| `StreamEvent.swift` | — | SSE event model (9-event contract: `message`, `tool_start`, `tool_end`, `artifact`, `clarification`, `status`, `heartbeat`, `done`, `error`) |
 | `ChatMessage.swift` | — | Chat UI message with author, content, timestamp |
-| `WorkspaceEvent.swift` | `users/{uid}/canvases/{id}/events/{id}` | Workspace event from agent |
+| `WorkspaceEvent.swift` | `users/{uid}/conversations/{id}/messages/{id}` | Conversation event from agent |
 
 ## Codable Patterns
 
@@ -47,4 +47,4 @@ struct MyModel: Codable {
 
 - Models are decoded by Repositories (`Povver/Povver/Repositories/`)
 - Schema contracts documented in `docs/FIRESTORE_SCHEMA.md`
-- Canvas-specific models live in `UI/Canvas/Models.swift` (not in this directory)
+- Conversation-specific models live in `UI/Canvas/Models.swift` (not in this directory)

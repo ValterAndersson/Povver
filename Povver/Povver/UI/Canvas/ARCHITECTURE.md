@@ -1,6 +1,6 @@
-# Canvas UI — Module Architecture
+# Conversation UI — Module Architecture
 
-The Canvas is the primary AI interaction surface. It displays agent-proposed cards organized in a grid layout, handles agent streaming visualization, and provides card-level actions (accept, reject, start workout, swap exercise).
+The Conversation UI is the primary AI interaction surface. It displays agent-proposed cards organized in a grid layout, handles agent streaming visualization, and provides card-level actions (accept, reject, start workout, swap exercise).
 
 ## File Inventory
 
@@ -9,7 +9,7 @@ The Canvas is the primary AI interaction surface. It displays agent-proposed car
 | File | Purpose |
 |------|---------|
 | `Models.swift` | Canvas card models: `CanvasCardModel`, `CardType`, `CardLane`, `CardStatus`, `CanvasCardData` |
-| `CanvasGridView.swift` | Masonry grid layout for cards |
+| `ConversationGridView.swift` | Masonry grid layout for cards |
 | `CardContainer.swift` | Universal card wrapper with header, actions, and status badge |
 | `CardHeader.swift` | Card title, subtitle, status indicator |
 | `CardActionEnvironment.swift` | Environment object for propagating card action handlers |
@@ -96,7 +96,7 @@ Has an optional `blocks: [PlanExercise]?` field for inline exercises from SSE ar
 ## Cross-References
 
 - Card type schemas: `firebase_functions/functions/canvas/schemas/card_types/`
-- Canvas ViewModel: `Povver/Povver/ViewModels/CanvasViewModel.swift`
-- Canvas Screen: `Povver/Povver/Views/CanvasScreen.swift`
+- Conversation ViewModel: `Povver/Povver/ViewModels/ConversationViewModel.swift`
+- Conversation Screen: `Povver/Povver/Views/ConversationScreen.swift`
 - Design tokens: `Povver/Povver/UI/DesignSystem/Tokens.swift`
 - Artifact action endpoint: `firebase_functions/functions/artifacts/artifact-action.js`
