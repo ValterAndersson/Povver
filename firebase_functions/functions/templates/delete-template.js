@@ -19,7 +19,7 @@ async function deleteTemplateHandler(req, res) {
     const result = await deleteTemplate(db, userId, templateId);
     return ok(res, result);
   } catch (err) {
-    return fail(res, ...mapErrorToResponse(err));
+    return mapErrorToResponse(res, err);
   }
 }
 

@@ -31,7 +31,7 @@ async function artifactActionHandler(req, res) {
     logger.info('[artifactAction] complete', { action, artifactId, userId });
     return res.status(200).json({ success: true, ...result });
   } catch (error) {
-    const httpStatus = error.http || 500;
+    const httpStatus = error.httpStatus || error.http || 500;
     if (httpStatus >= 500) {
       logger.error('[artifactAction] Error', { error: error.message, action, artifactId });
     }

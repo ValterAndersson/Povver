@@ -24,7 +24,7 @@ async function getUserTemplatesHandler(req, res) {
     const result = await listTemplates(db, userId);
     return ok(res, result);
   } catch (err) {
-    return fail(res, ...mapErrorToResponse(err));
+    return mapErrorToResponse(res, err);
   }
 }
 

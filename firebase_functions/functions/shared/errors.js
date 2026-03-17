@@ -38,6 +38,12 @@ class ConflictError extends AppError {
   }
 }
 
+class AuthenticationError extends AppError {
+  constructor(message = 'Authentication required') {
+    super(message, 'UNAUTHENTICATED', 401);
+  }
+}
+
 class PremiumRequiredError extends AppError {
   constructor(message = 'Premium subscription required') {
     super(message, 'PREMIUM_REQUIRED', 403);
@@ -58,4 +64,4 @@ function mapErrorToResponse(res, err) {
   });
 }
 
-module.exports = { AppError, ValidationError, NotFoundError, PermissionError, PermissionDeniedError, ConflictError, PremiumRequiredError, mapErrorToResponse };
+module.exports = { AppError, ValidationError, NotFoundError, PermissionError, PermissionDeniedError, ConflictError, AuthenticationError, PremiumRequiredError, mapErrorToResponse };

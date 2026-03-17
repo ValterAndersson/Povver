@@ -23,7 +23,7 @@ async function getTemplateHandler(req, res) {
     const template = await getTemplate(db, userId, templateId);
     return ok(res, template);
   } catch (err) {
-    return fail(res, ...mapErrorToResponse(err));
+    return mapErrorToResponse(res, err);
   }
 }
 

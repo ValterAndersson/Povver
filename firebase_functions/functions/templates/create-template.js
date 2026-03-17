@@ -24,7 +24,7 @@ async function createTemplateHandler(req, res) {
     });
     return ok(res, result);
   } catch (err) {
-    return fail(res, ...mapErrorToResponse(err));
+    return mapErrorToResponse(res, err);
   }
 }
 
