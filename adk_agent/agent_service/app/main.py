@@ -16,6 +16,10 @@ from app.observability import setup_logging, new_trace_id
 setup_logging()
 logger = logging.getLogger(__name__)
 
+# Register all tools at import time
+from app.tools.definitions import register_all_skills
+register_all_skills()
+
 
 async def stream_handler(request: Request) -> StreamingResponse:
     """POST /stream — main agent streaming endpoint.
@@ -52,8 +56,13 @@ async def stream_handler(request: Request) -> StreamingResponse:
         from app.agent_loop import run_agent_loop, sse_event
         from app.context import RequestContext
         from app.firestore_client import get_firestore_client
+        from app.functional_handler import execute_functional_lane
+        from app.instruction import build_instruction
         from app.llm.gemini import GeminiClient
         from app.observability import log_request
+        from app.planner import plan_tools
+        from app.router import route_request, Lane
+        from app.tools.registry import execute_tool, get_tools
 
         ctx = RequestContext(
             user_id=user_id,
@@ -64,28 +73,80 @@ async def stream_handler(request: Request) -> StreamingResponse:
         )
 
         fs = get_firestore_client()
+        llm_client = GeminiClient()
+        model = "gemini-2.5-flash"
 
-        log_request(user_id, conversation_id, "slow", "gemini-2.5-flash")
+        # Route the request
+        lane = route_request(message if isinstance(message, str) else body)
+        log_request(user_id, conversation_id, lane.value, model)
 
+        # --- Fast Lane ---
+        if lane == Lane.FAST and ctx.workout_mode:
+            from app.skills.copilot_skills import parse_shorthand
+            parsed = parse_shorthand(message) if isinstance(message, str) else None
+            if parsed:
+                try:
+                    from app.skills.copilot_skills import log_set_shorthand
+                    result = await log_set_shorthand(
+                        ctx=ctx,
+                        reps=parsed["reps"],
+                        weight_kg=parsed["weight"],
+                    )
+                    yield sse_event("message", {"text": f"Logged: {parsed['reps']} × {parsed['weight']}kg"}).encode()
+                    yield sse_event("done", {}).encode()
+                    return
+                except Exception as e:
+                    logger.warning("Fast lane failed, falling back to slow: %s", e)
+                    # Fall through to slow lane
+
+        # --- Functional Lane ---
+        if lane == Lane.FUNCTIONAL:
+            intent = body.get("intent") if isinstance(body, dict) else None
+            payload = body if isinstance(body, dict) else {}
+            if intent:
+                try:
+                    result = await execute_functional_lane(
+                        intent=intent,
+                        payload=payload,
+                        ctx=ctx,
+                        llm_client=llm_client,
+                        model=model,
+                        tool_executor=lambda name, args, c: execute_tool(name, args, c),
+                    )
+                    yield sse_event("message", {"text": json.dumps(result.to_dict())}).encode()
+                    yield sse_event("done", {}).encode()
+                    return
+                except Exception as e:
+                    logger.error("Functional lane error: %s", e)
+                    yield sse_event("error", {"message": str(e)}).encode()
+                    return
+
+        # --- Slow Lane (default) ---
         # Load conversation history
         history = await fs.get_conversation_messages(
             user_id, conversation_id, limit=20
         )
 
-        llm_client = GeminiClient()
+        # Build instruction with planning context
+        instruction = await build_instruction(fs, ctx)
 
-        # TODO: Tool registry + instruction builder (Phase 3a skill migration)
-        tools = []
-        instruction = "You are a helpful fitness coaching assistant."
+        # Get available tools for this context (respects workout mode banning)
+        tools = get_tools(ctx)
+
+        # Run planner to prioritize tools
+        tool_names = [t.name for t in tools]
+        prioritized = plan_tools(message, ctx, tool_names)
+        if prioritized:
+            logger.info("Planner prioritized: %s", prioritized)
 
         async for event in run_agent_loop(
             llm_client=llm_client,
-            model="gemini-2.5-flash",
+            model=model,
             instruction=instruction,
             history=_format_history(history),
             message=message,
             tools=tools,
-            tool_executor=_noop_executor,
+            tool_executor=lambda name, args, c: execute_tool(name, args, c),
             ctx=ctx,
             fs=fs,
         ):
@@ -107,11 +168,6 @@ async def stream_handler(request: Request) -> StreamingResponse:
             "X-Trace-Id": trace_id,
         },
     )
-
-
-async def _noop_executor(tool_name: str, args: dict, ctx) -> dict:
-    """Placeholder tool executor — replaced by real registry in Phase 3a skill migration."""
-    return {"error": f"Tool '{tool_name}' not yet implemented"}
 
 
 def _format_history(messages: list[dict]) -> list[dict]:
