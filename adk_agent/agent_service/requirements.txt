@@ -1,0 +1,25 @@
+# Core
+starlette==0.41.3
+uvicorn[standard]==0.32.1
+httpx==0.28.1
+
+# LLM
+google-genai==1.20.0
+
+# Firebase
+google-cloud-firestore==2.19.0
+google-cloud-logging==3.11.4
+firebase-admin==6.6.0
+
+# Observability
+opentelemetry-api==1.29.0
+opentelemetry-sdk==1.29.0
+opentelemetry-exporter-gcp-trace==1.9.0
+
+# Utils
+python-dotenv==1.1.0
+pydantic==2.11.7
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.24.0
