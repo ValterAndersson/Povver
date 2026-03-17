@@ -57,7 +57,7 @@ async def stream_handler(request: Request) -> StreamingResponse:
         from app.context import RequestContext
         from app.firestore_client import get_firestore_client
         from app.functional_handler import execute_functional_lane
-        from app.instruction import build_instruction
+        from app.instruction import build_system_instruction
         from app.llm.gemini import GeminiClient
         from app.observability import log_request
         from app.planner import plan_tools
@@ -127,8 +127,8 @@ async def stream_handler(request: Request) -> StreamingResponse:
             user_id, conversation_id, limit=20
         )
 
-        # Build instruction with planning context
-        instruction = await build_instruction(fs, ctx)
+        # Build system instruction with request context
+        instruction = build_system_instruction(ctx)
 
         # Get available tools for this context (respects workout mode banning)
         tools = get_tools(ctx)
@@ -139,6 +139,7 @@ async def stream_handler(request: Request) -> StreamingResponse:
         if prioritized:
             logger.info("Planner prioritized: %s", prioritized)
 
+        accumulated_text = []
         async for event in run_agent_loop(
             llm_client=llm_client,
             model=model,
@@ -150,15 +151,24 @@ async def stream_handler(request: Request) -> StreamingResponse:
             ctx=ctx,
             fs=fs,
         ):
+            # Collect agent text for persistence
+            if event.event == "message" and event.data.get("text"):
+                accumulated_text.append(event.data["text"])
             yield event.encode()
 
-        # Persist user message
+        # Persist user message + agent response
         from datetime import datetime, timezone
         await fs.save_message(user_id, conversation_id, {
             "type": "user_prompt",
             "content": message,
             "created_at": datetime.now(timezone.utc),
         })
+        if accumulated_text:
+            await fs.save_message(user_id, conversation_id, {
+                "type": "agent_response",
+                "content": "".join(accumulated_text),
+                "created_at": datetime.now(timezone.utc),
+            })
 
     return StreamingResponse(
         event_stream(),
