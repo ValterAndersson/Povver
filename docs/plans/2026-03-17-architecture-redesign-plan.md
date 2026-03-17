@@ -1,0 +1,4849 @@
+# Architecture Redesign Implementation Plan
+
+> **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Restructure Povver into a shared business logic layer, stateless Cloud Run agent, MCP server, and job queue — replacing Vertex AI Agent Engine and eliminating the circular HTTP dependency.
+
+**Architecture:** Extract pure business logic from Firebase Function handlers into `shared/` modules. Build a new Python Cloud Run agent service with direct Firestore access and model-agnostic LLM client. Add an MCP server (Node.js) importing the same shared modules. Replace the workout completion trigger cascade with a lease-based job queue worker.
+
+**Tech Stack:** Node.js (Firebase Functions, MCP Server), Python 3.11 (Agent Service), Firestore, Cloud Run, `google-genai` SDK, `@modelcontextprotocol/sdk`, Starlette (ASGI)
+
+**Spec:** `docs/plans/2026-03-17-architecture-redesign-design.md`
+
+---
+
+## File Structure
+
+### New Files
+
+**Phase 2 — Shared Business Logic:**
+```
+firebase_functions/functions/shared/
+  errors.js                    # ValidationError, NotFoundError, PermissionError
+  routines.js                  # get, list, create, patch, delete, getActive, setActive, getNextWorkout
+  templates.js                 # get, list, create, patch, delete, createFromPlan
+  workouts.js                  # get, list (paginated), upsert, delete
+  exercises.js                 # get, list, search, resolve
+  training-queries.js          # querySets, aggregateSets, getAnalysisSummary, getMuscleGroupSummary
+  planning-context.js          # getPlanningContext (user + history + routine + strength)
+firebase_functions/functions/tests/
+  shared.errors.test.js
+  shared.routines.test.js
+  shared.templates.test.js
+  shared.workouts.test.js
+  shared.exercises.test.js
+  shared.training-queries.test.js
+  shared.planning-context.test.js
+```
+
+**Phase 3a — Agent Service:**
+```
+adk_agent/agent_service/
+  Dockerfile
+  Makefile
+  requirements.txt
+  app/
+    __init__.py
+    main.py                    # Starlette ASGI app, /stream endpoint
+    agent_loop.py              # Core agent loop (replaces ADK Runner)
+    context.py                 # RequestContext dataclass (replaces ContextVar)
+    observability.py           # Structured logging, Cloud Trace
+    llm/
+      __init__.py
+      protocol.py              # LLMClient protocol, LLMChunk dataclass
+      gemini.py                # GeminiClient (google-genai SDK)
+    firestore_client.py        # AsyncClient-based Firestore access
+    router.py                  # 4-lane router (migrated from shell/router.py)
+    instruction.py             # Coaching persona (migrated, model-agnostic)
+    planner.py                 # Tool planning for Slow Lane (migrated)
+    safety_gate.py             # Write confirmation (migrated)
+    critic.py                  # Response validation (migrated)
+    functional_handler.py      # Functional Lane JSON handler (migrated)
+    skills/
+      __init__.py
+      copilot_skills.py        # Fast Lane — HTTP to Firebase Functions (retained)
+      coach_skills.py          # Read tools — direct Firestore queries
+      planner_skills.py        # Write tools — direct Firestore + SSE artifacts
+      workout_skills.py        # Active workout — HTTP to Firebase Functions (retained)
+    tools/
+      __init__.py
+      registry.py              # Tool registry + execute_tool dispatcher
+      definitions.py           # Tool schemas for LLM
+  tests/
+    __init__.py
+    test_agent_loop.py
+    test_llm_protocol.py
+    test_router.py
+    test_firestore_client.py
+    test_context.py
+    test_skills/
+      __init__.py
+      test_coach_skills.py
+      test_planner_skills.py
+```
+
+**Phase 3b — Agent Memory:**
+```
+adk_agent/agent_service/app/
+  memory.py                    # MemoryManager (save, retire, list, auto-load)
+  context_builder.py           # 360 view assembler (all tiers)
+  tools/
+    memory_tools.py            # save_memory, retire_memory, set_session_var, etc.
+adk_agent/agent_service/tests/
+  test_memory.py
+  test_context_builder.py
+```
+
+**Phase 4 — MCP Server:**
+```
+mcp_server/
+  package.json
+  tsconfig.json
+  Dockerfile
+  Makefile
+  src/
+    index.ts                   # Starlette HTTP MCP server entry
+    auth.ts                    # API key hash lookup + premium validation
+    tools.ts                   # MCP tool definitions importing shared modules
+  tests/
+    auth.test.ts
+    tools.test.ts
+```
+
+**Phase 5 — Workout Completion Worker:**
+```
+adk_agent/workout_completion_worker/
+  Dockerfile
+  Makefile
+  requirements.txt
+  cloud-run-worker.yaml
+  app/
+    __init__.py
+    config.py
+    firestore_client.py
+    processor.py               # Workout completion processing logic
+    jobs/
+      __init__.py
+      models.py                # Job, JobStatus
+      queue.py                 # Lease-based queue (same pattern as training_analyst)
+  workers/
+    completion_worker.py       # Main worker entry point
+  tests/
+    __init__.py
+    test_processor.py
+```
+
+### Modified Files (key changes only)
+
+| File | Phase | Change |
+|------|-------|--------|
+| `firebase_functions/functions/routines/*.js` | 2 | Thin wrappers calling `shared/routines.js` |
+| `firebase_functions/functions/templates/*.js` | 2 | Thin wrappers calling `shared/templates.js` |
+| `firebase_functions/functions/workouts/*.js` | 2 | Thin wrappers calling `shared/workouts.js` |
+| `firebase_functions/functions/exercises/*.js` | 2 | Thin wrappers calling `shared/exercises.js` |
+| `firebase_functions/functions/training/*.js` | 2 | Thin wrappers calling `shared/training-queries.js` |
+| `firebase_functions/functions/strengthos/stream-agent-normalized.js` | 3a, 3c | Call Cloud Run instead of Vertex AI; remove session logic |
+| `firebase_functions/functions/triggers/weekly-analytics.js` | 5 | Replace analytics pipeline with job enqueue |
+| `Povver/Povver/Services/SessionPreWarmer.swift` | 3c | Delete |
+| `Povver/Povver/Services/SessionManager.swift` | 3c | Remove session pre-warming references |
+| `Povver/Povver/Services/DirectStreamingService.swift` | 3c | Remove session ID handling |
+
+---
+
+## Chunk 1: Phase 1 (Observability) + Phase 2 (Shared Business Logic)
+
+### Task 1: Cloud Monitoring Dashboards (Phase 1)
+
+**Files:**
+- No code files — Cloud Console configuration
+
+- [ ] **Step 1: Create Firebase Functions dashboard**
+
+In Google Cloud Console > Monitoring > Dashboards, create "Povver — Firebase Functions":
+- Widget: Function execution count by function name (metric: `cloudfunctions.googleapis.com/function/execution_count`)
+- Widget: Execution latency p50/p95/p99 by function name (metric: `cloudfunctions.googleapis.com/function/execution_times`)
+- Widget: Error rate by function name
+- Widget: Active instances
+
+- [ ] **Step 2: Create Cloud Run dashboard**
+
+Create "Povver — Cloud Run":
+- Widget: Request count by service
+- Widget: Request latency p50/p95/p99
+- Widget: Container instance count
+- Widget: Billable container instance time
+
+- [ ] **Step 3: Create alerting policies**
+
+Create alerts:
+- Function error rate > 5% over 5 min window → email notification
+- Function p95 latency > 10s → email notification
+- Cloud Run error rate > 5% → email notification
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add docs/plans/
+git commit -m "docs: add observability setup instructions to implementation plan"
+```
+
+---
+
+### Task 2: Shared Error Types
+
+**Files:**
+- Create: `firebase_functions/functions/shared/errors.js`
+- Test: `firebase_functions/functions/tests/shared.errors.test.js`
+
+- [ ] **Step 1: Write the failing test**
+
+```javascript
+// tests/shared.errors.test.js
+const { test, describe } = require('node:test');
+const assert = require('node:assert/strict');
+const { ValidationError, NotFoundError, PermissionError, mapErrorToResponse } = require('../shared/errors');
+
+describe('shared/errors', () => {
+  test('ValidationError has correct code', () => {
+    const err = new ValidationError('bad input');
+    assert.equal(err.message, 'bad input');
+    assert.equal(err.code, 'INVALID_ARGUMENT');
+    assert.equal(err.httpStatus, 400);
+  });
+
+  test('NotFoundError has correct code', () => {
+    const err = new NotFoundError('not found');
+    assert.equal(err.code, 'NOT_FOUND');
+    assert.equal(err.httpStatus, 404);
+  });
+
+  test('PermissionError has correct code', () => {
+    const err = new PermissionError('forbidden');
+    assert.equal(err.code, 'FORBIDDEN');
+    assert.equal(err.httpStatus, 403);
+  });
+
+  test('mapErrorToResponse handles ValidationError', () => {
+    const res = mockRes();
+    const err = new ValidationError('routineId required');
+    mapErrorToResponse(res, err);
+    assert.equal(res._status, 400);
+    assert.deepEqual(res._json, {
+      success: false,
+      error: { code: 'INVALID_ARGUMENT', message: 'routineId required', details: undefined }
+    });
+  });
+
+  test('mapErrorToResponse handles unknown errors as INTERNAL', () => {
+    const res = mockRes();
+    mapErrorToResponse(res, new Error('kaboom'));
+    assert.equal(res._status, 500);
+    assert.equal(res._json.error.code, 'INTERNAL');
+  });
+});
+
+function mockRes() {
+  const r = { _status: null, _json: null };
+  r.status = (s) => { r._status = s; return r; };
+  r.json = (j) => { r._json = j; return r; };
+  return r;
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+```bash
+cd firebase_functions/functions && node --test tests/shared.errors.test.js
+```
+Expected: FAIL — `Cannot find module '../shared/errors'`
+
+- [ ] **Step 3: Write implementation**
+
+```javascript
+// shared/errors.js
+'use strict';
+
+class AppError extends Error {
+  constructor(message, code, httpStatus) {
+    super(message);
+    this.name = this.constructor.name;
+    this.code = code;
+    this.httpStatus = httpStatus;
+  }
+}
+
+class ValidationError extends AppError {
+  constructor(message, details) {
+    super(message, 'INVALID_ARGUMENT', 400);
+    this.details = details;
+  }
+}
+
+class NotFoundError extends AppError {
+  constructor(message) {
+    super(message, 'NOT_FOUND', 404);
+  }
+}
+
+class PermissionError extends AppError {
+  constructor(message) {
+    super(message, 'FORBIDDEN', 403);
+  }
+}
+
+function mapErrorToResponse(res, err) {
+  if (err instanceof AppError) {
+    return res.status(err.httpStatus).json({
+      success: false,
+      error: { code: err.code, message: err.message, details: err.details }
+    });
+  }
+  console.error('Unhandled error:', err);
+  return res.status(500).json({
+    success: false,
+    error: { code: 'INTERNAL', message: 'Internal server error', details: undefined }
+  });
+}
+
+module.exports = { AppError, ValidationError, NotFoundError, PermissionError, mapErrorToResponse };
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+```bash
+cd firebase_functions/functions && node --test tests/shared.errors.test.js
+```
+Expected: All 5 tests PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add firebase_functions/functions/shared/errors.js firebase_functions/functions/tests/shared.errors.test.js
+git commit -m "feat(shared): add typed error classes with mapErrorToResponse"
+```
+
+---
+
+### Task 3: Shared Routines Module
+
+**Files:**
+- Create: `firebase_functions/functions/shared/routines.js`
+- Test: `firebase_functions/functions/tests/shared.routines.test.js`
+- Modify: `firebase_functions/functions/routines/get-routine.js`
+- Modify: `firebase_functions/functions/routines/get-user-routines.js`
+- Modify: `firebase_functions/functions/routines/create-routine.js`
+- Modify: `firebase_functions/functions/routines/patch-routine.js`
+- Modify: `firebase_functions/functions/routines/delete-routine.js`
+- Modify: `firebase_functions/functions/routines/get-active-routine.js`
+- Modify: `firebase_functions/functions/routines/set-active-routine.js`
+- Modify: `firebase_functions/functions/routines/get-next-workout.js`
+- Modify: `firebase_functions/functions/routines/create-routine-from-draft.js`
+
+- [ ] **Step 1: Write tests for shared routines module**
+
+Tests use a mock Firestore that validates the query patterns without requiring an emulator. Focus on: validation logic, error throwing, and data transformation.
+
+```javascript
+// tests/shared.routines.test.js
+const { test, describe, beforeEach } = require('node:test');
+const assert = require('node:assert/strict');
+const { ValidationError, NotFoundError } = require('../shared/errors');
+
+// Mock db — inject via function parameter
+function mockDb(docs = {}) {
+  return {
+    doc: (path) => ({
+      get: async () => {
+        const d = docs[path];
+        return { exists: !!d, id: path.split('/').pop(), data: () => d };
+      },
+      set: async (data) => { docs[path] = data; },
+      update: async (data) => { docs[path] = { ...(docs[path] || {}), ...data }; },
+      delete: async () => { delete docs[path]; },
+    }),
+    collection: (path) => ({
+      where: () => ({ get: async () => ({ docs: [] }) }),
+      orderBy: () => ({ get: async () => ({ docs: [] }) }),
+      get: async () => ({
+        docs: Object.entries(docs)
+          .filter(([k]) => k.startsWith(path + '/'))
+          .map(([k, v]) => ({ id: k.split('/').pop(), data: () => v, exists: true }))
+      }),
+      add: async (data) => {
+        const id = 'auto-' + Math.random().toString(36).slice(2, 8);
+        docs[`${path}/${id}`] = data;
+        return { id };
+      },
+    }),
+  };
+}
+
+describe('shared/routines', () => {
+  // Tests will be imported after implementation
+  // Pattern: each function receives (db, userId, ...args) — no req/res
+
+  test('getRoutine throws ValidationError when routineId missing', async () => {
+    const { getRoutine } = require('../shared/routines');
+    await assert.rejects(
+      () => getRoutine(mockDb(), 'user1', null),
+      (err) => err instanceof ValidationError
+    );
+  });
+
+  test('getRoutine throws NotFoundError when doc missing', async () => {
+    const { getRoutine } = require('../shared/routines');
+    await assert.rejects(
+      () => getRoutine(mockDb(), 'user1', 'nonexistent'),
+      (err) => err instanceof NotFoundError
+    );
+  });
+
+  test('getRoutine returns routine with id', async () => {
+    const { getRoutine } = require('../shared/routines');
+    const docs = { 'users/user1/routines/r1': { name: 'PPL', template_ids: ['t1'] } };
+    const result = await getRoutine(mockDb(docs), 'user1', 'r1');
+    assert.equal(result.id, 'r1');
+    assert.equal(result.name, 'PPL');
+  });
+
+  test('listRoutines returns all routines for user', async () => {
+    const { listRoutines } = require('../shared/routines');
+    const docs = {
+      'users/user1/routines/r1': { name: 'PPL', created_at: new Date() },
+      'users/user1/routines/r2': { name: 'UL', created_at: new Date() },
+    };
+    const result = await listRoutines(mockDb(docs), 'user1');
+    assert.equal(result.length, 2);
+  });
+
+  test('deleteRoutine throws NotFoundError when doc missing', async () => {
+    const { deleteRoutine } = require('../shared/routines');
+    await assert.rejects(
+      () => deleteRoutine(mockDb(), 'user1', 'nonexistent'),
+      (err) => err instanceof NotFoundError
+    );
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+```bash
+cd firebase_functions/functions && node --test tests/shared.routines.test.js
+```
+Expected: FAIL — `Cannot find module '../shared/routines'`
+
+- [ ] **Step 3: Write shared/routines.js**
+
+Extract pure business logic from each handler. The pattern: each function takes `(db, userId, ...args)` and returns data or throws a typed error. No `req`, no `res`, no auth.
+
+```javascript
+// shared/routines.js
+'use strict';
+
+const { ValidationError, NotFoundError } = require('./errors');
+const admin = require('firebase-admin');
+
+async function getRoutine(db, userId, routineId) {
+  if (!routineId) throw new ValidationError('routineId required');
+  const doc = await db.doc(`users/${userId}/routines/${routineId}`).get();
+  if (!doc.exists) throw new NotFoundError('Routine not found');
+  return { id: doc.id, ...doc.data() };
+}
+
+async function listRoutines(db, userId) {
+  const snapshot = await db.collection(`users/${userId}/routines`).get();
+  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
+
+async function createRoutine(db, userId, { name, description, frequency, template_ids }) {
+  if (!name || typeof name !== 'string') throw new ValidationError('name is required');
+  if (!template_ids || !Array.isArray(template_ids) || template_ids.length === 0) {
+    throw new ValidationError('template_ids must be a non-empty array');
+  }
+  // Verify all templates exist
+  const templateChecks = template_ids.map(tid =>
+    db.doc(`users/${userId}/templates/${tid}`).get()
+  );
+  const templateDocs = await Promise.all(templateChecks);
+  const missing = templateDocs.filter(d => !d.exists);
+  if (missing.length > 0) throw new NotFoundError('One or more templates not found');
+
+  const data = {
+    name,
+    description: description || '',
+    frequency: frequency || template_ids.length,
+    template_ids,
+    created_at: admin.firestore.FieldValue.serverTimestamp(),
+    updated_at: admin.firestore.FieldValue.serverTimestamp(),
+  };
+  const ref = await db.collection(`users/${userId}/routines`).add(data);
+  return { id: ref.id, ...data };
+}
+
+const PATCH_ALLOWED_FIELDS = ['name', 'description', 'frequency', 'template_ids'];
+
+async function patchRoutine(db, userId, routineId, updates) {
+  if (!routineId) throw new ValidationError('routineId required');
+  if (!updates || typeof updates !== 'object') throw new ValidationError('updates required');
+
+  const doc = await db.doc(`users/${userId}/routines/${routineId}`).get();
+  if (!doc.exists) throw new NotFoundError('Routine not found');
+
+  const patch = {};
+  for (const [key, value] of Object.entries(updates)) {
+    if (!PATCH_ALLOWED_FIELDS.includes(key)) continue;
+    patch[key] = value;
+  }
+  if (Object.keys(patch).length === 0) throw new ValidationError('No valid fields to update');
+
+  // Cross-validate template_ids if changed
+  if (patch.template_ids) {
+    if (!Array.isArray(patch.template_ids) || patch.template_ids.length === 0) {
+      throw new ValidationError('template_ids must be a non-empty array');
+    }
+    const checks = patch.template_ids.map(tid =>
+      db.doc(`users/${userId}/templates/${tid}`).get()
+    );
+    const docs = await Promise.all(checks);
+    if (docs.some(d => !d.exists)) throw new NotFoundError('One or more templates not found');
+
+    // Clear cursor if removed template was the last completed
+    const current = doc.data();
+    if (current.last_completed_template_id &&
+        !patch.template_ids.includes(current.last_completed_template_id)) {
+      patch.last_completed_template_id = null;
+    }
+  }
+
+  patch.updated_at = admin.firestore.FieldValue.serverTimestamp();
+  await db.doc(`users/${userId}/routines/${routineId}`).update(patch);
+  return { id: routineId, ...doc.data(), ...patch };
+}
+
+async function deleteRoutine(db, userId, routineId) {
+  if (!routineId) throw new ValidationError('routineId required');
+  const doc = await db.doc(`users/${userId}/routines/${routineId}`).get();
+  if (!doc.exists) throw new NotFoundError('Routine not found');
+  await db.doc(`users/${userId}/routines/${routineId}`).delete();
+  return { id: routineId };
+}
+
+async function getActiveRoutine(db, userId) {
+  const userDoc = await db.doc(`users/${userId}`).get();
+  if (!userDoc.exists) throw new NotFoundError('User not found');
+  const activeRoutineId = userDoc.data().activeRoutineId;
+  if (!activeRoutineId) return null;
+  return getRoutine(db, userId, activeRoutineId);
+}
+
+async function setActiveRoutine(db, userId, routineId) {
+  if (!routineId) throw new ValidationError('routineId required');
+  const doc = await db.doc(`users/${userId}/routines/${routineId}`).get();
+  if (!doc.exists) throw new NotFoundError('Routine not found');
+  await db.doc(`users/${userId}`).update({
+    activeRoutineId: routineId,
+    updated_at: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  return { id: routineId, ...doc.data() };
+}
+
+async function getNextWorkout(db, userId) {
+  const activeRoutine = await getActiveRoutine(db, userId);
+  if (!activeRoutine) return null;
+  const { template_ids, last_completed_template_id } = activeRoutine;
+  if (!template_ids || template_ids.length === 0) return null;
+
+  // Find next template in rotation
+  let nextIndex = 0;
+  if (last_completed_template_id) {
+    const lastIndex = template_ids.indexOf(last_completed_template_id);
+    nextIndex = (lastIndex + 1) % template_ids.length;
+  }
+  const nextTemplateId = template_ids[nextIndex];
+  const templateDoc = await db.doc(`users/${userId}/templates/${nextTemplateId}`).get();
+  if (!templateDoc.exists) throw new NotFoundError('Next template not found');
+  return { id: templateDoc.id, ...templateDoc.data(), routine_id: activeRoutine.id };
+}
+
+async function createRoutineFromDraft(db, userId, draft) {
+  // draft contains: { name, templates: [{ name, exercises: [...] }] }
+  if (!draft || !draft.name) throw new ValidationError('Draft must include a name');
+  if (!draft.templates || !Array.isArray(draft.templates) || draft.templates.length === 0) {
+    throw new ValidationError('Draft must include at least one template');
+  }
+
+  // Create templates first
+  const templateIds = [];
+  for (const tmpl of draft.templates) {
+    const data = {
+      name: tmpl.name,
+      exercises: tmpl.exercises || [],
+      created_at: admin.firestore.FieldValue.serverTimestamp(),
+      updated_at: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    const ref = await db.collection(`users/${userId}/templates`).add(data);
+    templateIds.push(ref.id);
+  }
+
+  // Create routine
+  return createRoutine(db, userId, {
+    name: draft.name,
+    description: draft.description || '',
+    frequency: draft.frequency || templateIds.length,
+    template_ids: templateIds,
+  });
+}
+
+module.exports = {
+  getRoutine,
+  listRoutines,
+  createRoutine,
+  patchRoutine,
+  deleteRoutine,
+  getActiveRoutine,
+  setActiveRoutine,
+  getNextWorkout,
+  createRoutineFromDraft,
+};
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+```bash
+cd firebase_functions/functions && node --test tests/shared.routines.test.js
+```
+Expected: All tests PASS
+
+- [ ] **Step 5: Refactor handlers to use shared module**
+
+Refactor each handler to be a thin HTTP wrapper. Example pattern for `get-routine.js`:
+
+```javascript
+// routines/get-routine.js (refactored)
+const { onRequest } = require('firebase-functions/v2/https');
+const { requireFlexibleAuth } = require('../auth/middleware');
+const { getAuthenticatedUserId } = require('../utils/auth-helpers');
+const { ok } = require('../utils/response');
+const { mapErrorToResponse } = require('../shared/errors');
+const { getRoutine } = require('../shared/routines');
+const admin = require('firebase-admin');
+
+async function getRoutineHandler(req, res) {
+  try {
+    const userId = getAuthenticatedUserId(req);
+    const routineId = req.body?.routineId || req.query?.routineId;
+    const routine = await getRoutine(admin.firestore(), userId, routineId);
+    return ok(res, { routine });
+  } catch (e) {
+    return mapErrorToResponse(res, e);
+  }
+}
+
+exports.getRoutine = onRequest(requireFlexibleAuth(getRoutineHandler));
+```
+
+Apply this pattern to all 9 handler files in `routines/`:
+- `get-routine.js` → calls `getRoutine(db, userId, routineId)`
+- `get-user-routines.js` → calls `listRoutines(db, userId)`
+- `create-routine.js` → calls `createRoutine(db, userId, body)`
+- `patch-routine.js` → calls `patchRoutine(db, userId, routineId, updates)`
+- `delete-routine.js` → calls `deleteRoutine(db, userId, routineId)`
+- `get-active-routine.js` → calls `getActiveRoutine(db, userId)`
+- `set-active-routine.js` → calls `setActiveRoutine(db, userId, routineId)`
+- `get-next-workout.js` → extract core logic to `shared/routines.js:getNextWorkout()`
+- `create-routine-from-draft.js` → extract core logic to `shared/routines.js:createRoutineFromDraft()`
+
+Read each handler file before refactoring to preserve any handler-specific validation or logic.
+
+- [ ] **Step 6: Run existing tests to verify no regressions**
+
+```bash
+cd firebase_functions/functions && npm test
+```
+Expected: All existing tests PASS
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add firebase_functions/functions/shared/routines.js firebase_functions/functions/tests/shared.routines.test.js firebase_functions/functions/routines/
+git commit -m "refactor(routines): extract business logic into shared/routines.js"
+```
+
+---
+
+### Task 4: Shared Templates Module
+
+**Files:**
+- Create: `firebase_functions/functions/shared/templates.js`
+- Test: `firebase_functions/functions/tests/shared.templates.test.js`
+- Modify: `firebase_functions/functions/templates/get-template.js`
+- Modify: `firebase_functions/functions/templates/get-user-templates.js`
+- Modify: `firebase_functions/functions/templates/create-template.js`
+- Modify: `firebase_functions/functions/templates/create-template-from-plan.js`
+- Modify: `firebase_functions/functions/templates/patch-template.js`
+- Modify: `firebase_functions/functions/templates/delete-template.js`
+
+Follow the identical pattern from Task 3. Read each handler file before extracting:
+
+- [ ] **Step 1: Write tests for shared/templates.js**
+
+```javascript
+// tests/shared.templates.test.js
+const { test, describe } = require('node:test');
+const assert = require('node:assert/strict');
+const { ValidationError, NotFoundError } = require('../shared/errors');
+
+// Use same mockDb() helper from shared.routines.test.js
+
+describe('shared/templates', () => {
+  test('getTemplate throws ValidationError when templateId missing', async () => {
+    const { getTemplate } = require('../shared/templates');
+    await assert.rejects(
+      () => getTemplate(mockDb(), 'user1', null),
+      (err) => err instanceof ValidationError
+    );
+  });
+
+  test('getTemplate throws NotFoundError when doc missing', async () => {
+    const { getTemplate } = require('../shared/templates');
+    await assert.rejects(
+      () => getTemplate(mockDb(), 'user1', 'nonexistent'),
+      (err) => err instanceof NotFoundError
+    );
+  });
+
+  test('getTemplate returns template with id', async () => {
+    const { getTemplate } = require('../shared/templates');
+    const docs = { 'users/user1/templates/t1': { name: 'Push Day', exercises: [] } };
+    const result = await getTemplate(mockDb(docs), 'user1', 't1');
+    assert.equal(result.id, 't1');
+    assert.equal(result.name, 'Push Day');
+  });
+
+  test('listTemplates returns all templates for user', async () => {
+    const { listTemplates } = require('../shared/templates');
+    const docs = {
+      'users/user1/templates/t1': { name: 'Push', created_at: new Date() },
+      'users/user1/templates/t2': { name: 'Pull', created_at: new Date() },
+    };
+    const result = await listTemplates(mockDb(docs), 'user1');
+    assert.equal(result.length, 2);
+  });
+
+  test('createTemplate validates name is required', async () => {
+    const { createTemplate } = require('../shared/templates');
+    await assert.rejects(
+      () => createTemplate(mockDb(), 'user1', { exercises: [] }),
+      (err) => err instanceof ValidationError
+    );
+  });
+
+  test('deleteTemplate throws NotFoundError when doc missing', async () => {
+    const { deleteTemplate } = require('../shared/templates');
+    await assert.rejects(
+      () => deleteTemplate(mockDb(), 'user1', 'nonexistent'),
+      (err) => err instanceof NotFoundError
+    );
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+```bash
+cd firebase_functions/functions && node --test tests/shared.templates.test.js
+```
+Expected: FAIL — `Cannot find module '../shared/templates'`
+
+- [ ] **Step 3: Write shared/templates.js**
+
+Read each handler file first. Extract:
+- `getTemplate(db, userId, templateId)` — from `get-template.js`
+- `listTemplates(db, userId)` — from `get-user-templates.js`
+- `createTemplate(db, userId, data)` — from `create-template.js`, uses Zod `TemplateSchema` from `utils/validators.js`
+- `patchTemplate(db, userId, templateId, updates)` — from `patch-template.js`, allowlisted fields
+- `deleteTemplate(db, userId, templateId)` — from `delete-template.js`
+- `createTemplateFromPlan(db, userId, plan)` — from `create-template-from-plan.js`, uses `utils/plan-to-template-converter.js`
+
+Each function follows the same pattern as `shared/routines.js`: takes `(db, userId, ...)`, returns data or throws typed error.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+```bash
+cd firebase_functions/functions && node --test tests/shared.templates.test.js
+```
+Expected: All tests PASS
+
+- [ ] **Step 5: Refactor all 6 template handlers to thin wrappers**
+
+Apply the same thin wrapper pattern from Task 3, Step 5:
+- `get-template.js` → calls `getTemplate(db, userId, templateId)`
+- `get-user-templates.js` → calls `listTemplates(db, userId)`
+- `create-template.js` → calls `createTemplate(db, userId, body)`
+- `create-template-from-plan.js` → calls `createTemplateFromPlan(db, userId, plan)`
+- `patch-template.js` → calls `patchTemplate(db, userId, templateId, updates)`
+- `delete-template.js` → calls `deleteTemplate(db, userId, templateId)`
+
+- [ ] **Step 6: Run full test suite**
+
+```bash
+cd firebase_functions/functions && npm test
+```
+Expected: All existing tests PASS
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add firebase_functions/functions/shared/templates.js firebase_functions/functions/tests/shared.templates.test.js firebase_functions/functions/templates/
+git commit -m "refactor(templates): extract business logic into shared/templates.js"
+```
+
+---
+
+### Task 5: Shared Workouts Module
+
+**Files:**
+- Create: `firebase_functions/functions/shared/workouts.js`
+- Test: `firebase_functions/functions/tests/shared.workouts.test.js`
+- Modify: `firebase_functions/functions/workouts/get-workout.js`
+- Modify: `firebase_functions/functions/workouts/get-user-workouts.js`
+- Modify: `firebase_functions/functions/workouts/upsert-workout.js`
+- Modify: `firebase_functions/functions/workouts/delete-workout.js`
+
+- [ ] **Step 1: Write tests**
+
+```javascript
+// tests/shared.workouts.test.js
+const { test, describe } = require('node:test');
+const assert = require('node:assert/strict');
+const { ValidationError, NotFoundError } = require('../shared/errors');
+
+describe('shared/workouts', () => {
+  test('getWorkout throws ValidationError when workoutId missing', async () => {
+    const { getWorkout } = require('../shared/workouts');
+    await assert.rejects(() => getWorkout(mockDb(), 'user1', null),
+      (err) => err instanceof ValidationError);
+  });
+
+  test('getWorkout throws NotFoundError when doc missing', async () => {
+    const { getWorkout } = require('../shared/workouts');
+    await assert.rejects(() => getWorkout(mockDb(), 'user1', 'nonexistent'),
+      (err) => err instanceof NotFoundError);
+  });
+
+  test('listWorkouts returns paginated results', async () => {
+    const { listWorkouts } = require('../shared/workouts');
+    // Test with mockDb containing 3 workouts, limit=2
+    // Verify returns 2 items + hasMore flag
+  });
+
+  test('deleteWorkout throws NotFoundError when doc missing', async () => {
+    const { deleteWorkout } = require('../shared/workouts');
+    await assert.rejects(() => deleteWorkout(mockDb(), 'user1', 'nonexistent'),
+      (err) => err instanceof NotFoundError);
+  });
+});
+```
+
+- [ ] **Step 2: Run test — expect FAIL**
+
+```bash
+cd firebase_functions/functions && node --test tests/shared.workouts.test.js
+```
+
+- [ ] **Step 3: Write shared/workouts.js**
+
+Read `get-user-workouts.js` first to understand pagination pattern. Extract:
+- `getWorkout(db, userId, workoutId)`
+- `listWorkouts(db, userId, { limit, cursor, startDate, endDate })` — cursor-based, ordered by `start_time` desc
+- `upsertWorkout(db, userId, workoutData)` — from `upsert-workout.js`
+- `deleteWorkout(db, userId, workoutId)` — from `delete-workout.js`
+
+- [ ] **Step 4: Run tests — expect PASS**
+
+```bash
+cd firebase_functions/functions && node --test tests/shared.workouts.test.js
+```
+
+- [ ] **Step 5: Refactor handlers to thin wrappers**
+
+Apply thin wrapper pattern to all 4 workout handlers.
+
+- [ ] **Step 6: Run full test suite**
+
+```bash
+cd firebase_functions/functions && npm test
+```
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add firebase_functions/functions/shared/workouts.js firebase_functions/functions/tests/shared.workouts.test.js firebase_functions/functions/workouts/
+git commit -m "refactor(workouts): extract business logic into shared/workouts.js"
+```
+
+---
+
+### Task 6: Shared Exercises Module
+
+**Files:**
+- Create: `firebase_functions/functions/shared/exercises.js`
+- Test: `firebase_functions/functions/tests/shared.exercises.test.js`
+- Modify: Relevant handlers in `firebase_functions/functions/exercises/`
+
+- [ ] **Step 1: Write tests**
+
+```javascript
+// tests/shared.exercises.test.js
+const { test, describe } = require('node:test');
+const assert = require('node:assert/strict');
+
+describe('shared/exercises', () => {
+  test('listExercises returns canonical-only by default', async () => {
+    const { listExercises } = require('../shared/exercises');
+    // Mock db with 3 exercises: 2 canonical, 1 merged
+    // Verify only 2 returned when canonicalOnly=true (default)
+  });
+
+  test('listExercises includes merged when requested', async () => {
+    const { listExercises } = require('../shared/exercises');
+    // Verify all 3 returned when canonicalOnly=false
+  });
+
+  test('searchExercises filters by name prefix', async () => {
+    const { searchExercises } = require('../shared/exercises');
+    // Mock exercises, search for "bench", verify correct matches
+  });
+});
+```
+
+- [ ] **Step 2: Run test — expect FAIL**
+
+```bash
+cd firebase_functions/functions && node --test tests/shared.exercises.test.js
+```
+
+- [ ] **Step 3: Write shared/exercises.js**
+
+Read `exercises/get-exercises.js` and any search endpoint. The exercises collection is top-level (`exercises/{id}`), not user-scoped. Extract:
+- `listExercises(db, { limit, canonicalOnly })` — from `get-exercises.js`, preserves canonical filtering
+- `getExercise(db, exerciseId)` — single exercise lookup
+- `searchExercises(db, query, { limit })` — name-based search
+- `resolveExercise(db, name)` — resolve exercise by name (for the catalog orchestrator)
+
+- [ ] **Step 4: Run tests — expect PASS**
+
+```bash
+cd firebase_functions/functions && node --test tests/shared.exercises.test.js
+```
+
+- [ ] **Step 5: Refactor exercise handlers to thin wrappers**
+- [ ] **Step 6: Run full test suite**
+
+```bash
+cd firebase_functions/functions && npm test
+```
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add firebase_functions/functions/shared/exercises.js firebase_functions/functions/tests/shared.exercises.test.js firebase_functions/functions/exercises/
+git commit -m "refactor(exercises): extract business logic into shared/exercises.js"
+```
+
+---
+
+### Task 7: Shared Training Queries Module
+
+**Files:**
+- Create: `firebase_functions/functions/shared/training-queries.js`
+- Test: `firebase_functions/functions/tests/shared.training-queries.test.js`
+- Modify: `firebase_functions/functions/training/query-sets.js`
+- Modify: `firebase_functions/functions/training/series-endpoints.js`
+- Modify: `firebase_functions/functions/training/get-analysis-summary.js`
+- Modify: `firebase_functions/functions/training/progress-summary.js`
+
+- [ ] **Step 1: Write tests**
+
+Key tests: `querySets` (with filters, pagination, projection), `getAnalysisSummary`, `getMuscleGroupSummary`, `getExerciseSummary`. These are the most complex queries — test the filter building logic.
+
+- [ ] **Step 2: Run test — expect FAIL**
+- [ ] **Step 3: Write shared/training-queries.js**
+
+This is the most complex extraction. Read each training handler carefully. Key concerns:
+- `querySets` uses `utils/caps.js` for pagination, projection, cursor encoding. Import and reuse these.
+- `series-endpoints.js` likely serves muscle group / exercise progress data.
+- `get-analysis-summary.js` reads from `analysis_insights` and `weekly_reviews`.
+- Preserve the validation from `utils/muscle-taxonomy.js` (validateMuscleGroupWithRecovery).
+
+Functions to extract:
+- `querySets(db, userId, { target, classification, effort, performance, sort, cursor, start, end, limit, fields })`
+- `getAnalysisSummary(db, userId, { sections, date })`
+- `getMuscleGroupSummary(db, userId, { group, weeks })`
+- `getMuscleSummary(db, userId, { muscle, weeks })`
+- `getExerciseSummary(db, userId, { exercise, weeks })`
+
+- [ ] **Step 4: Run tests — expect PASS**
+- [ ] **Step 5: Refactor training handlers to thin wrappers**
+- [ ] **Step 6: Run full test suite**
+- [ ] **Step 7: Commit**
+
+```bash
+git add firebase_functions/functions/shared/training-queries.js firebase_functions/functions/tests/shared.training-queries.test.js firebase_functions/functions/training/
+git commit -m "refactor(training): extract query logic into shared/training-queries.js"
+```
+
+---
+
+### Task 8: Shared Planning Context Module
+
+**Files:**
+- Create: `firebase_functions/functions/shared/planning-context.js`
+- Test: `firebase_functions/functions/tests/shared.planning-context.test.js`
+- Modify: `firebase_functions/functions/training/context-pack.js`
+
+- [ ] **Step 1: Write tests**
+
+Test `getPlanningContext(db, userId)` returns the assembled context object with user profile, active routine, training snapshot, and strength summary.
+
+- [ ] **Step 2: Run test — expect FAIL**
+- [ ] **Step 3: Write shared/planning-context.js**
+
+Read `training/context-pack.js` to understand the current context assembly. Extract the core assembly logic. This function assembles:
+- User profile (from `users/{uid}`)
+- Active routine + its templates
+- Recent workout summary (last N workouts)
+- Training analysis highlights
+- Weekly stats snapshot
+
+```javascript
+async function getPlanningContext(db, userId) {
+  const [userDoc, activeRoutine, recentWorkouts] = await Promise.all([
+    db.doc(`users/${userId}`).get(),
+    getActiveRoutineWithTemplates(db, userId),
+    getRecentWorkouts(db, userId, 5),
+  ]);
+  // ... assemble and return
+}
+```
+
+- [ ] **Step 4: Run tests — expect PASS**
+- [ ] **Step 5: Refactor context-pack.js handler**
+- [ ] **Step 6: Run full test suite**
+- [ ] **Step 7: Commit**
+
+```bash
+git add firebase_functions/functions/shared/planning-context.js firebase_functions/functions/tests/shared.planning-context.test.js firebase_functions/functions/training/context-pack.js
+git commit -m "refactor(planning): extract getPlanningContext into shared module"
+```
+
+---
+
+### Task 9: Phase 2 Integration Verification
+
+- [ ] **Step 1: Run full Firebase Functions test suite**
+
+```bash
+cd firebase_functions/functions && npm test
+```
+Expected: All tests PASS
+
+- [ ] **Step 2: Deploy to emulator and smoke test**
+
+```bash
+cd firebase_functions/functions && npm run serve
+```
+
+Test key endpoints manually via curl or the iOS app against the emulator:
+- `GET /getRoutine` with valid/invalid routineId
+- `GET /getUserRoutines`
+- `POST /createRoutine`
+- `POST /patchRoutine`
+- `GET /getTemplate`, `POST /createTemplate`
+- `GET /getUserWorkouts`
+- `POST /querySets`
+
+- [ ] **Step 3: Verify shared modules export correctly**
+
+```bash
+cd firebase_functions/functions && node -e "
+  const r = require('./shared/routines');
+  const t = require('./shared/templates');
+  const w = require('./shared/workouts');
+  const e = require('./shared/exercises');
+  const q = require('./shared/training-queries');
+  const p = require('./shared/planning-context');
+  const err = require('./shared/errors');
+  console.log('All shared modules load successfully');
+  console.log('Routines:', Object.keys(r));
+  console.log('Templates:', Object.keys(t));
+  console.log('Workouts:', Object.keys(w));
+  console.log('Exercises:', Object.keys(e));
+  console.log('Training:', Object.keys(q));
+  console.log('Planning:', Object.keys(p));
+  console.log('Errors:', Object.keys(err));
+"
+```
+
+- [ ] **Step 4: Deploy Firebase Functions**
+
+```bash
+cd firebase_functions/functions && npm run deploy
+```
+
+- [ ] **Step 5: Update documentation**
+
+Update `docs/FIREBASE_FUNCTIONS_ARCHITECTURE.md` to document the shared module layer.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add -A
+git commit -m "feat(shared): complete Phase 2 — shared business logic extraction
+
+Extracted pure business logic from all CRUD handlers into shared/ modules:
+- shared/errors.js — typed errors with HTTP mapping
+- shared/routines.js — routine CRUD + active routine + next workout
+- shared/templates.js — template CRUD + createFromPlan
+- shared/workouts.js — workout CRUD with pagination
+- shared/exercises.js — exercise queries + search + resolve
+- shared/training-queries.js — querySets, series endpoints, analysis
+- shared/planning-context.js — getPlanningContext assembler
+
+All Firebase Function handlers refactored to thin HTTP wrappers.
+All existing tests pass. Shared modules have dedicated unit tests."
+```
+
+---
+
+## Chunk 2: Phase 3a Part 1 — Agent Service Infrastructure
+
+### Task 10: Agent Service Scaffold
+
+**Files:**
+- Create: `adk_agent/agent_service/requirements.txt`
+- Create: `adk_agent/agent_service/Makefile`
+- Create: `adk_agent/agent_service/Dockerfile`
+- Create: `adk_agent/agent_service/app/__init__.py`
+
+- [ ] **Step 1: Create requirements.txt**
+
+```
+# Core
+starlette==0.41.3
+uvicorn[standard]==0.32.1
+httpx==0.28.1
+
+# LLM
+google-genai==1.20.0
+
+# Firebase
+google-cloud-firestore==2.19.0
+google-cloud-logging==3.11.4
+firebase-admin==6.6.0
+
+# Observability
+opentelemetry-api==1.29.0
+opentelemetry-sdk==1.29.0
+opentelemetry-exporter-gcp-trace==1.9.0
+
+# Utils
+python-dotenv==1.1.0
+pydantic==2.11.7
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.24.0
+```
+
+- [ ] **Step 2: Create Makefile**
+
+```makefile
+.PHONY: help install test dev deploy lint format check
+
+PROJECT_ID ?= myon-53d85
+REGION ?= us-central1
+IMAGE_TAG ?= latest
+SERVICE_NAME ?= agent-service
+
+help:
+	@echo "Agent Service"
+	@echo "============="
+	@echo ""
+	@echo "Development:"
+	@echo "  make install    - Install dependencies"
+	@echo "  make test       - Run tests"
+	@echo "  make dev        - Run locally"
+	@echo "  make lint       - Run linter"
+	@echo "  make format     - Format code"
+	@echo ""
+	@echo "Deployment:"
+	@echo "  make deploy     - Build + deploy to Cloud Run"
+
+install:
+	pip install -r requirements.txt
+
+test:
+	python -m pytest tests/ -v
+
+dev:
+	uvicorn app.main:app --reload --port 8080
+
+lint:
+	python -m ruff check app/ tests/
+
+format:
+	python -m ruff format app/ tests/
+
+deploy:
+	gcloud builds submit --tag gcr.io/$(PROJECT_ID)/$(SERVICE_NAME):$(IMAGE_TAG) --project=$(PROJECT_ID)
+	gcloud run deploy $(SERVICE_NAME) \
+		--image gcr.io/$(PROJECT_ID)/$(SERVICE_NAME):$(IMAGE_TAG) \
+		--region $(REGION) \
+		--platform managed \
+		--no-allow-unauthenticated \
+		--memory 512Mi \
+		--cpu 1 \
+		--min-instances 0 \
+		--max-instances 10 \
+		--timeout 300 \
+		--concurrency 1 \
+		--service-account ai-agents@$(PROJECT_ID).iam.gserviceaccount.com \
+		--set-env-vars "PROJECT_ID=$(PROJECT_ID),GOOGLE_CLOUD_PROJECT=$(PROJECT_ID)"
+```
+
+- [ ] **Step 3: Create Dockerfile**
+
+```dockerfile
+FROM --platform=linux/amd64 python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONPATH=/app
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app/ app/
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+```
+
+- [ ] **Step 4: Create app/__init__.py**
+
+```python
+# Agent Service — Povver AI coaching agent
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add adk_agent/agent_service/
+git commit -m "feat(agent): scaffold Cloud Run agent service"
+```
+
+---
+
+### Task 11: Request Context
+
+**Files:**
+- Create: `adk_agent/agent_service/app/context.py`
+- Test: `adk_agent/agent_service/tests/__init__.py`
+- Test: `adk_agent/agent_service/tests/test_context.py`
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# tests/test_context.py
+import pytest
+from app.context import RequestContext
+
+
+def test_request_context_creation():
+    ctx = RequestContext(
+        user_id="user123",
+        conversation_id="conv456",
+        correlation_id="corr789",
+    )
+    assert ctx.user_id == "user123"
+    assert ctx.conversation_id == "conv456"
+    assert ctx.correlation_id == "corr789"
+    assert ctx.workout_mode is False
+    assert ctx.active_workout_id is None
+
+
+def test_request_context_workout_mode():
+    ctx = RequestContext(
+        user_id="user123",
+        conversation_id="conv456",
+        correlation_id="corr789",
+        workout_mode=True,
+        active_workout_id="aw001",
+    )
+    assert ctx.workout_mode is True
+    assert ctx.active_workout_id == "aw001"
+
+
+def test_request_context_is_immutable():
+    ctx = RequestContext(user_id="u", conversation_id="c", correlation_id="r")
+    with pytest.raises(AttributeError):
+        ctx.user_id = "other"
+```
+
+- [ ] **Step 2: Run test — expect FAIL**
+
+```bash
+cd adk_agent/agent_service && python -m pytest tests/test_context.py -v
+```
+
+- [ ] **Step 3: Write implementation**
+
+```python
+# app/context.py
+"""Request context — replaces ContextVar approach from ADK."""
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class RequestContext:
+    """Immutable per-request context. Passed as function arg, not ContextVar."""
+    user_id: str
+    conversation_id: str
+    correlation_id: str
+    workout_mode: bool = False
+    active_workout_id: str | None = None
+    today: str | None = None  # YYYY-MM-DD, set from client timezone
+```
+
+- [ ] **Step 4: Run test — expect PASS**
+
+```bash
+cd adk_agent/agent_service && python -m pytest tests/test_context.py -v
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add adk_agent/agent_service/app/context.py adk_agent/agent_service/tests/
+git commit -m "feat(agent): add RequestContext dataclass"
+```
+
+---
+
+### Task 12: LLM Client Protocol + Gemini Implementation
+
+**Files:**
+- Create: `adk_agent/agent_service/app/llm/__init__.py`
+- Create: `adk_agent/agent_service/app/llm/protocol.py`
+- Create: `adk_agent/agent_service/app/llm/gemini.py`
+- Test: `adk_agent/agent_service/tests/test_llm_protocol.py`
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# tests/test_llm_protocol.py
+import pytest
+from app.llm.protocol import LLMChunk, ToolCallChunk
+
+
+def test_text_chunk():
+    chunk = LLMChunk(text="hello")
+    assert chunk.is_text is True
+    assert chunk.is_tool_call is False
+    assert chunk.text == "hello"
+
+
+def test_tool_call_chunk():
+    tc = ToolCallChunk(call_id="c1", tool_name="get_routine", args={"routine_id": "r1"})
+    chunk = LLMChunk(tool_call=tc)
+    assert chunk.is_text is False
+    assert chunk.is_tool_call is True
+    assert chunk.tool_call.tool_name == "get_routine"
+
+
+def test_llm_client_protocol_exists():
+    from app.llm.protocol import LLMClient
+    # Verify it's a Protocol with a stream method
+    import inspect
+    assert hasattr(LLMClient, 'stream')
+
+
+def test_model_config_defaults():
+    from app.llm.protocol import ModelConfig
+    config = ModelConfig()
+    assert config.temperature == 0.3
+    assert config.max_output_tokens == 8192
+```
+
+- [ ] **Step 2: Run test — expect FAIL**
+
+```bash
+cd adk_agent/agent_service && python -m pytest tests/test_llm_protocol.py -v
+```
+
+- [ ] **Step 3: Write protocol.py**
+
+```python
+# app/llm/protocol.py
+"""LLM client abstraction — model-agnostic interface."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, AsyncIterator, Protocol, runtime_checkable
+
+
+@dataclass
+class ToolCallChunk:
+    call_id: str
+    tool_name: str
+    args: dict[str, Any]
+
+
+@dataclass
+class LLMChunk:
+    text: str | None = None
+    tool_call: ToolCallChunk | None = None
+
+    @property
+    def is_text(self) -> bool:
+        return self.text is not None
+
+    @property
+    def is_tool_call(self) -> bool:
+        return self.tool_call is not None
+
+
+@dataclass
+class ModelConfig:
+    temperature: float = 0.3
+    max_output_tokens: int = 8192
+    max_context_tokens: int = 1_000_000  # Model-specific, overridden per client
+    json_mode: bool = False
+
+
+@dataclass
+class ToolDef:
+    """Tool definition for the LLM."""
+    name: str
+    description: str
+    parameters: dict[str, Any]  # JSON Schema
+
+
+@runtime_checkable
+class LLMClient(Protocol):
+    async def stream(
+        self,
+        model: str,
+        messages: list[dict],
+        tools: list[ToolDef] | None = None,
+        config: ModelConfig | None = None,
+    ) -> AsyncIterator[LLMChunk]: ...
+```
+
+- [ ] **Step 4: Run test — expect PASS**
+
+```bash
+cd adk_agent/agent_service && python -m pytest tests/test_llm_protocol.py -v
+```
+
+- [ ] **Step 5: Write gemini.py**
+
+```python
+# app/llm/gemini.py
+"""Gemini LLM client using google-genai SDK."""
+
+from __future__ import annotations
+
+import logging
+from typing import Any, AsyncIterator
+
+from google import genai
+from google.genai import types
+
+from app.llm.protocol import LLMChunk, LLMClient, ModelConfig, ToolCallChunk, ToolDef
+
+logger = logging.getLogger(__name__)
+
+
+class GeminiClient:
+    """Gemini client implementing LLMClient protocol."""
+
+    def __init__(self):
+        self.client = genai.Client()
+
+    async def stream(
+        self,
+        model: str,
+        messages: list[dict],
+        tools: list[ToolDef] | None = None,
+        config: ModelConfig | None = None,
+    ) -> AsyncIterator[LLMChunk]:
+        config = config or ModelConfig()
+
+        # Convert messages to Gemini format
+        gemini_contents = self._to_gemini_contents(messages)
+
+        # Convert tools to Gemini format
+        gemini_tools = self._to_gemini_tools(tools) if tools else None
+
+        # Extract system instruction (Gemini handles it as a separate parameter)
+        system_instruction = self._extract_system_instruction(messages)
+
+        gen_config = types.GenerateContentConfig(
+            temperature=config.temperature,
+            max_output_tokens=config.max_output_tokens,
+            system_instruction=system_instruction,
+        )
+
+        async for response in self.client.aio.models.generate_content_stream(
+            model=model,
+            contents=gemini_contents,
+            config=gen_config,
+            tools=gemini_tools,
+        ):
+            for part in response.candidates[0].content.parts:
+                if part.text:
+                    yield LLMChunk(text=part.text)
+                elif part.function_call:
+                    yield LLMChunk(tool_call=ToolCallChunk(
+                        call_id=part.function_call.id or part.function_call.name,
+                        tool_name=part.function_call.name,
+                        args=dict(part.function_call.args) if part.function_call.args else {},
+                    ))
+
+    def _extract_system_instruction(self, messages: list[dict]) -> str | None:
+        """Extract system instruction from messages (Gemini handles it separately)."""
+        for msg in messages:
+            if msg["role"] == "system":
+                return msg["content"]
+        return None
+
+    def _to_gemini_contents(self, messages: list[dict]) -> list:
+        """Convert generic messages to Gemini Content format."""
+        contents = []
+        for msg in messages:
+            role = msg["role"]
+            if role == "system":
+                continue  # Handled via system_instruction parameter
+            gemini_role = "user" if role == "user" else "model"
+            if "tool_result" in msg:
+                contents.append(types.Content(
+                    role="user",
+                    parts=[types.Part(function_response=types.FunctionResponse(
+                        name=msg["tool_name"],
+                        response=msg["tool_result"],
+                    ))],
+                ))
+            else:
+                contents.append(types.Content(
+                    role=gemini_role,
+                    parts=[types.Part(text=msg["content"])],
+                ))
+        return contents
+
+    def _to_gemini_tools(self, tools: list[ToolDef]) -> list:
+        """Convert ToolDef list to Gemini tool format."""
+        declarations = []
+        for tool in tools:
+            declarations.append(types.FunctionDeclaration(
+                name=tool.name,
+                description=tool.description,
+                parameters=tool.parameters,
+            ))
+        return [types.Tool(function_declarations=declarations)]
+```
+
+- [ ] **Step 6: Write __init__.py**
+
+```python
+# app/llm/__init__.py
+from app.llm.protocol import LLMChunk, LLMClient, ModelConfig, ToolCallChunk, ToolDef
+from app.llm.gemini import GeminiClient
+
+__all__ = ["LLMChunk", "LLMClient", "ModelConfig", "ToolCallChunk", "ToolDef", "GeminiClient"]
+```
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add adk_agent/agent_service/app/llm/ adk_agent/agent_service/tests/test_llm_protocol.py
+git commit -m "feat(agent): add LLM client protocol + Gemini implementation"
+```
+
+---
+
+### Task 13: Agent Loop
+
+**Files:**
+- Create: `adk_agent/agent_service/app/agent_loop.py`
+- Test: `adk_agent/agent_service/tests/test_agent_loop.py`
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# tests/test_agent_loop.py
+import pytest
+import json
+from unittest.mock import AsyncMock, MagicMock
+from app.agent_loop import run_agent_loop, SSEEvent
+from app.llm.protocol import LLMChunk, ToolCallChunk, ModelConfig, ToolDef
+from app.context import RequestContext
+
+
+@pytest.fixture
+def ctx():
+    return RequestContext(user_id="u1", conversation_id="c1", correlation_id="r1")
+
+
+class FakeLLMClient:
+    """LLM client that returns a scripted sequence of responses."""
+
+    def __init__(self, turns: list[list[LLMChunk]]):
+        self.turns = iter(turns)
+
+    async def stream(self, model, messages, tools=None, config=None):
+        for chunk in next(self.turns):
+            yield chunk
+
+
+@pytest.mark.asyncio
+async def test_text_only_response(ctx):
+    """LLM returns text, no tool calls — single turn."""
+    client = FakeLLMClient([[LLMChunk(text="Hello!")]])
+
+    events = []
+    async for event in run_agent_loop(
+        llm_client=client,
+        model="gemini-2.5-flash",
+        instruction="You are a coach",
+        history=[],
+        message="Hi",
+        tools=[],
+        tool_executor=AsyncMock(),
+        ctx=ctx,
+    ):
+        events.append(event)
+
+    assert any(e.event == "message" and "Hello" in e.data for e in events)
+    assert events[-1].event == "done"
+
+
+@pytest.mark.asyncio
+async def test_tool_call_then_response(ctx):
+    """LLM calls a tool, gets result, then responds with text."""
+    client = FakeLLMClient([
+        [LLMChunk(tool_call=ToolCallChunk("c1", "get_routine", {"routine_id": "r1"}))],
+        [LLMChunk(text="Your routine is PPL")],
+    ])
+
+    async def mock_executor(tool_name, args, context):
+        return {"name": "PPL", "template_ids": ["t1", "t2"]}
+
+    events = []
+    async for event in run_agent_loop(
+        llm_client=client,
+        model="gemini-2.5-flash",
+        instruction="You are a coach",
+        history=[],
+        message="What's my routine?",
+        tools=[ToolDef("get_routine", "Get routine", {})],
+        tool_executor=mock_executor,
+        ctx=ctx,
+    ):
+        events.append(event)
+
+    event_types = [e.event for e in events]
+    assert "tool_start" in event_types
+    assert "tool_end" in event_types
+    assert "message" in event_types
+    assert events[-1].event == "done"
+
+
+@pytest.mark.asyncio
+async def test_tool_error_returned_to_model(ctx):
+    """Tool raises exception — error is returned to model for recovery."""
+    client = FakeLLMClient([
+        [LLMChunk(tool_call=ToolCallChunk("c1", "get_routine", {"routine_id": "bad"}))],
+        [LLMChunk(text="Sorry, I couldn't find that routine.")],
+    ])
+
+    async def failing_executor(tool_name, args, context):
+        raise ValueError("Routine not found")
+
+    events = []
+    async for event in run_agent_loop(
+        llm_client=client,
+        model="gemini-2.5-flash",
+        instruction="",
+        history=[],
+        message="Get my routine",
+        tools=[ToolDef("get_routine", "Get routine", {})],
+        tool_executor=failing_executor,
+        ctx=ctx,
+    ):
+        events.append(event)
+
+    assert events[-1].event == "done"
+    assert any(e.event == "message" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_max_turns_guard(ctx):
+    """Agent loop terminates after MAX_TOOL_TURNS."""
+    # Every turn returns a tool call — should hit the limit
+    infinite_tools = [[LLMChunk(tool_call=ToolCallChunk(f"c{i}", "noop", {}))]
+                      for i in range(20)]
+    client = FakeLLMClient(infinite_tools)
+
+    async def noop_executor(tool_name, args, context):
+        return {"ok": True}
+
+    events = []
+    async for event in run_agent_loop(
+        llm_client=client,
+        model="gemini-2.5-flash",
+        instruction="",
+        history=[],
+        message="Loop forever",
+        tools=[ToolDef("noop", "Do nothing", {})],
+        tool_executor=noop_executor,
+        ctx=ctx,
+        max_tool_turns=3,
+    ):
+        events.append(event)
+
+    # Should have exactly 3 tool_start events, then a graceful termination
+    tool_starts = [e for e in events if e.event == "tool_start"]
+    assert len(tool_starts) == 3
+    assert events[-1].event == "done"
+```
+
+- [ ] **Step 2: Run test — expect FAIL**
+
+```bash
+cd adk_agent/agent_service && python -m pytest tests/test_agent_loop.py -v
+```
+
+- [ ] **Step 3: Write implementation**
+
+```python
+# app/agent_loop.py
+"""Core agent loop — replaces ADK's Runner."""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+from dataclasses import dataclass
+from typing import Any, AsyncIterator, Callable, Awaitable
+
+from app.context import RequestContext
+from app.llm.protocol import LLMClient, LLMChunk, ModelConfig, ToolDef
+
+logger = logging.getLogger(__name__)
+
+MAX_TOOL_TURNS = 12
+
+
+@dataclass
+class SSEEvent:
+    event: str
+    data: str
+
+    def encode(self) -> str:
+        return f"event: {self.event}\ndata: {self.data}\n\n"
+
+
+def sse_event(event: str, data: Any) -> SSEEvent:
+    if isinstance(data, str):
+        return SSEEvent(event=event, data=json.dumps({"text": data}))
+    return SSEEvent(event=event, data=json.dumps(data))
+
+
+ToolExecutor = Callable[[str, dict, RequestContext], Awaitable[Any]]
+
+
+async def run_agent_loop(
+    *,
+    llm_client: LLMClient,
+    model: str,
+    instruction: str,
+    history: list[dict],
+    message: str,
+    tools: list[ToolDef],
+    tool_executor: ToolExecutor,
+    ctx: RequestContext,
+    config: ModelConfig | None = None,
+    max_tool_turns: int = MAX_TOOL_TURNS,
+) -> AsyncIterator[SSEEvent]:
+    """Run the agent loop: LLM -> tool calls -> LLM -> ... -> text response."""
+
+    messages = _build_messages(instruction, history, message)
+    turn = 0
+
+    while turn < max_tool_turns:
+        tool_calls = []
+
+        async for chunk in llm_client.stream(model, messages, tools, config):
+            if chunk.is_text:
+                yield sse_event("message", chunk.text)
+            elif chunk.is_tool_call:
+                tool_calls.append(chunk.tool_call)
+
+        # No tool calls — model is done
+        if not tool_calls:
+            yield sse_event("done", {})
+            return
+
+        # Execute all tool calls from this turn
+        for tc in tool_calls:
+            yield sse_event("tool_start", {"tool": tc.tool_name, "call_id": tc.call_id})
+            start = time.monotonic()
+            try:
+                result = await tool_executor(tc.tool_name, tc.args, ctx)
+            except Exception as e:
+                logger.warning("Tool %s failed: %s", tc.tool_name, e)
+                result = {"error": str(e)}
+            elapsed_ms = int((time.monotonic() - start) * 1000)
+            yield sse_event("tool_end", {"tool": tc.tool_name, "call_id": tc.call_id, "elapsed_ms": elapsed_ms})
+
+            # Append tool result to messages for next LLM turn
+            messages.append({
+                "role": "tool",
+                "tool_name": tc.tool_name,
+                "tool_call_id": tc.call_id,
+                "tool_result": result,
+            })
+
+        turn += 1
+
+    # Exceeded max turns
+    yield sse_event("message", "I've reached my reasoning limit for this request. "
+                               "Please try rephrasing or breaking your question into parts.")
+    yield sse_event("done", {})
+
+
+def _build_messages(instruction: str, history: list[dict], message: str) -> list[dict]:
+    """Build the message list for the LLM."""
+    messages = []
+    if instruction:
+        messages.append({"role": "system", "content": instruction})
+    messages.extend(history)
+    messages.append({"role": "user", "content": message})
+    return messages
+```
+
+- [ ] **Step 4: Run test — expect PASS**
+
+```bash
+cd adk_agent/agent_service && python -m pytest tests/test_agent_loop.py -v
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add adk_agent/agent_service/app/agent_loop.py adk_agent/agent_service/tests/test_agent_loop.py
+git commit -m "feat(agent): implement core agent loop with tool execution"
+```
+
+---
+
+### Task 14: Firestore Client (AsyncClient)
+
+**Files:**
+- Create: `adk_agent/agent_service/app/firestore_client.py`
+- Test: `adk_agent/agent_service/tests/test_firestore_client.py`
+
+- [ ] **Step 1: Write the failing test**
+
+Tests verify interface and query building — not live Firestore calls. Use mocking.
+
+```python
+# tests/test_firestore_client.py
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from app.firestore_client import FirestoreClient
+
+
+def test_firestore_client_init():
+    """Verify FirestoreClient creates an AsyncClient."""
+    with patch("app.firestore_client.AsyncClient") as mock_async:
+        client = FirestoreClient()
+        mock_async.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_get_routine_returns_dict():
+    """get_routine returns dict with id field."""
+    client = FirestoreClient.__new__(FirestoreClient)
+    mock_doc = AsyncMock()
+    mock_doc.exists = True
+    mock_doc.id = "r1"
+    mock_doc.to_dict.return_value = {"name": "PPL", "template_ids": ["t1"]}
+
+    client.db = MagicMock()
+    client.db.document.return_value.get = AsyncMock(return_value=mock_doc)
+
+    result = await client.get_routine("user1", "r1")
+    assert result["id"] == "r1"
+    assert result["name"] == "PPL"
+    client.db.document.assert_called_with("users/user1/routines/r1")
+
+
+@pytest.mark.asyncio
+async def test_get_routine_not_found_raises():
+    """get_routine raises when doc doesn't exist."""
+    client = FirestoreClient.__new__(FirestoreClient)
+    mock_doc = AsyncMock()
+    mock_doc.exists = False
+
+    client.db = MagicMock()
+    client.db.document.return_value.get = AsyncMock(return_value=mock_doc)
+
+    with pytest.raises(ValueError, match="not found"):
+        await client.get_routine("user1", "nonexistent")
+```
+
+- [ ] **Step 2: Run test — expect FAIL**
+
+```bash
+cd adk_agent/agent_service && python -m pytest tests/test_firestore_client.py -v
+```
+
+- [ ] **Step 3: Write implementation**
+
+```python
+# app/firestore_client.py
+"""Async Firestore client for the agent service.
+
+Uses AsyncClient to avoid blocking the async agent loop.
+Mirrors the query patterns from the Node.js shared modules —
+the Firestore schema is the shared contract.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from google.cloud.firestore import AsyncClient
+
+logger = logging.getLogger(__name__)
+
+
+_instance: 'FirestoreClient | None' = None
+
+
+def get_firestore_client() -> 'FirestoreClient':
+    """Module-level singleton — reuses gRPC channel across requests."""
+    global _instance
+    if _instance is None:
+        _instance = FirestoreClient()
+    return _instance
+
+
+class FirestoreClient:
+    def __init__(self):
+        self.db = AsyncClient()
+
+    # --- Routines ---
+
+    async def get_routine(self, user_id: str, routine_id: str) -> dict:
+        doc = await self.db.document(f"users/{user_id}/routines/{routine_id}").get()
+        if not doc.exists:
+            raise ValueError(f"Routine {routine_id} not found")
+        return {"id": doc.id, **doc.to_dict()}
+
+    async def list_routines(self, user_id: str) -> list[dict]:
+        docs = self.db.collection(f"users/{user_id}/routines").stream()
+        return [{"id": doc.id, **doc.to_dict()} async for doc in docs]
+
+    # --- Templates ---
+
+    async def get_template(self, user_id: str, template_id: str) -> dict:
+        doc = await self.db.document(f"users/{user_id}/templates/{template_id}").get()
+        if not doc.exists:
+            raise ValueError(f"Template {template_id} not found")
+        return {"id": doc.id, **doc.to_dict()}
+
+    async def list_templates(self, user_id: str) -> list[dict]:
+        docs = self.db.collection(f"users/{user_id}/templates").stream()
+        return [{"id": doc.id, **doc.to_dict()} async for doc in docs]
+
+    # --- User ---
+
+    async def get_user(self, user_id: str) -> dict:
+        doc = await self.db.document(f"users/{user_id}").get()
+        if not doc.exists:
+            raise ValueError(f"User {user_id} not found")
+        return {"id": doc.id, **doc.to_dict()}
+
+    # --- Workouts ---
+
+    async def list_recent_workouts(self, user_id: str, limit: int = 5) -> list[dict]:
+        query = (
+            self.db.collection(f"users/{user_id}/workouts")
+            .order_by("start_time", direction="DESCENDING")
+            .limit(limit)
+        )
+        docs = query.stream()
+        return [{"id": doc.id, **doc.to_dict()} async for doc in docs]
+
+    # --- Training Data ---
+
+    async def get_analysis_summary(self, user_id: str) -> dict | None:
+        """Get most recent analysis insight."""
+        query = (
+            self.db.collection(f"users/{user_id}/analysis_insights")
+            .order_by("created_at", direction="DESCENDING")
+            .limit(1)
+        )
+        docs = [doc async for doc in query.stream()]
+        if not docs:
+            return None
+        return {"id": docs[0].id, **docs[0].to_dict()}
+
+    async def get_weekly_review(self, user_id: str) -> dict | None:
+        """Get most recent weekly review."""
+        query = (
+            self.db.collection(f"users/{user_id}/weekly_reviews")
+            .order_by("created_at", direction="DESCENDING")
+            .limit(1)
+        )
+        docs = [doc async for doc in query.stream()]
+        if not docs:
+            return None
+        return {"id": docs[0].id, **docs[0].to_dict()}
+
+    async def get_weekly_stats(self, user_id: str) -> dict | None:
+        """Get current week's stats."""
+        doc = await self.db.document(f"users/{user_id}/weekly_stats/current").get()
+        if not doc.exists:
+            return None
+        return doc.to_dict()
+
+    # --- Planning Context (360 view assembly) ---
+
+    async def get_planning_context(self, user_id: str) -> dict:
+        """Assemble the full planning context for the agent."""
+        import asyncio
+
+        user_task = self.get_user(user_id)
+        routines_task = self.list_routines(user_id)
+        templates_task = self.list_templates(user_id)
+        workouts_task = self.list_recent_workouts(user_id, limit=5)
+        analysis_task = self.get_analysis_summary(user_id)
+        weekly_task = self.get_weekly_stats(user_id)
+
+        user, routines, templates, workouts, analysis, weekly = await asyncio.gather(
+            user_task, routines_task, templates_task,
+            workouts_task, analysis_task, weekly_task,
+        )
+
+        # Determine active routine
+        active_routine_id = user.get("activeRoutineId")
+        active_routine = next((r for r in routines if r["id"] == active_routine_id), None)
+
+        return {
+            "user": {
+                "display_name": user.get("display_name"),
+                "preferences": user.get("preferences", {}),
+                "training_level": user.get("training_level"),
+                "goals": user.get("goals", []),
+            },
+            "active_routine": active_routine,
+            "templates": templates,
+            "recent_workouts": workouts,
+            "analysis": analysis,
+            "weekly_stats": weekly,
+        }
+
+    # --- Exercises ---
+
+    async def search_exercises(self, query: str, limit: int = 10) -> list[dict]:
+        """Search exercises by name prefix (top-level collection)."""
+        docs = (
+            self.db.collection("exercises")
+            .where("status", "!=", "merged")
+            .order_by("name")
+            .limit(limit)
+            .stream()
+        )
+        results = []
+        query_lower = query.lower()
+        async for doc in docs:
+            data = doc.to_dict()
+            if query_lower in data.get("name", "").lower():
+                results.append({"id": doc.id, **data})
+        return results
+
+    # --- Conversations ---
+
+    async def get_conversation_messages(
+        self, user_id: str, conversation_id: str, limit: int = 20
+    ) -> list[dict]:
+        """Load recent messages for a conversation."""
+        query = (
+            self.db.collection(f"users/{user_id}/conversations/{conversation_id}/messages")
+            .order_by("timestamp", direction="DESCENDING")
+            .limit(limit)
+        )
+        docs = [doc async for doc in query.stream()]
+        docs.reverse()  # Chronological order
+        return [{"id": doc.id, **doc.to_dict()} for doc in docs]
+
+    async def save_message(
+        self, user_id: str, conversation_id: str, message: dict
+    ) -> str:
+        """Save a message to a conversation."""
+        ref = await self.db.collection(
+            f"users/{user_id}/conversations/{conversation_id}/messages"
+        ).add(message)
+        return ref[1].id
+```
+
+- [ ] **Step 4: Run tests — expect PASS**
+
+```bash
+cd adk_agent/agent_service && python -m pytest tests/test_firestore_client.py -v
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add adk_agent/agent_service/app/firestore_client.py adk_agent/agent_service/tests/test_firestore_client.py
+git commit -m "feat(agent): add async Firestore client with planning context assembly"
+```
+
+---
+
+### Task 15: Observability Module
+
+**Files:**
+- Create: `adk_agent/agent_service/app/observability.py`
+
+- [ ] **Step 1: Write implementation**
+
+```python
+# app/observability.py
+"""Structured logging and tracing for the agent service."""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+import uuid
+from contextvars import ContextVar
+from functools import wraps
+from typing import Any
+
+# Request-scoped trace ID for log correlation
+_trace_id: ContextVar[str] = ContextVar("trace_id", default="")
+
+
+class StructuredFormatter(logging.Formatter):
+    """JSON log formatter for Cloud Logging."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        log_entry = {
+            "severity": record.levelname,
+            "message": record.getMessage(),
+            "logger": record.name,
+            "trace_id": _trace_id.get(""),
+        }
+        if hasattr(record, "extra_fields"):
+            log_entry.update(record.extra_fields)
+        return json.dumps(log_entry)
+
+
+def setup_logging():
+    """Configure structured JSON logging."""
+    handler = logging.StreamHandler()
+    handler.setFormatter(StructuredFormatter())
+    logging.root.handlers = [handler]
+    logging.root.setLevel(logging.INFO)
+
+
+def new_trace_id() -> str:
+    """Generate and set a new trace ID for the current request."""
+    tid = uuid.uuid4().hex[:16]
+    _trace_id.set(tid)
+    return tid
+
+
+def get_trace_id() -> str:
+    return _trace_id.get("")
+
+
+def log_request(user_id: str, conversation_id: str, lane: str, model: str):
+    """Log request metadata."""
+    logger = logging.getLogger("agent.request")
+    logger.info(
+        "request_start",
+        extra={"extra_fields": {
+            "user_id": user_id,
+            "conversation_id": conversation_id,
+            "lane": lane,
+            "model": model,
+        }},
+    )
+
+
+def log_tool_call(tool_name: str, elapsed_ms: int, success: bool):
+    """Log tool execution."""
+    logger = logging.getLogger("agent.tool")
+    logger.info(
+        "tool_call",
+        extra={"extra_fields": {
+            "tool": tool_name,
+            "elapsed_ms": elapsed_ms,
+            "success": success,
+        }},
+    )
+
+
+def log_tokens(model: str, input_tokens: int, output_tokens: int):
+    """Log token usage."""
+    logger = logging.getLogger("agent.tokens")
+    logger.info(
+        "token_usage",
+        extra={"extra_fields": {
+            "model": model,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        }},
+    )
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add adk_agent/agent_service/app/observability.py
+git commit -m "feat(agent): add structured observability module"
+```
+
+---
+
+### Task 16: Starlette App + /stream Endpoint
+
+**Files:**
+- Create: `adk_agent/agent_service/app/main.py`
+
+- [ ] **Step 1: Write implementation**
+
+```python
+# app/main.py
+"""Agent Service — Starlette ASGI application."""
+
+from __future__ import annotations
+
+import json
+import logging
+
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import StreamingResponse, JSONResponse
+from starlette.routing import Route
+
+from app.observability import setup_logging, new_trace_id
+
+setup_logging()
+logger = logging.getLogger(__name__)
+
+
+async def stream_handler(request: Request) -> StreamingResponse:
+    """POST /stream — main agent streaming endpoint.
+
+    Request body: { "user_id": str, "conversation_id": str, "message": str }
+    Response: SSE stream
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    user_id = body.get("user_id")
+    conversation_id = body.get("conversation_id")
+    message = body.get("message")
+
+    if not all([user_id, conversation_id, message]):
+        return JSONResponse(
+            {"error": "user_id, conversation_id, and message are required"},
+            status_code=400,
+        )
+
+    trace_id = new_trace_id()
+
+    async def event_stream():
+        # Import here to avoid circular imports during startup
+        from app.agent_loop import run_agent_loop, sse_event
+        from app.context import RequestContext
+        from app.firestore_client import FirestoreClient
+        from app.llm.gemini import GeminiClient
+        from app.router import route_request, Lane
+        from app.tools.registry import get_tools, execute_tool
+
+        ctx = RequestContext(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            correlation_id=trace_id,
+        )
+
+        fs = get_firestore_client()
+
+        # Load conversation history
+        history = await fs.get_conversation_messages(
+            user_id, conversation_id, limit=20
+        )
+
+        # Route to determine lane
+        lane = route_request(message)
+
+        # TODO: Fast Lane handling (Phase 3a skill migration)
+        # TODO: Functional Lane handling (Phase 3a skill migration)
+
+        # Slow Lane — full agent loop
+        llm_client = GeminiClient()
+        tools = get_tools(ctx)
+
+        # Build instruction with planning context
+        from app.instruction import build_instruction
+        instruction = await build_instruction(fs, ctx)
+
+        async for event in run_agent_loop(
+            llm_client=llm_client,
+            model="gemini-2.5-flash",
+            instruction=instruction,
+            history=_format_history(history),
+            message=message,
+            tools=tools,
+            tool_executor=execute_tool,
+            ctx=ctx,
+        ):
+            yield event.encode()
+
+        # Persist user message and indicate stream ended
+        await fs.save_message(user_id, conversation_id, {
+            "role": "user",
+            "content": message,
+            "timestamp": _server_timestamp(),
+        })
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Trace-Id": trace_id,
+        },
+    )
+
+
+def _format_history(messages: list[dict]) -> list[dict]:
+    """Convert Firestore message docs to LLM message format."""
+    formatted = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        if role in ("user", "assistant"):
+            formatted.append({"role": role, "content": content})
+    return formatted
+
+
+def _server_timestamp():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc)
+
+
+async def health(request: Request) -> JSONResponse:
+    return JSONResponse({"status": "ok"})
+
+
+app = Starlette(
+    routes=[
+        Route("/stream", stream_handler, methods=["POST"]),
+        Route("/health", health, methods=["GET"]),
+    ],
+)
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add adk_agent/agent_service/app/main.py
+git commit -m "feat(agent): add Starlette app with /stream endpoint"
+```
+
+---
+
+## Chunk 3: Phase 3a Part 2 — Skill Migration, Router, Instruction, SSE Proxy
+
+### Task 17: Router Migration
+
+**Files:**
+- Create: `adk_agent/agent_service/app/router.py`
+- Test: `adk_agent/agent_service/tests/test_router.py`
+- Reference: `adk_agent/canvas_orchestrator/app/shell/router.py`
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# tests/test_router.py
+import pytest
+from app.router import route_request, Lane
+
+
+def test_fast_lane_log_set():
+    assert route_request("log 8 reps at 100kg") == Lane.FAST
+
+
+def test_fast_lane_shorthand():
+    assert route_request("8@100") == Lane.FAST
+
+
+def test_fast_lane_done():
+    assert route_request("done") == Lane.FAST
+
+
+def test_fast_lane_next_set():
+    assert route_request("next set") == Lane.FAST
+
+
+def test_slow_lane_general():
+    assert route_request("How's my training going?") == Lane.SLOW
+
+
+def test_slow_lane_routine_creation():
+    assert route_request("Create me a push pull legs routine") == Lane.SLOW
+
+
+def test_functional_lane_json():
+    assert route_request({"intent": "SWAP_EXERCISE"}) == Lane.FUNCTIONAL
+
+
+def test_functional_lane_autofill():
+    assert route_request({"intent": "AUTOFILL_SET"}) == Lane.FUNCTIONAL
+```
+
+- [ ] **Step 2: Run test — expect FAIL**
+- [ ] **Step 3: Migrate router from `canvas_orchestrator/app/shell/router.py`**
+
+Read the source file. Port the regex patterns and lane classification logic. Key changes:
+- Remove all ContextVar usage — return `Lane` enum only
+- Remove `execute_fast_lane()` — that moves to `main.py`
+- Keep the regex patterns and intent classification unchanged
+
+```python
+# app/router.py
+"""4-lane message router — migrated from shell/router.py."""
+
+from __future__ import annotations
+
+import re
+from enum import Enum
+from typing import Any
+
+
+class Lane(str, Enum):
+    FAST = "fast"
+    SLOW = "slow"
+    FUNCTIONAL = "functional"
+    WORKER = "worker"
+
+
+# Fast Lane patterns — regex match → direct skill execution, no LLM
+FAST_PATTERNS = [
+    re.compile(r"^(?:log\s+)?(\d+)\s*(?:reps?\s*)?(?:@|at)\s*(\d+(?:\.\d+)?)\s*(?:kg|lbs?|pounds?)?$", re.I),
+    re.compile(r"^(\d+)@(\d+(?:\.\d+)?)$"),
+    re.compile(r"^done$", re.I),
+    re.compile(r"^next\s*set$", re.I),
+    re.compile(r"^rest$", re.I),
+    re.compile(r"^log\s+set\b", re.I),
+    re.compile(r"^(\d+)\s*(?:reps?)?$", re.I),
+]
+
+# Functional Lane intents
+FUNCTIONAL_INTENTS = {"SWAP_EXERCISE", "AUTOFILL_SET", "SUGGEST_WEIGHT", "MONITOR_STATE"}
+
+
+def route_request(payload: str | dict[str, Any]) -> Lane:
+    """Route a message to the appropriate lane."""
+    if isinstance(payload, dict):
+        intent = payload.get("intent", "")
+        if intent in FUNCTIONAL_INTENTS:
+            return Lane.FUNCTIONAL
+        return Lane.SLOW
+
+    text = payload.strip()
+    for pattern in FAST_PATTERNS:
+        if pattern.match(text):
+            return Lane.FAST
+
+    return Lane.SLOW
+```
+
+- [ ] **Step 4: Run tests — expect PASS**
+- [ ] **Step 5: Commit**
+
+```bash
+git add adk_agent/agent_service/app/router.py adk_agent/agent_service/tests/test_router.py
+git commit -m "feat(agent): migrate 4-lane router"
+```
+
+---
+
+### Task 18: Tool Registry
+
+**Files:**
+- Create: `adk_agent/agent_service/app/tools/__init__.py`
+- Create: `adk_agent/agent_service/app/tools/registry.py`
+- Create: `adk_agent/agent_service/app/tools/definitions.py`
+
+- [ ] **Step 1: Write tool registry**
+
+```python
+# app/tools/registry.py
+"""Tool registry — maps tool names to implementations."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from app.context import RequestContext
+from app.llm.protocol import ToolDef
+
+# Tool implementations are registered here after skill migration
+_TOOL_REGISTRY: dict[str, Any] = {}
+
+
+def register_tool(name: str, fn, description: str, parameters: dict):
+    """Register a tool function."""
+    _TOOL_REGISTRY[name] = {
+        "fn": fn,
+        "def": ToolDef(name=name, description=description, parameters=parameters),
+    }
+
+
+async def execute_tool(tool_name: str, args: dict, ctx: RequestContext) -> Any:
+    """Execute a registered tool."""
+    if tool_name not in _TOOL_REGISTRY:
+        return {"error": f"Unknown tool: {tool_name}"}
+    fn = _TOOL_REGISTRY[tool_name]["fn"]
+    return await fn(ctx=ctx, **args)
+
+
+# Tools that are banned during active workout mode (heavy-compute, disruptive)
+WORKOUT_BANNED_TOOLS = {
+    "get_planning_context", "search_exercises", "query_training_sets",
+    "get_training_analysis", "propose_routine", "propose_routine_update",
+}
+
+
+def get_tools(ctx: RequestContext) -> list[ToolDef]:
+    """Get tool definitions available for this context."""
+    if ctx.workout_mode:
+        return [
+            entry["def"] for entry in _TOOL_REGISTRY.values()
+            if entry["def"].name not in WORKOUT_BANNED_TOOLS
+        ]
+    return [entry["def"] for entry in _TOOL_REGISTRY.values()]
+```
+
+- [ ] **Step 2: Write tool definitions skeleton**
+
+```python
+# app/tools/definitions.py
+"""Tool definitions — JSON schemas for each tool.
+
+Populated during skill migration (Tasks 19-21).
+"""
+
+# Will be populated as skills are migrated
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add adk_agent/agent_service/app/tools/
+git commit -m "feat(agent): add tool registry and executor"
+```
+
+---
+
+### Task 19: Coach Skills Migration (Read Tools)
+
+**Files:**
+- Create: `adk_agent/agent_service/app/skills/__init__.py`
+- Create: `adk_agent/agent_service/app/skills/coach_skills.py`
+- Test: `adk_agent/agent_service/tests/test_skills/__init__.py`
+- Test: `adk_agent/agent_service/tests/test_skills/test_coach_skills.py`
+- Reference: `adk_agent/canvas_orchestrator/app/skills/coach_skills.py`
+
+- [ ] **Step 1: Read the source file**
+
+```bash
+# Read the full source to understand every function
+```
+Read `adk_agent/canvas_orchestrator/app/skills/coach_skills.py` in full.
+
+- [ ] **Step 2: Write failing tests**
+
+```python
+# tests/test_skills/test_coach_skills.py
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from app.context import RequestContext
+from app.skills.coach_skills import get_user_profile, search_exercises, get_planning_context
+
+
+@pytest.fixture
+def ctx():
+    return RequestContext(user_id="u1", conversation_id="c1", correlation_id="r1")
+
+
+@pytest.mark.asyncio
+async def test_get_user_profile_returns_user_data(ctx):
+    with patch("app.skills.coach_skills.get_firestore_client") as mock_fc:
+        mock_client = AsyncMock()
+        mock_client.get_user.return_value = {"id": "u1", "display_name": "Test"}
+        mock_fc.return_value = mock_client
+        result = await get_user_profile(ctx=ctx)
+        assert result["display_name"] == "Test"
+        mock_client.get_user.assert_called_once_with("u1")
+
+
+@pytest.mark.asyncio
+async def test_search_exercises_returns_results(ctx):
+    with patch("app.skills.coach_skills.get_firestore_client") as mock_fc:
+        mock_client = AsyncMock()
+        mock_client.search_exercises.return_value = [{"id": "e1", "name": "Bench Press"}]
+        mock_fc.return_value = mock_client
+        result = await search_exercises(ctx=ctx, query="bench")
+        assert result["count"] == 1
+        assert result["exercises"][0]["name"] == "Bench Press"
+
+
+@pytest.mark.asyncio
+async def test_get_planning_context_returns_full_context(ctx):
+    with patch("app.skills.coach_skills.get_firestore_client") as mock_fc:
+        mock_client = AsyncMock()
+        mock_client.get_planning_context.return_value = {
+            "user": {"display_name": "Test"},
+            "active_routine": None,
+            "templates": [],
+            "recent_workouts": [],
+            "analysis": None,
+            "weekly_stats": None,
+        }
+        mock_fc.return_value = mock_client
+        result = await get_planning_context(ctx=ctx)
+        assert "user" in result
+```
+
+Test each coach skill function. Mock the `FirestoreClient` via `get_firestore_client`.
+
+- [ ] **Step 3: Write implementation**
+
+Key changes from the original:
+- Replace `CanvasFunctionsClient` HTTP calls with `FirestoreClient` async calls
+- Replace `ContextVar` for `user_id` with explicit `ctx: RequestContext` parameter
+- Replace `SkillResult` returns with plain dicts (tool registry handles the wrapping)
+- Remove `_client_instance` singleton pattern — `FirestoreClient` is passed in
+
+```python
+# app/skills/coach_skills.py
+"""Read tools — training data queries via direct Firestore access.
+
+Migrated from canvas_orchestrator/app/skills/coach_skills.py.
+Replaces HTTP calls with FirestoreClient.
+"""
+
+from __future__ import annotations
+
+from app.context import RequestContext
+from app.firestore_client import get_firestore_client
+
+
+async def get_user_profile(*, ctx: RequestContext) -> dict:
+    fs = get_firestore_client()
+    return await fs.get_user(ctx.user_id)
+
+
+async def search_exercises(*, ctx: RequestContext, query: str, limit: int = 10) -> dict:
+    fs = get_firestore_client()
+    results = await fs.search_exercises(query, limit)
+    return {"exercises": results, "count": len(results)}
+
+
+async def get_planning_context(*, ctx: RequestContext) -> dict:
+    fs = get_firestore_client()
+    return await fs.get_planning_context(ctx.user_id)
+
+
+async def get_training_analysis(*, ctx: RequestContext, sections: list[str] | None = None) -> dict:
+    fs = get_firestore_client()
+    analysis = await fs.get_analysis_summary(ctx.user_id)
+    weekly = await fs.get_weekly_review(ctx.user_id)
+    return {"analysis": analysis, "weekly_review": weekly}
+
+
+async def get_muscle_group_progress(*, ctx: RequestContext, group: str, weeks: int = 8) -> dict:
+    fs = get_firestore_client()
+    query = (
+        fs.db.collection(f"users/{ctx.user_id}/muscle_group_series")
+        .where("muscle_group", "==", group)
+        .order_by("week_start", direction="DESCENDING")
+        .limit(weeks)
+    )
+    docs = [doc async for doc in query.stream()]
+    return {"series": [{"id": d.id, **d.to_dict()} for d in reversed(docs)]}
+
+
+async def get_exercise_progress(*, ctx: RequestContext, exercise: str, weeks: int = 8) -> dict:
+    fs = get_firestore_client()
+    query = (
+        fs.db.collection(f"users/{ctx.user_id}/exercise_series")
+        .where("exercise_name", "==", exercise)
+        .order_by("date", direction="DESCENDING")
+        .limit(weeks * 7)
+    )
+    docs = [doc async for doc in query.stream()]
+    return {"series": [{"id": d.id, **d.to_dict()} for d in reversed(docs)]}
+```
+
+- [ ] **Step 4: Register tools**
+
+In `tools/definitions.py`, register each coach skill with its JSON schema:
+
+```python
+from app.tools.registry import register_tool
+from app.skills import coach_skills
+
+register_tool(
+    "get_planning_context",
+    coach_skills.get_planning_context,
+    "Get the full planning context for the current user",
+    {"type": "object", "properties": {}, "required": []},
+)
+
+register_tool(
+    "search_exercises",
+    coach_skills.search_exercises,
+    "Search the exercise catalog by name",
+    {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Search query"},
+            "limit": {"type": "integer", "description": "Max results", "default": 10},
+        },
+        "required": ["query"],
+    },
+)
+# ... register all coach skills
+```
+
+- [ ] **Step 5: Run tests — expect PASS**
+- [ ] **Step 6: Commit**
+
+```bash
+git add adk_agent/agent_service/app/skills/ adk_agent/agent_service/app/tools/definitions.py adk_agent/agent_service/tests/test_skills/
+git commit -m "feat(agent): migrate coach skills with direct Firestore access"
+```
+
+---
+
+### Task 20: Planner Skills Migration (Write Tools)
+
+**Files:**
+- Create: `adk_agent/agent_service/app/skills/planner_skills.py`
+- Test: `adk_agent/agent_service/tests/test_skills/test_planner_skills.py`
+- Reference: `adk_agent/canvas_orchestrator/app/skills/planner_skills.py`
+
+- [ ] **Step 1: Read the source file**
+
+Read `adk_agent/canvas_orchestrator/app/skills/planner_skills.py` in full.
+
+- [ ] **Step 2: Write failing tests**
+- [ ] **Step 3: Write implementation**
+
+Key changes:
+- Artifacts are written directly to Firestore `conversations/{id}/artifacts` + yielded as SSE events
+- No more proxy-side artifact detection — the agent controls artifact persistence
+- Replace `CanvasFunctionsClient` with `FirestoreClient` for routine/template creation
+- `propose_workout`, `propose_routine`, `propose_routine_update`, `propose_template_update`
+
+- [ ] **Step 4: Register tools in definitions.py**
+- [ ] **Step 5: Run tests — expect PASS**
+- [ ] **Step 6: Commit**
+
+```bash
+git add adk_agent/agent_service/app/skills/planner_skills.py adk_agent/agent_service/tests/test_skills/test_planner_skills.py
+git commit -m "feat(agent): migrate planner skills with direct artifact writes"
+```
+
+---
+
+### Task 21: Copilot + Workout Skills Migration (HTTP-Retained)
+
+**Files:**
+- Create: `adk_agent/agent_service/app/skills/copilot_skills.py`
+- Create: `adk_agent/agent_service/app/skills/workout_skills.py`
+- Reference: `adk_agent/canvas_orchestrator/app/skills/copilot_skills.py`
+- Reference: `adk_agent/canvas_orchestrator/app/skills/workout_skills.py`
+
+- [ ] **Step 1: Read both source files**
+- [ ] **Step 2: Write implementation**
+
+These skills **retain HTTP calls** to Firebase Functions — active workout mutations are too critical to reimplement. Key changes:
+- Replace `ContextVar` for user_id with `ctx: RequestContext`
+- Replace `_client_instance` singleton with injected HTTP client
+- Use `httpx.AsyncClient` instead of `requests`
+- Keep the same Firebase Function endpoints and API key auth
+
+```python
+# app/skills/copilot_skills.py
+"""Fast Lane skills — active workout operations via HTTP.
+
+These call Firebase Functions via HTTP because the active workout
+state machine (Zod validation, idempotency, concurrent-set protection)
+is too critical to reimplement in Python.
+"""
+
+from __future__ import annotations
+
+import os
+import httpx
+
+from app.context import RequestContext
+
+FUNCTIONS_URL = os.getenv("FIREBASE_FUNCTIONS_URL", "https://us-central1-myon-53d85.cloudfunctions.net")
+API_KEY = os.getenv("FIREBASE_API_KEY", "")
+
+
+async def log_set(*, ctx: RequestContext, reps: int, weight_kg: float, **kwargs) -> dict:
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        resp = await client.post(
+            f"{FUNCTIONS_URL}/logSet",
+            json={
+                "exercise_instance_id": kwargs.get("exercise_instance_id"),
+                "set_id": kwargs.get("set_id"),
+                "reps": reps,
+                "weight_kg": weight_kg,
+            },
+            headers={
+                "x-api-key": API_KEY,
+                "x-user-id": ctx.user_id,
+            },
+        )
+        return resp.json()
+
+# ... log_set_shorthand, get_next_set, swap_exercise, add_exercise, etc.
+```
+
+- [ ] **Step 3: Register tools in definitions.py**
+- [ ] **Step 4: Commit**
+
+```bash
+git add adk_agent/agent_service/app/skills/copilot_skills.py adk_agent/agent_service/app/skills/workout_skills.py
+git commit -m "feat(agent): migrate copilot/workout skills (HTTP retained for active workout)"
+```
+
+---
+
+### Task 22: Safety Gate, Planner, Critic Migration
+
+**Files:**
+- Create: `adk_agent/agent_service/app/safety_gate.py`
+- Create: `adk_agent/agent_service/app/planner.py`
+- Create: `adk_agent/agent_service/app/critic.py`
+- Create: `adk_agent/agent_service/app/functional_handler.py`
+- Reference: `adk_agent/canvas_orchestrator/app/shell/safety_gate.py`
+- Reference: `adk_agent/canvas_orchestrator/app/shell/planner.py`
+- Reference: `adk_agent/canvas_orchestrator/app/shell/critic.py`
+- Reference: `adk_agent/canvas_orchestrator/app/shell/functional_handler.py`
+
+- [ ] **Step 1: Read all four source files**
+- [ ] **Step 2: Migrate safety_gate.py**
+
+Key changes: replace ContextVar message access with function parameter. Keep confirmation keyword patterns unchanged.
+
+- [ ] **Step 3: Migrate planner.py**
+
+Key changes: replace ContextVar context access with function parameter. Keep intent templates and tool plan generation unchanged.
+
+- [ ] **Step 4: Migrate critic.py**
+
+Key changes: replace ContextVar with function parameter. Keep safety/hallucination pattern matching unchanged.
+
+- [ ] **Step 5: Migrate functional_handler.py**
+
+Key changes: use the LLM client abstraction instead of direct google-genai. Keep intent handling unchanged.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add adk_agent/agent_service/app/safety_gate.py adk_agent/agent_service/app/planner.py adk_agent/agent_service/app/critic.py adk_agent/agent_service/app/functional_handler.py
+git commit -m "feat(agent): migrate safety gate, planner, critic, functional handler"
+```
+
+---
+
+### Task 23: Instruction Migration
+
+**Files:**
+- Create: `adk_agent/agent_service/app/instruction.py`
+- Reference: `adk_agent/canvas_orchestrator/app/shell/instruction.py`
+
+- [ ] **Step 1: Read the full instruction (698 lines)**
+- [ ] **Step 2: Migrate instruction.py**
+
+Read `adk_agent/canvas_orchestrator/app/shell/instruction.py` (698 lines) in full. Copy the entire `CORE_INSTRUCTION` string, then apply these modifications:
+
+1. **Remove Gemini-specific formatting** — delete any references to Gemini's extended thinking format, thinking tokens, or model-specific behavior
+2. **Remove session-awareness** — delete references to `session_id`, `agent_version`, session state, version-forced resets
+3. **Remove ContextVar references** — delete any mention of ContextVar, thread boundaries, or ADK-specific patterns
+4. **Add memory usage guidance** — append the `MEMORY_GUIDANCE` section (defined above)
+5. **Keep unchanged:** core coaching persona, response craft (Verdict/Evidence/Action), weight prescription rules, workout mode rules, safety patterns, tool usage tiers, evidence-based training principles
+
+After migration, verify the instruction string doesn't reference any ADK/Vertex AI concepts by searching for: "session", "agent_version", "ContextVar", "ADK", "Vertex", "gemini" (case-insensitive). Any matches should be removed or made model-agnostic.
+
+```python
+# app/instruction.py
+"""Agent instruction — coaching persona and behavior rules.
+
+Migrated from canvas_orchestrator/app/shell/instruction.py (698 lines).
+Model-agnostic — no Gemini-specific formatting.
+"""
+
+from __future__ import annotations
+
+from app.context import RequestContext
+from app.firestore_client import FirestoreClient
+
+
+CORE_INSTRUCTION = ""  # Populated in Step 2 below — full migration of 698-line instruction
+
+MEMORY_GUIDANCE = """
+## Memory Usage
+When you learn something new about the user that would be valuable in future
+conversations — a goal, a constraint, an injury, a preference, a life context —
+save it with the save_memory tool.
+
+Save durable facts: "user prefers 4-day upper/lower splits"
+Don't save transient details: "user wants to train chest today"
+
+When you discover a previous memory is outdated or incorrect, retire it with
+retire_memory and optionally save the corrected version.
+"""
+
+
+async def build_instruction(fs: FirestoreClient, ctx: RequestContext) -> str:
+    """Build the full system instruction with auto-loaded context."""
+    parts = [CORE_INSTRUCTION, MEMORY_GUIDANCE]
+
+    # Auto-loaded context will be added in Phase 3b (memory system)
+    # For now, load planning context
+    try:
+        planning = await fs.get_planning_context(ctx.user_id)
+        parts.append(_format_training_snapshot(planning))
+    except Exception:
+        pass  # First-time user may have no data
+
+    return "\n\n".join(parts)
+
+
+def _format_training_snapshot(planning: dict) -> str:
+    """Format planning context as a system message section."""
+    sections = ["## Current Training Snapshot"]
+    user = planning.get("user", {})
+    if user.get("display_name"):
+        sections.append(f"User: {user['display_name']}")
+    active = planning.get("active_routine")
+    if active:
+        sections.append(f"Active routine: {active.get('name', 'Unknown')}")
+    return "\n".join(sections)
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add adk_agent/agent_service/app/instruction.py
+git commit -m "feat(agent): migrate instruction with model-agnostic formatting"
+```
+
+---
+
+### Task 24: Wire main.py with Full Lane Support
+
+**Files:**
+- Modify: `adk_agent/agent_service/app/main.py`
+
+- [ ] **Step 1: Update stream_handler**
+
+Wire the router, Fast Lane (copilot_skills), Functional Lane (functional_handler), and Slow Lane (agent loop with planner + critic):
+
+- Fast Lane: parse shorthand, execute copilot skill, return SSE result
+- Functional Lane: execute functional_handler with LLM client
+- Slow Lane: run planner → agent loop → critic
+
+Read the `agent_engine_app.py` `stream_query` method to ensure all pipeline stages are preserved.
+
+- [ ] **Step 2: Import and wire tool definitions**
+
+Ensure `tools/definitions.py` registers all tools on module import.
+
+- [ ] **Step 3: Run full test suite**
+
+```bash
+cd adk_agent/agent_service && python -m pytest tests/ -v
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add adk_agent/agent_service/app/main.py adk_agent/agent_service/app/tools/definitions.py
+git commit -m "feat(agent): wire full lane support in /stream endpoint"
+```
+
+---
+
+### Task 25: SSE Proxy Update
+
+**Files:**
+- Modify: `firebase_functions/functions/strengthos/stream-agent-normalized.js`
+
+- [ ] **Step 1: Read the full SSE proxy file**
+
+Read `firebase_functions/functions/strengthos/stream-agent-normalized.js` (~1528 lines).
+
+- [ ] **Step 2: Modify to call Cloud Run instead of Vertex AI**
+
+Key changes:
+1. Replace Vertex AI `:streamQuery` call with Cloud Run `/stream` POST
+2. Use IAM identity token for Cloud Run auth (replace Vertex AI session auth)
+3. Remove session creation/reuse logic (calls to `initializeOrReuseSession`)
+4. Remove session pre-warming hooks
+5. Keep: auth, premium gate, rate limiting, SSE event relay, artifact handling
+
+```javascript
+// Key change — replace Vertex AI call with Cloud Run call
+const { GoogleAuth } = require('google-auth-library');
+const auth = new GoogleAuth();
+
+const AGENT_SERVICE_URL = process.env.AGENT_SERVICE_URL || 'https://agent-service-HASH-uc.a.run.app';
+
+async function callAgentService(userId, conversationId, message) {
+  const client = await auth.getIdTokenClient(AGENT_SERVICE_URL);
+  const response = await client.request({
+    url: `${AGENT_SERVICE_URL}/stream`,
+    method: 'POST',
+    data: { user_id: userId, conversation_id: conversationId, message },
+    responseType: 'stream',
+  });
+  return response.data; // SSE stream
+}
+```
+
+3. Update event relay — the Cloud Run service emits the same SSE event types defined in the spec (message, tool_start, tool_end, artifact, done, error), so the relay logic stays largely the same.
+
+- [ ] **Step 3: Run Firebase Functions tests**
+
+```bash
+cd firebase_functions/functions && npm test
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add firebase_functions/functions/strengthos/stream-agent-normalized.js
+git commit -m "feat(proxy): update SSE proxy to call Cloud Run agent service"
+```
+
+---
+
+### Task 26: Deploy + End-to-End Verification
+
+- [ ] **Step 1: Deploy agent service to Cloud Run**
+
+```bash
+cd adk_agent/agent_service && make deploy
+```
+
+- [ ] **Step 2: Set AGENT_SERVICE_URL env var for Firebase Functions**
+
+```bash
+# Get the Cloud Run URL
+gcloud run services describe agent-service --region us-central1 --format 'value(status.url)'
+
+# Set as env var in firebase_functions/functions/.env (v2 Functions use dotenv, not functions:config)
+echo 'AGENT_SERVICE_URL=https://agent-service-HASH-uc.a.run.app' >> firebase_functions/functions/.env
+```
+
+Note: Firebase Functions v2 reads environment variables from `.env` files, not `firebase functions:config`. The `.env` file is already gitignored.
+
+- [ ] **Step 3: Deploy Firebase Functions**
+
+```bash
+cd firebase_functions/functions && npm run deploy
+```
+
+- [ ] **Step 4: Test via iOS app**
+
+Open the iOS app, start a new conversation. Verify:
+- Text responses stream correctly
+- Tool calls show in the thinking UI
+- Routine/template queries work
+- Active workout operations work (Fast Lane)
+
+- [ ] **Step 5: Update documentation**
+
+Update `docs/SHELL_AGENT_ARCHITECTURE.md` to document the new agent service architecture.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add -A
+git commit -m "feat(agent): complete Phase 3a — agent service on Cloud Run
+
+New stateless Cloud Run agent service replaces Vertex AI Agent Engine:
+- LLM client protocol + Gemini implementation
+- Core agent loop with tool execution
+- Direct Firestore access via AsyncClient
+- All skills migrated (copilot/workout retain HTTP for active workout)
+- 4-lane router, planner, critic, safety gate migrated
+- Model-agnostic instruction
+- Structured observability (JSON logging, trace IDs)
+- SSE proxy updated to call Cloud Run"
+```
+
+---
+
+## Chunk 4: Phase 3b (Agent Memory) + Phase 3c (Session Elimination)
+
+### Task 27: Agent Memory — Firestore Operations
+
+**Files:**
+- Create: `adk_agent/agent_service/app/memory.py`
+- Test: `adk_agent/agent_service/tests/test_memory.py`
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# tests/test_memory.py
+import pytest
+from unittest.mock import AsyncMock, MagicMock
+from app.memory import MemoryManager
+
+
+@pytest.mark.asyncio
+async def test_save_memory():
+    mm = MemoryManager.__new__(MemoryManager)
+    mock_ref = AsyncMock()
+    mock_ref.__getitem__ = MagicMock(return_value=MagicMock(id="mem1"))
+    mm.db = MagicMock()
+    mm.db.collection.return_value.add = AsyncMock(return_value=mock_ref)
+
+    result = await mm.save_memory("u1", "Prefers 4-day splits", "preference", "conv1")
+    assert result["content"] == "Prefers 4-day splits"
+    assert result["category"] == "preference"
+
+
+@pytest.mark.asyncio
+async def test_retire_memory():
+    mm = MemoryManager.__new__(MemoryManager)
+    mock_doc = AsyncMock()
+    mock_doc.exists = True
+    mm.db = MagicMock()
+    mm.db.document.return_value.get = AsyncMock(return_value=mock_doc)
+    mm.db.document.return_value.update = AsyncMock()
+
+    result = await mm.retire_memory("u1", "mem1", "Contradicted by user")
+    assert result["retired"] is True
+
+
+@pytest.mark.asyncio
+async def test_list_active_memories():
+    mm = MemoryManager.__new__(MemoryManager)
+    mm.db = MagicMock()
+
+    mock_docs = []
+    for i in range(3):
+        doc = MagicMock()
+        doc.id = f"mem{i}"
+        doc.to_dict.return_value = {"content": f"Memory {i}", "category": "preference", "active": True}
+        mock_docs.append(doc)
+
+    # Mock async stream
+    async def mock_stream():
+        for doc in mock_docs:
+            yield doc
+
+    mm.db.collection.return_value.where.return_value.order_by.return_value.limit.return_value.stream = mock_stream
+
+    result = await mm.list_active_memories("u1", limit=50)
+    assert len(result) == 3
+```
+
+- [ ] **Step 2: Run test — expect FAIL**
+- [ ] **Step 3: Write implementation**
+
+```python
+# app/memory.py
+"""Agent Memory Manager — persistent cross-conversation memory.
+
+Tier 3 of the 4-tier memory system. Stores learned facts about the user
+in users/{uid}/agent_memory/{auto-id}.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from google.cloud.firestore import AsyncClient
+
+
+_mm_instance: 'MemoryManager | None' = None
+
+
+def get_memory_manager() -> 'MemoryManager':
+    """Module-level singleton — reuses gRPC channel."""
+    global _mm_instance
+    if _mm_instance is None:
+        _mm_instance = MemoryManager()
+    return _mm_instance
+
+
+class MemoryManager:
+    def __init__(self):
+        self.db = AsyncClient()
+
+    async def save_memory(
+        self, user_id: str, content: str, category: str, conversation_id: str
+    ) -> dict:
+        data = {
+            "content": content,
+            "category": category,
+            "active": True,
+            "created_at": datetime.now(timezone.utc),
+            "source_conversation_id": conversation_id,
+        }
+        ref = await self.db.collection(f"users/{user_id}/agent_memory").add(data)
+        return {"id": ref[1].id, **data}
+
+    async def retire_memory(
+        self, user_id: str, memory_id: str, reason: str
+    ) -> dict:
+        doc_ref = self.db.document(f"users/{user_id}/agent_memory/{memory_id}")
+        doc = await doc_ref.get()
+        if not doc.exists:
+            return {"error": f"Memory {memory_id} not found"}
+        await doc_ref.update({
+            "active": False,
+            "retired_at": datetime.now(timezone.utc),
+            "retire_reason": reason,
+        })
+        return {"retired": True, "memory_id": memory_id}
+
+    async def list_active_memories(self, user_id: str, limit: int = 50) -> list[dict]:
+        query = (
+            self.db.collection(f"users/{user_id}/agent_memory")
+            .where("active", "==", True)
+            .order_by("created_at", direction="DESCENDING")
+            .limit(limit)
+        )
+        return [{"id": doc.id, **doc.to_dict()} async for doc in query.stream()]
+
+    async def generate_conversation_summary(
+        self, user_id: str, conversation_id: str, llm_client, model: str
+    ) -> str | None:
+        """Generate a summary for a completed conversation (lazy, Tier 4)."""
+        conv_ref = self.db.document(
+            f"users/{user_id}/conversations/{conversation_id}"
+        )
+        conv = await conv_ref.get()
+        if not conv.exists:
+            return None
+        if conv.to_dict().get("summary"):
+            return conv.to_dict()["summary"]
+
+        # Load last 10 messages
+        msgs_query = (
+            self.db.collection(
+                f"users/{user_id}/conversations/{conversation_id}/messages"
+            )
+            .order_by("timestamp", direction="DESCENDING")
+            .limit(10)
+        )
+        msgs = [doc.to_dict() async for doc in msgs_query.stream()]
+        msgs.reverse()
+
+        if not msgs:
+            return None
+
+        # Single-shot summary
+        transcript = "\n".join(
+            f"{m.get('role', 'user')}: {m.get('content', '')}" for m in msgs
+        )
+        prompt = (
+            "Summarize this coaching conversation in 1-2 sentences. "
+            "Focus on what was discussed and any decisions made.\n\n"
+            f"{transcript}"
+        )
+
+        summary_text = ""
+        async for chunk in llm_client.stream(
+            model, [{"role": "user", "content": prompt}]
+        ):
+            if chunk.is_text:
+                summary_text += chunk.text
+
+        # Persist
+        await conv_ref.update({
+            "summary": summary_text,
+            "completed_at": datetime.now(timezone.utc),
+        })
+        return summary_text
+```
+
+- [ ] **Step 4: Run tests — expect PASS**
+- [ ] **Step 5: Commit**
+
+```bash
+git add adk_agent/agent_service/app/memory.py adk_agent/agent_service/tests/test_memory.py
+git commit -m "feat(agent): add MemoryManager with save, retire, list, summary"
+```
+
+---
+
+### Task 28: Context Builder (360 View)
+
+**Files:**
+- Create: `adk_agent/agent_service/app/context_builder.py`
+- Test: `adk_agent/agent_service/tests/test_context_builder.py`
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# tests/test_context_builder.py
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from app.context_builder import build_system_context
+from app.context import RequestContext
+
+
+@pytest.mark.asyncio
+async def test_build_system_context_includes_all_sections():
+    ctx = RequestContext(user_id="u1", conversation_id="c1", correlation_id="r1")
+
+    mock_fs = AsyncMock()
+    mock_fs.get_planning_context.return_value = {
+        "user": {"display_name": "Test User"},
+        "active_routine": {"name": "PPL"},
+        "templates": [],
+        "recent_workouts": [],
+        "analysis": None,
+        "weekly_stats": None,
+    }
+    mock_fs.get_conversation_messages.return_value = []
+
+    mock_mm = AsyncMock()
+    mock_mm.list_active_memories.return_value = [
+        {"content": "Prefers morning workouts", "category": "preference"}
+    ]
+
+    mock_fs_class = MagicMock(return_value=mock_fs)
+    mock_mm_class = MagicMock(return_value=mock_mm)
+
+    with patch("app.context_builder.FirestoreClient", mock_fs_class), \
+         patch("app.context_builder.MemoryManager", mock_mm_class):
+        instruction, history = await build_system_context(ctx)
+
+    assert "Test User" in instruction or "PPL" in instruction
+    assert "morning workouts" in instruction
+```
+
+- [ ] **Step 2: Run test — expect FAIL**
+- [ ] **Step 3: Write implementation**
+
+```python
+# app/context_builder.py
+"""360 View Context Builder — assembles the full system context.
+
+Auto-loaded before the LLM sees anything. Assembles:
+1. INSTRUCTION (coaching persona)
+2. AGENT MEMORIES (cross-conversation)
+3. RECENT CONVERSATIONS (last 5 summaries)
+4. USER PROFILE + TRAINING SNAPSHOT
+5. ACTIVE ALERTS (from training analyst)
+6. SESSION VARS (current conversation)
+7. CONVERSATION HISTORY (last 20 messages)
+"""
+
+from __future__ import annotations
+
+from app.context import RequestContext
+from app.firestore_client import get_firestore_client
+from app.memory import get_memory_manager
+from app.instruction import CORE_INSTRUCTION, MEMORY_GUIDANCE
+
+
+async def build_system_context(
+    ctx: RequestContext,
+    llm_client=None,
+    model: str = "gemini-2.5-flash",
+) -> tuple[str, list[dict]]:
+    """Build instruction string and conversation history.
+
+    Returns: (instruction, history_messages)
+    """
+    fs = get_firestore_client()
+    mm = get_memory_manager()
+
+    # Parallel loads
+    import asyncio
+    planning_task = fs.get_planning_context(ctx.user_id)
+    memories_task = mm.list_active_memories(ctx.user_id, limit=50)
+    history_task = fs.get_conversation_messages(
+        ctx.user_id, ctx.conversation_id, limit=20
+    )
+    summaries_task = _load_recent_summaries(fs, ctx.user_id, limit=5)
+
+    planning, memories, history, summaries = await asyncio.gather(
+        planning_task, memories_task, history_task, summaries_task,
+        return_exceptions=True,
+    )
+
+    # Handle errors gracefully — first-time users may have no data
+    if isinstance(planning, Exception):
+        planning = {}
+    if isinstance(memories, Exception):
+        memories = []
+    if isinstance(history, Exception):
+        history = []
+    if isinstance(summaries, Exception):
+        summaries = []
+
+    # Lazy summary generation for previous conversation
+    if llm_client and summaries is not None:
+        await _maybe_generate_previous_summary(
+            fs, mm, ctx, llm_client, model
+        )
+
+    # Assemble instruction
+    instruction_parts = [CORE_INSTRUCTION, MEMORY_GUIDANCE]
+
+    if memories:
+        mem_text = "\n".join(f"- [{m['category']}] {m['content']}" for m in memories)
+        instruction_parts.append(f"## What You Know About This User\n{mem_text}")
+
+    if summaries:
+        sum_text = "\n".join(f"- {s}" for s in summaries)
+        instruction_parts.append(f"## Recent Conversations\n{sum_text}")
+
+    if isinstance(planning, dict):
+        instruction_parts.append(_format_snapshot(planning))
+
+    # Session vars
+    conv_doc = await _get_session_vars(fs, ctx)
+    if conv_doc:
+        vars_text = "\n".join(f"- {k}: {v}" for k, v in conv_doc.items())
+        instruction_parts.append(f"## Session State\n{vars_text}")
+
+    instruction = "\n\n".join(instruction_parts)
+
+    # Format history for LLM
+    formatted_history = _format_history(history)
+
+    return instruction, formatted_history
+
+
+async def _load_recent_summaries(fs: FirestoreClient, user_id: str, limit: int) -> list[str]:
+    query = (
+        fs.db.collection(f"users/{user_id}/conversations")
+        .where("summary", "!=", None)
+        .order_by("completed_at", direction="DESCENDING")
+        .limit(limit)
+    )
+    return [doc.to_dict().get("summary", "") async for doc in query.stream()]
+
+
+async def _maybe_generate_previous_summary(fs, mm, ctx, llm_client, model):
+    """Lazy summary: check if previous conversation needs a summary."""
+    query = (
+        fs.db.collection(f"users/{ctx.user_id}/conversations")
+        .order_by("created_at", direction="DESCENDING")
+        .limit(2)
+    )
+    convs = [doc async for doc in query.stream()]
+    if len(convs) < 2:
+        return
+    prev = convs[1]  # Second most recent
+    if not prev.to_dict().get("summary"):
+        await mm.generate_conversation_summary(
+            ctx.user_id, prev.id, llm_client, model
+        )
+
+
+async def _get_session_vars(fs: FirestoreClient, ctx: RequestContext) -> dict | None:
+    doc = await fs.db.document(
+        f"users/{ctx.user_id}/conversations/{ctx.conversation_id}"
+    ).get()
+    if doc.exists:
+        return doc.to_dict().get("session_vars")
+    return None
+
+
+def _format_snapshot(planning: dict) -> str:
+    sections = ["## Current Training Snapshot"]
+    user = planning.get("user", {})
+    if user.get("display_name"):
+        sections.append(f"User: {user['display_name']}")
+    routine = planning.get("active_routine")
+    if routine:
+        sections.append(f"Active routine: {routine.get('name', 'Unknown')}")
+    analysis = planning.get("analysis")
+    if analysis:
+        sections.append(f"Latest insight: {analysis.get('summary', 'N/A')}")
+    return "\n".join(sections)
+
+
+def _format_history(messages: list[dict]) -> list[dict]:
+    formatted = []
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        if role in ("user", "assistant"):
+            formatted.append({"role": role, "content": content})
+    return formatted
+```
+
+- [ ] **Step 4: Run tests — expect PASS**
+- [ ] **Step 5: Commit**
+
+```bash
+git add adk_agent/agent_service/app/context_builder.py adk_agent/agent_service/tests/test_context_builder.py
+git commit -m "feat(agent): add 360 view context builder with all 4 memory tiers"
+```
+
+---
+
+### Task 29: Memory Tools + Session Var Tools
+
+**Files:**
+- Create: `adk_agent/agent_service/app/tools/memory_tools.py`
+- Modify: `adk_agent/agent_service/app/tools/definitions.py`
+
+- [ ] **Step 1: Write memory tool functions**
+
+```python
+# app/tools/memory_tools.py
+"""Memory and session variable tools for the agent."""
+
+from __future__ import annotations
+
+from app.context import RequestContext
+from app.memory import MemoryManager
+from app.firestore_client import FirestoreClient
+
+
+async def save_memory(*, ctx: RequestContext, content: str, category: str) -> dict:
+    from app.memory import get_memory_manager
+    mm = get_memory_manager()
+    return await mm.save_memory(ctx.user_id, content, category, ctx.conversation_id)
+
+
+async def retire_memory(*, ctx: RequestContext, memory_id: str, reason: str) -> dict:
+    from app.memory import get_memory_manager
+    mm = get_memory_manager()
+    return await mm.retire_memory(ctx.user_id, memory_id, reason)
+
+
+async def list_memories(*, ctx: RequestContext, offset: int = 0, limit: int = 50) -> dict:
+    from app.memory import get_memory_manager
+    mm = get_memory_manager()
+    memories = await mm.list_active_memories(ctx.user_id, limit=limit)
+    return {"memories": memories, "count": len(memories)}
+
+
+async def set_session_var(*, ctx: RequestContext, key: str, value) -> dict:
+    fs = FirestoreClient()
+    await fs.db.document(
+        f"users/{ctx.user_id}/conversations/{ctx.conversation_id}"
+    ).update({f"session_vars.{key}": value})
+    return {"set": key, "value": value}
+
+
+async def delete_session_var(*, ctx: RequestContext, key: str) -> dict:
+    from google.cloud.firestore import DELETE_FIELD
+    fs = FirestoreClient()
+    await fs.db.document(
+        f"users/{ctx.user_id}/conversations/{ctx.conversation_id}"
+    ).update({f"session_vars.{key}": DELETE_FIELD})
+    return {"deleted": key}
+
+
+async def search_past_conversations(*, ctx: RequestContext, query: str, limit: int = 5) -> dict:
+    # Simple keyword search across recent conversation messages
+    fs = FirestoreClient()
+    convs_query = (
+        fs.db.collection(f"users/{ctx.user_id}/conversations")
+        .order_by("created_at", direction="DESCENDING")
+        .limit(20)
+    )
+    results = []
+    async for conv_doc in convs_query.stream():
+        conv_data = conv_doc.to_dict()
+        summary = conv_data.get("summary", "")
+        if query.lower() in summary.lower():
+            results.append({
+                "conversation_id": conv_doc.id,
+                "summary": summary,
+                "date": str(conv_data.get("completed_at", "")),
+            })
+            if len(results) >= limit:
+                break
+    return {"results": results}
+```
+
+- [ ] **Step 2: Register all memory tools in definitions.py**
+- [ ] **Step 3: Commit**
+
+```bash
+git add adk_agent/agent_service/app/tools/memory_tools.py adk_agent/agent_service/app/tools/definitions.py
+git commit -m "feat(agent): add memory and session variable tools"
+```
+
+---
+
+### Task 30: Wire Context Builder into main.py
+
+**Files:**
+- Modify: `adk_agent/agent_service/app/main.py`
+
+- [ ] **Step 1: Replace direct instruction building with context_builder**
+
+Replace the instruction + history loading in `stream_handler` with `build_system_context()`. The context builder handles all 4 memory tiers, conversation history, and auto-loaded context.
+
+- [ ] **Step 2: Run full test suite**
+
+```bash
+cd adk_agent/agent_service && python -m pytest tests/ -v
+```
+
+- [ ] **Step 3: Deploy and verify**
+
+```bash
+cd adk_agent/agent_service && make deploy
+```
+
+Test via iOS app: verify conversation continuity, memory saves, and session variables.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add adk_agent/agent_service/app/main.py
+git commit -m "feat(agent): wire 360 view context builder into /stream endpoint"
+```
+
+---
+
+### Task 31: Session Elimination (Phase 3c)
+
+**Files:**
+- Modify: `firebase_functions/functions/strengthos/stream-agent-normalized.js`
+- Delete: `firebase_functions/functions/sessions/` (entire directory)
+- Delete: `Povver/Povver/Services/SessionPreWarmer.swift`
+- Modify: `Povver/Povver/Services/DirectStreamingService.swift`
+- Modify: `firebase_functions/functions/index.js`
+
+- [ ] **Step 1: Read session-related code**
+
+Read:
+- `firebase_functions/functions/sessions/` — list all files, read each
+- `stream-agent-normalized.js` — identify all session logic
+- `DirectStreamingService.swift` — identify session ID handling
+- `index.js` — identify session-related exports
+
+- [ ] **Step 2: Remove session logic from SSE proxy**
+
+In `stream-agent-normalized.js`:
+- Remove `initializeOrReuseSession()` function
+- Remove `agent_sessions` Firestore reads/writes
+- Remove session ID from request to Cloud Run (Cloud Run is stateless)
+- Remove session validation/invalidation logic
+
+- [ ] **Step 3: Delete session Firebase Functions**
+
+```bash
+rm -rf firebase_functions/functions/sessions/
+```
+
+Remove session-related exports from `index.js` (e.g., `initializeSession`, `preWarmSession`, `cleanupSessions`).
+
+- [ ] **Step 4: Delete SessionPreWarmer.swift**
+
+```bash
+rm Povver/Povver/Services/SessionPreWarmer.swift
+```
+
+- [ ] **Step 5: Update DirectStreamingService.swift**
+
+Remove session ID from the SSE request. The service now sends only `conversation_id` and `message` — no session management.
+
+- [ ] **Step 6: Remove SessionPreWarmer references from iOS**
+
+Search for all references to `SessionPreWarmer` in the iOS codebase and remove them. Check:
+- `ChatHomeView` or similar (`.preWarmSession` modifier)
+- `CanvasViewModel` or `WorkoutCoachViewModel`
+- Any `import` statements
+
+- [ ] **Step 7: Delete agent_sessions Firestore collection data**
+
+The `users/{uid}/agent_sessions/` collection is no longer used. Add a note to `docs/FIRESTORE_SCHEMA.md` marking it as deprecated/removed.
+
+- [ ] **Step 8: Build iOS to verify no compilation errors**
+
+```bash
+xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build
+```
+
+- [ ] **Step 9: Run Firebase Functions tests**
+
+```bash
+cd firebase_functions/functions && npm test
+```
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add -A
+git commit -m "feat: Phase 3c — eliminate session management
+
+Removed:
+- SessionPreWarmer.swift (iOS)
+- firebase_functions/functions/sessions/ (all session endpoints)
+- Session logic from SSE proxy (stream-agent-normalized.js)
+- Session ID from DirectStreamingService.swift
+- agent_sessions Firestore collection references
+
+The agent is now fully stateless. Conversation context is loaded
+from Firestore per-request via the context builder."
+```
+
+---
+
+## Chunk 5: Phase 4 (MCP Server) + Phase 5 (Job Queue)
+
+### Task 32: MCP Server Scaffold
+
+**Files:**
+- Create: `mcp_server/package.json`
+- Create: `mcp_server/tsconfig.json`
+- Create: `mcp_server/Dockerfile`
+- Create: `mcp_server/Makefile`
+
+- [ ] **Step 1: Create package.json**
+
+```json
+{
+  "name": "povver-mcp-server",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "node --test dist/tests/*.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "firebase-admin": "^12.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "tsx": "^4.19.0",
+    "@types/node": "^22.0.0"
+  }
+}
+```
+
+- [ ] **Step 2: Create tsconfig.json**
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "outDir": "dist",
+    "rootDir": "src",
+    "strict": true,
+    "esModuleInterop": true,
+    "declaration": true
+  },
+  "include": ["src/**/*"]
+}
+```
+
+- [ ] **Step 3: Create Dockerfile**
+
+```dockerfile
+FROM --platform=linux/amd64 node:20-slim
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --production
+
+COPY dist/ dist/
+
+# Import shared modules from Firebase Functions
+COPY shared/ shared/
+
+CMD ["node", "dist/index.js"]
+```
+
+- [ ] **Step 4: Create Makefile**
+
+```makefile
+.PHONY: help install build test dev deploy
+
+PROJECT_ID ?= myon-53d85
+REGION ?= us-central1
+SERVICE_NAME ?= mcp-server
+
+help:
+	@echo "MCP Server"
+	@echo "=========="
+	@echo "  make install  - Install dependencies"
+	@echo "  make build    - Build TypeScript"
+	@echo "  make test     - Run tests"
+	@echo "  make dev      - Run locally"
+	@echo "  make deploy   - Build + deploy to Cloud Run"
+
+install:
+	npm install
+
+build:
+	npm run build
+
+test:
+	npm run build && npm test
+
+dev:
+	npm run dev
+
+deploy: build
+	cp -r ../firebase_functions/functions/shared shared/
+	gcloud builds submit --tag gcr.io/$(PROJECT_ID)/$(SERVICE_NAME):latest --project=$(PROJECT_ID)
+	gcloud run deploy $(SERVICE_NAME) \
+		--image gcr.io/$(PROJECT_ID)/$(SERVICE_NAME):latest \
+		--region $(REGION) \
+		--platform managed \
+		--allow-unauthenticated \
+		--memory 256Mi \
+		--cpu 1 \
+		--min-instances 0 \
+		--max-instances 5 \
+		--timeout 60
+	rm -rf shared/
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add mcp_server/
+git commit -m "feat(mcp): scaffold MCP server project"
+```
+
+---
+
+### Task 33: MCP Authentication
+
+**Files:**
+- Create: `mcp_server/src/auth.ts`
+- Test: `mcp_server/src/tests/auth.test.ts`
+
+- [ ] **Step 1: Write auth module**
+
+```typescript
+// src/auth.ts
+import { createHash } from 'crypto';
+import admin from 'firebase-admin';
+
+if (!admin.apps.length) {
+  admin.initializeApp();
+}
+
+const db = admin.firestore();
+
+export interface AuthResult {
+  userId: string;
+  keyName: string;
+}
+
+export async function authenticateApiKey(apiKey: string): Promise<AuthResult> {
+  const keyHash = createHash('sha256').update(apiKey).digest('hex');
+  const doc = await db.doc(`mcp_api_keys/${keyHash}`).get();
+
+  if (!doc.exists) {
+    throw new Error('Invalid API key');
+  }
+
+  const data = doc.data()!;
+
+  // Check premium status
+  const userDoc = await db.doc(`users/${data.user_id}`).get();
+  if (!userDoc.exists) {
+    throw new Error('User not found');
+  }
+
+  const userData = userDoc.data()!;
+  if (!userData.subscription_status?.is_premium) {
+    throw new Error('Premium subscription required for MCP access');
+  }
+
+  // Update last_used_at
+  await doc.ref.update({ last_used_at: admin.firestore.FieldValue.serverTimestamp() });
+
+  return { userId: data.user_id, keyName: data.name || 'default' };
+}
+```
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add mcp_server/src/auth.ts
+git commit -m "feat(mcp): add API key authentication with premium validation"
+```
+
+---
+
+### Task 34: MCP Tool Definitions + Server
+
+**Files:**
+- Create: `mcp_server/src/tools.ts`
+- Create: `mcp_server/src/index.ts`
+
+- [ ] **Step 1: Write tools.ts**
+
+Import shared business logic modules and expose as MCP tools:
+
+```typescript
+// src/tools.ts
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import admin from 'firebase-admin';
+
+// Import shared business logic (copied into build context)
+const routines = require('../../shared/routines');
+const templates = require('../../shared/templates');
+const workouts = require('../../shared/workouts');
+const exercises = require('../../shared/exercises');
+const trainingQueries = require('../../shared/training-queries');
+const planningContext = require('../../shared/planning-context');
+
+const db = admin.firestore();
+
+export function registerTools(server: McpServer, userId: string) {
+  // Read tools
+  server.tool('get_training_snapshot', 'Get user training snapshot', {},
+    async () => {
+      const ctx = await planningContext.getPlanningContext(db, userId);
+      return { content: [{ type: 'text', text: JSON.stringify(ctx, null, 2) }] };
+    }
+  );
+
+  server.tool('list_routines', 'List all routines', {},
+    async () => {
+      const items = await routines.listRoutines(db, userId);
+      return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
+    }
+  );
+
+  server.tool('get_routine', 'Get a specific routine', {
+    routine_id: { type: 'string', description: 'Routine ID' }
+  }, async ({ routine_id }) => {
+    const routine = await routines.getRoutine(db, userId, routine_id);
+    return { content: [{ type: 'text', text: JSON.stringify(routine, null, 2) }] };
+  });
+
+  // --- Templates ---
+  server.tool('list_templates', 'List all workout templates', {},
+    async () => {
+      const items = await templates.listTemplates(db, userId);
+      return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
+    }
+  );
+
+  server.tool('get_template', 'Get a specific template', {
+    template_id: { type: 'string', description: 'Template ID' }
+  }, async ({ template_id }) => {
+    const tmpl = await templates.getTemplate(db, userId, template_id);
+    return { content: [{ type: 'text', text: JSON.stringify(tmpl, null, 2) }] };
+  });
+
+  // --- Workouts ---
+  server.tool('list_workouts', 'List recent workouts', {
+    limit: { type: 'number', description: 'Max results (default 20)', default: 20 }
+  }, async ({ limit }) => {
+    const items = await workouts.listWorkouts(db, userId, { limit: limit || 20 });
+    return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
+  });
+
+  server.tool('get_workout', 'Get a specific workout', {
+    workout_id: { type: 'string', description: 'Workout ID' }
+  }, async ({ workout_id }) => {
+    const w = await workouts.getWorkout(db, userId, workout_id);
+    return { content: [{ type: 'text', text: JSON.stringify(w, null, 2) }] };
+  });
+
+  // --- Exercises ---
+  server.tool('search_exercises', 'Search exercise catalog', {
+    query: { type: 'string', description: 'Search query' },
+    limit: { type: 'number', description: 'Max results', default: 10 }
+  }, async ({ query, limit }) => {
+    const items = await exercises.searchExercises(db, query, { limit: limit || 10 });
+    return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
+  });
+
+  // --- Training Analysis ---
+  server.tool('get_training_analysis', 'Get training analysis insights', {
+    sections: { type: 'array', items: { type: 'string' }, description: 'Sections to include', optional: true }
+  }, async ({ sections }) => {
+    const analysis = await trainingQueries.getAnalysisSummary(db, userId, { sections });
+    return { content: [{ type: 'text', text: JSON.stringify(analysis, null, 2) }] };
+  });
+
+  server.tool('get_muscle_group_progress', 'Get muscle group progress over time', {
+    group: { type: 'string', description: 'Muscle group name' },
+    weeks: { type: 'number', description: 'Number of weeks', default: 8 }
+  }, async ({ group, weeks }) => {
+    const data = await trainingQueries.getMuscleGroupSummary(db, userId, { group, weeks: weeks || 8 });
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+  });
+
+  server.tool('get_exercise_progress', 'Get exercise progress over time', {
+    exercise: { type: 'string', description: 'Exercise name' },
+    weeks: { type: 'number', description: 'Number of weeks', default: 8 }
+  }, async ({ exercise, weeks }) => {
+    const data = await trainingQueries.getExerciseSummary(db, userId, { exercise, weeks: weeks || 8 });
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+  });
+
+  server.tool('query_sets', 'Query raw set-level training data', {
+    target: { type: 'object', description: 'Target filter (exercise, muscle_group, or muscle)' },
+    limit: { type: 'number', description: 'Max results', default: 50 }
+  }, async ({ target, limit }) => {
+    const data = await trainingQueries.querySets(db, userId, { target, limit: limit || 50 });
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+  });
+
+  // --- Write Tools ---
+  server.tool('create_routine', 'Create a new routine', {
+    name: { type: 'string', description: 'Routine name' },
+    template_ids: { type: 'array', items: { type: 'string' }, description: 'Template IDs' },
+    frequency: { type: 'number', description: 'Days per week', optional: true }
+  }, async (args) => {
+    const routine = await routines.createRoutine(db, userId, args);
+    return { content: [{ type: 'text', text: JSON.stringify(routine, null, 2) }] };
+  });
+
+  server.tool('update_routine', 'Update an existing routine', {
+    routine_id: { type: 'string', description: 'Routine ID' },
+    updates: { type: 'object', description: 'Fields to update' }
+  }, async ({ routine_id, updates }) => {
+    const routine = await routines.patchRoutine(db, userId, routine_id, updates);
+    return { content: [{ type: 'text', text: JSON.stringify(routine, null, 2) }] };
+  });
+
+  server.tool('create_template', 'Create a new workout template', {
+    name: { type: 'string', description: 'Template name' },
+    exercises: { type: 'array', description: 'Exercise list with sets' }
+  }, async (args) => {
+    const tmpl = await templates.createTemplate(db, userId, args);
+    return { content: [{ type: 'text', text: JSON.stringify(tmpl, null, 2) }] };
+  });
+
+  server.tool('update_template', 'Update an existing template', {
+    template_id: { type: 'string', description: 'Template ID' },
+    updates: { type: 'object', description: 'Fields to update' }
+  }, async ({ template_id, updates }) => {
+    const tmpl = await templates.patchTemplate(db, userId, template_id, updates);
+    return { content: [{ type: 'text', text: JSON.stringify(tmpl, null, 2) }] };
+  });
+
+  // --- Memory (read-only via MCP) ---
+  server.tool('list_memories', 'List agent memories about the user', {},
+    async () => {
+      const memSnap = await db.collection(`users/${userId}/agent_memory`)
+        .where('active', '==', true)
+        .orderBy('created_at', 'desc')
+        .limit(50)
+        .get();
+      const memories = memSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      return { content: [{ type: 'text', text: JSON.stringify(memories, null, 2) }] };
+    }
+  );
+}
+```
+
+- [ ] **Step 2: Write index.ts (server entry)**
+
+```typescript
+// src/index.ts
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { createServer } from 'http';
+import { authenticateApiKey } from './auth.js';
+import { registerTools } from './tools.js';
+
+const PORT = parseInt(process.env.PORT || '8080');
+
+const httpServer = createServer(async (req, res) => {
+  if (req.method === 'GET' && req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok' }));
+    return;
+  }
+
+  // Extract API key from Authorization header
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) {
+    res.writeHead(401, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Missing API key' }));
+    return;
+  }
+
+  const apiKey = authHeader.slice(7);
+
+  try {
+    const auth = await authenticateApiKey(apiKey);
+
+    const server = new McpServer({ name: 'povver', version: '1.0.0' });
+    registerTools(server, auth.userId);
+
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    await server.connect(transport);
+    await transport.handleRequest(req, res);
+  } catch (e: any) {
+    res.writeHead(e.message === 'Premium subscription required for MCP access' ? 403 : 401);
+    res.end(JSON.stringify({ error: e.message }));
+  }
+});
+
+httpServer.listen(PORT, () => {
+  console.log(`MCP server listening on port ${PORT}`);
+});
+```
+
+- [ ] **Step 3: Build and test locally**
+
+```bash
+cd mcp_server && npm install && npm run build
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add mcp_server/src/
+git commit -m "feat(mcp): add MCP server with Streamable HTTP transport and shared tools"
+```
+
+---
+
+### Task 35: iOS — API Key Generation UI
+
+**Files:**
+- Create: `Povver/Povver/Views/Settings/ConnectedAppsView.swift`
+- Modify: Settings navigation to include Connected Apps
+
+- [ ] **Step 1: Create ConnectedAppsView**
+
+Premium-gated view with:
+- "Generate API Key" button (shows key once, copies to clipboard)
+- List of existing keys (name, created_at, last_used_at)
+- Revoke button per key
+- Instructions for connecting Claude Desktop / ChatGPT
+
+Key generation goes through a Firebase Function (not client-side Firestore write), because `mcp_api_keys` is server-only:
+
+1. iOS calls `POST /generateMcpApiKey` with `{ name: "My Key" }`
+2. Firebase Function generates random 32-byte key, SHA-256 hashes it
+3. Function writes to `mcp_api_keys/{hash}` via Admin SDK
+4. Function returns the raw key to the client (shown once, never stored server-side)
+5. iOS displays key for user to copy
+
+Listing/revoking keys: Firebase Function endpoint queries `mcp_api_keys` by `user_id`.
+
+- [ ] **Step 1b: Create Firebase Function for key management**
+
+Create `firebase_functions/functions/mcp/generate-api-key.js` and `firebase_functions/functions/mcp/list-api-keys.js` and `firebase_functions/functions/mcp/revoke-api-key.js`. Use `requireAuth` (iOS-only, not API key lane). Premium gate via `isPremiumUser`.
+
+- [ ] **Step 2: Add Firestore rules for mcp_api_keys**
+
+Add to `firestore.rules`:
+```
+match /mcp_api_keys/{keyHash} {
+  // Server-only (Admin SDK) — no client reads/writes
+  allow read, write: if false;
+}
+```
+
+- [ ] **Step 3: Add navigation link from Settings**
+- [ ] **Step 4: Build and test**
+
+```bash
+xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add Povver/Povver/Views/Settings/ConnectedAppsView.swift
+git commit -m "feat(ios): add Connected Apps settings for MCP API key management"
+```
+
+---
+
+### Task 36: MCP Deploy + Verification
+
+- [ ] **Step 1: Deploy MCP server**
+
+```bash
+cd mcp_server && make deploy
+```
+
+- [ ] **Step 2: Test with Claude Desktop**
+
+Generate an API key via the iOS app. Configure Claude Desktop:
+```json
+{
+  "mcpServers": {
+    "povver": {
+      "url": "https://mcp-server-HASH-uc.a.run.app",
+      "headers": {
+        "Authorization": "Bearer YOUR_API_KEY"
+      }
+    }
+  }
+}
+```
+
+Verify: list routines, get training snapshot, search exercises.
+
+- [ ] **Step 3: Update documentation**
+
+Create `docs/MCP_SERVER_ARCHITECTURE.md` documenting the MCP server.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add -A
+git commit -m "feat: complete Phase 4 — MCP server for external LLM access"
+```
+
+---
+
+### Task 37: Workout Completion Worker Scaffold (Phase 5)
+
+**Files:**
+- Create: `adk_agent/workout_completion_worker/` (full directory structure)
+
+- [ ] **Step 1: Create project files**
+
+Follow the training_analyst pattern exactly:
+- `requirements.txt` — `google-cloud-firestore`, `google-cloud-logging`
+- `Dockerfile` — same pattern as training_analyst
+- `Makefile` — install, test, worker-local, deploy, trigger
+- `cloud-run-worker.yaml` — Cloud Run Job config
+- `app/__init__.py`, `app/config.py`, `app/firestore_client.py`
+- `app/jobs/models.py`, `app/jobs/queue.py` — copy pattern from training_analyst
+- `workers/completion_worker.py` — main entry point
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add adk_agent/workout_completion_worker/
+git commit -m "feat(worker): scaffold workout completion worker"
+```
+
+---
+
+### Task 38: Workout Completion Processor
+
+**Files:**
+- Create: `adk_agent/workout_completion_worker/app/processor.py`
+- Test: `adk_agent/workout_completion_worker/tests/test_processor.py`
+
+- [ ] **Step 1: Write the failing test**
+
+```python
+# tests/test_processor.py
+import pytest
+from unittest.mock import MagicMock, AsyncMock, patch
+from app.processor import generate_set_facts, process_workout_completion
+
+
+def test_generate_set_facts_from_workout():
+    """set_facts are generated from workout exercises and sets."""
+    workout = {
+        "exercises": [
+            {
+                "exercise_id": "e1", "exercise_name": "Bench Press",
+                "muscle_group": "chest",
+                "sets": [
+                    {"reps": 8, "weight_kg": 80, "completed": True},
+                    {"reps": 6, "weight_kg": 85, "completed": True},
+                ]
+            }
+        ],
+        "start_time": "2026-03-15T10:00:00Z",
+        "end_time": "2026-03-15T11:00:00Z",
+    }
+    facts = generate_set_facts(workout, "w1", "u1")
+    assert len(facts) == 2
+    assert facts[0]["exercise_name"] == "Bench Press"
+    assert facts[0]["reps"] == 8
+    assert facts[0]["weight_kg"] == 80
+    assert facts[0]["workout_id"] == "w1"
+    assert facts[0]["user_id"] == "u1"
+    assert "e1rm" in facts[0]  # Estimated 1RM should be calculated
+
+
+def test_generate_set_facts_skips_incomplete_sets():
+    """Only completed sets generate set_facts."""
+    workout = {
+        "exercises": [{
+            "exercise_id": "e1", "exercise_name": "Squat",
+            "muscle_group": "quads",
+            "sets": [
+                {"reps": 5, "weight_kg": 100, "completed": True},
+                {"reps": 0, "weight_kg": 100, "completed": False},
+            ]
+        }],
+        "start_time": "2026-03-15T10:00:00Z",
+        "end_time": "2026-03-15T11:00:00Z",
+    }
+    facts = generate_set_facts(workout, "w1", "u1")
+    assert len(facts) == 1
+
+
+@pytest.mark.asyncio
+async def test_process_workout_writes_all_collections():
+    """Full processing pipeline writes to all expected collections."""
+    mock_db = AsyncMock()
+    mock_workout_doc = AsyncMock()
+    mock_workout_doc.exists = True
+    mock_workout_doc.to_dict.return_value = {
+        "exercises": [{
+            "exercise_id": "e1", "exercise_name": "Bench",
+            "muscle_group": "chest", "muscles": ["pectorals"],
+            "sets": [{"reps": 8, "weight_kg": 80, "completed": True}]
+        }],
+        "start_time": "2026-03-15T10:00:00Z",
+        "end_time": "2026-03-15T11:00:00Z",
+    }
+    mock_db.document.return_value.get = AsyncMock(return_value=mock_workout_doc)
+    mock_batch = MagicMock()
+    mock_batch.commit = AsyncMock()
+    mock_db.batch.return_value = mock_batch
+
+    await process_workout_completion(mock_db, "u1", "w1")
+
+    # Verify batch.set was called for set_facts
+    assert mock_batch.set.call_count >= 1
+    # Verify batch.commit was called
+    mock_batch.commit.assert_called_once()
+```
+
+- [ ] **Step 2: Write processor**
+
+Read `firebase_functions/functions/triggers/weekly-analytics.js` (`onWorkoutCompleted` function, ~300 lines) to understand every step. Port the logic to Python:
+
+```python
+# app/processor.py
+"""Workout completion processor — atomic post-workout data pipeline.
+
+Replaces the trigger cascade from weekly-analytics.js with atomic
+sequential processing in a worker.
+"""
+
+from __future__ import annotations
+
+import logging
+from google.cloud import firestore
+
+logger = logging.getLogger(__name__)
+
+
+async def process_workout_completion(db, user_id: str, workout_id: str):
+    """Process a completed workout atomically.
+
+    Steps (must all succeed or none):
+    1. Load workout data
+    2. Generate set_facts from workout sets
+    3. Update exercise series (per-exercise daily data points)
+    4. Update muscle_group series
+    5. Update muscle series
+    6. Update rollups (volume, sets, reps aggregates)
+    7. Update weekly_stats
+    8. Update exercise_usage_stats
+    9. Update watermark
+    10. Enqueue training analysis (if premium)
+    """
+    workout_doc = await db.document(f"users/{user_id}/workouts/{workout_id}").get()
+    if not workout_doc.exists:
+        logger.error("Workout %s not found for user %s", workout_id, user_id)
+        return
+
+    workout = workout_doc.to_dict()
+
+    # Derive date keys
+    workout_date = workout.get("start_time", "")[:10]  # YYYY-MM-DD
+    from datetime import datetime
+    dt = datetime.fromisoformat(workout_date)
+    # ISO week key: YYYY-WNN
+    week_key = f"{dt.isocalendar()[0]}-W{dt.isocalendar()[1]:02d}"
+
+    # Step 1: Generate set_facts
+    set_facts = generate_set_facts(workout, workout_id, user_id)
+    batch = db.batch()
+    for sf in set_facts:
+        ref = db.collection(f"users/{user_id}/set_facts").document()
+        batch.set(ref, sf)
+
+    # Step 2: Update exercise series (per-exercise daily data points)
+    # Port from: utils/analytics-writes.js → appendExerciseSeries()
+    # For each exercise in workout, upsert a document in exercise_series
+    # with date, exercise_name, total_volume, best_e1rm, set_count
+    for exercise in workout.get("exercises", []):
+        ex_ref = db.collection(f"users/{user_id}/exercise_series").document(
+            f"{exercise['exercise_id']}_{workout_date}"
+        )
+        batch.set(ex_ref, _build_exercise_series_entry(exercise, workout_date), merge=True)
+
+    # Step 3: Update muscle_group series
+    # Port from: utils/analytics-writes.js → appendMuscleSeries()
+    # Aggregate volume per muscle group, upsert weekly data point
+    muscle_group_volumes = _aggregate_muscle_group_volumes(workout)
+    for group, volume_data in muscle_group_volumes.items():
+        mg_ref = db.collection(f"users/{user_id}/muscle_group_series").document(
+            f"{group}_{week_key}"
+        )
+        batch.set(mg_ref, volume_data, merge=True)
+
+    # Step 4: Update muscle series (individual muscles)
+    muscle_volumes = _aggregate_muscle_volumes(workout)
+    for muscle, volume_data in muscle_volumes.items():
+        m_ref = db.collection(f"users/{user_id}/muscle_series").document(
+            f"{muscle}_{week_key}"
+        )
+        batch.set(m_ref, volume_data, merge=True)
+
+    # Step 5: Update rollups (all-time aggregates)
+    # Port from: utils/analytics-writes.js → upsertRollup()
+    rollup_ref = db.document(f"users/{user_id}/rollups/all_time")
+    batch.set(rollup_ref, _build_rollup_update(workout, set_facts), merge=True)
+
+    # Step 6: Update weekly_stats
+    # Port from: weekly-analytics.js → updateWeeklyStats()
+    stats_ref = db.document(f"users/{user_id}/weekly_stats/{week_key}")
+    batch.set(stats_ref, _build_weekly_stats_update(workout, set_facts), merge=True)
+
+    # Step 7: Update exercise_usage_stats
+    for exercise in workout.get("exercises", []):
+        usage_ref = db.document(f"users/{user_id}/exercise_usage_stats/{exercise['exercise_id']}")
+        batch.set(usage_ref, {
+            "last_used": workout_date,
+            "total_sets": firestore.Increment(len(exercise.get("sets", []))),
+        }, merge=True)
+
+    # Step 8: Update watermark
+    wm_ref = db.document(f"users/{user_id}/watermarks/analytics")
+    batch.set(wm_ref, {"last_processed_workout": workout_id, "processed_at": _utcnow()}, merge=True)
+
+    # Step 9: Enqueue training analysis (if premium)
+    # Check user subscription, create training_analysis_jobs entry
+    user_doc = await db.document(f"users/{user_id}").get()
+    if user_doc.exists and user_doc.to_dict().get("subscription_status", {}).get("is_premium"):
+        analysis_ref = db.collection("training_analysis_jobs").document()
+        batch.set(analysis_ref, {
+            "type": "POST_WORKOUT",
+            "status": "QUEUED",
+            "payload": {"user_id": user_id, "workout_id": workout_id},
+            "created_at": _utcnow(),
+        })
+
+    await batch.commit()
+    logger.info("Processed workout %s for user %s: %d set_facts", workout_id, user_id, len(set_facts))
+
+
+def generate_set_facts(workout: dict, workout_id: str, user_id: str) -> list[dict]:
+    """Generate set_facts from a completed workout.
+
+    Port from: training/set-facts-generator.js
+    Each completed set becomes a set_fact with computed e1RM.
+    """
+    facts = []
+    workout_date = workout.get("start_time", "")[:10]
+    for exercise in workout.get("exercises", []):
+        for i, s in enumerate(exercise.get("sets", [])):
+            if not s.get("completed", False):
+                continue
+            reps = s.get("reps", 0)
+            weight = s.get("weight_kg", 0)
+            e1rm = weight * (1 + reps / 30) if reps > 0 and weight > 0 else 0
+            facts.append({
+                "user_id": user_id,
+                "workout_id": workout_id,
+                "exercise_id": exercise.get("exercise_id"),
+                "exercise_name": exercise.get("exercise_name"),
+                "muscle_group": exercise.get("muscle_group"),
+                "muscles": exercise.get("muscles", []),
+                "set_index": i,
+                "reps": reps,
+                "weight_kg": weight,
+                "e1rm": round(e1rm, 1),
+                "volume": round(reps * weight, 1),
+                "date": workout_date,
+            })
+    return facts
+```
+
+The full implementation will port each step from `weekly-analytics.js`. Key references:
+- `training/set-facts-generator.js` — set_facts generation logic
+- `utils/analytics-writes.js` — rollup, series, watermark writes
+- `utils/analytics-calculator.js` — volume/intensity calculations
+- `utils/muscle-taxonomy.js` — exercise → muscle mapping
+
+- [ ] **Step 3: Run tests — expect PASS**
+- [ ] **Step 4: Commit**
+
+```bash
+git add adk_agent/workout_completion_worker/app/processor.py adk_agent/workout_completion_worker/tests/
+git commit -m "feat(worker): implement workout completion processor"
+```
+
+---
+
+### Task 39: Simplify Workout Completion Trigger
+
+**Files:**
+- Modify: `firebase_functions/functions/triggers/weekly-analytics.js`
+- Modify: `firebase_functions/functions/index.js`
+
+- [ ] **Step 1: Read the current trigger in full**
+
+Read `firebase_functions/functions/triggers/weekly-analytics.js`.
+
+- [ ] **Step 2: Replace onWorkoutCompleted with job enqueue**
+
+```javascript
+// Replace the massive onWorkoutCompleted with a simple job enqueue
+exports.onWorkoutCompleted = onDocumentUpdated(
+  "users/{userId}/workouts/{workoutId}",
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+
+    // Only fire when end_time is added (workout completed)
+    if (!after.end_time || before.end_time) return;
+
+    await db.collection("workout_completion_jobs").add({
+      user_id: event.params.userId,
+      workout_id: event.params.workoutId,
+      status: "pending",
+      created_at: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    logger.info("Enqueued workout completion job", {
+      userId: event.params.userId,
+      workoutId: event.params.workoutId,
+    });
+  }
+);
+```
+
+- [ ] **Step 3: Keep onWorkoutDeleted** — deletion analytics can stay as a trigger (simpler, less frequent)
+- [ ] **Step 4: Keep weeklyStatsRecalculation** — scheduled job stays unchanged
+- [ ] **Step 5: Add onCreate trigger for job dispatch**
+
+```javascript
+// New trigger: dispatch Cloud Run Job when a completion job is created
+const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+
+exports.onWorkoutCompletionJobCreated = onDocumentCreated(
+  "workout_completion_jobs/{jobId}",
+  async (event) => {
+    // Execute the Cloud Run Job
+    const { v2 } = require('@google-cloud/run');
+    const runClient = new v2.JobsClient();
+
+    const jobName = `projects/myon-53d85/locations/us-central1/jobs/workout-completion-worker`;
+
+    try {
+      const [operation] = await runClient.runJob({ name: jobName });
+      logger.info("Triggered workout completion worker", {
+        jobId: event.params.jobId,
+        operation: operation.name,
+      });
+    } catch (err) {
+      logger.error("Failed to trigger workout completion worker", {
+        jobId: event.params.jobId,
+        error: err.message,
+      });
+      // Job stays in 'pending' — worker will pick it up on next scheduled run
+    }
+  }
+);
+```
+
+Note: The Cloud Run Job (`workout-completion-worker`) also runs on a 15-minute schedule (like the training analyst) as a fallback, so even if the trigger fails, pending jobs will be picked up.
+
+- [ ] **Step 6: Run tests**
+
+```bash
+cd firebase_functions/functions && npm test
+```
+
+- [ ] **Step 7: Deploy and verify**
+- [ ] **Step 8: Commit**
+
+```bash
+git add firebase_functions/functions/triggers/weekly-analytics.js firebase_functions/functions/index.js
+git commit -m "feat: Phase 5 — replace trigger cascade with job queue
+
+onWorkoutCompleted now enqueues a single job to workout_completion_jobs.
+The workout completion worker processes atomically with lease-based
+concurrency. No partial state, no contention, observable queue."
+```
+
+---
+
+## Chunk 6: Phase 6 (Training Analyst) + Phase 7 (iOS Cleanup)
+
+### Task 40: Training Analyst — New Analysis Sections (Phase 6)
+
+**Files:**
+- Modify: `adk_agent/training_analyst/app/analyzers/post_workout.py`
+- Modify: `adk_agent/training_analyst/app/analyzers/weekly_review.py`
+- Create: `adk_agent/training_analyst/app/analyzers/plateau_detector.py`
+- Create: `adk_agent/training_analyst/app/analyzers/volume_optimizer.py`
+
+- [ ] **Step 1: Read existing analyzers**
+
+Read `adk_agent/training_analyst/app/analyzers/post_workout.py` and `weekly_review.py` to understand the pattern.
+
+- [ ] **Step 2: Add plateau_detector.py**
+
+New analyzer. Reads `users/{uid}/exercise_series` for the last 4 weeks. An exercise is "plateaued" if its best e1RM has not increased for 3+ consecutive weeks with at least 2 data points per week.
+
+```python
+# app/analyzers/plateau_detector.py
+"""Plateau detection — identifies stalled exercises."""
+
+async def detect_plateaus(db, user_id: str) -> list[dict]:
+    """Returns list of plateaued exercises with suggested interventions."""
+    # Read exercise_series for last 4 weeks
+    # Group by exercise_name, check if best_e1rm is flat/declining
+    # Return: [{ exercise_name, weeks_stalled, last_e1rm, suggested_action }]
+    # suggested_action is one of: "increase_volume", "change_rep_range", "add_variation"
+```
+
+Output written to: `users/{uid}/analysis_insights/{autoId}` with `section: "plateau_report"`.
+
+- [ ] **Step 3: Add volume_optimizer.py**
+
+New analyzer. Reads `users/{uid}/muscle_group_series` for the last 2 weeks and compares against known MEV/MRV ranges per muscle group.
+
+```python
+# app/analyzers/volume_optimizer.py
+"""Volume optimization — actual vs target per muscle group."""
+
+# MEV/MRV reference ranges (sets per week)
+VOLUME_TARGETS = {
+    "chest": {"mev": 10, "mrv": 20},
+    "back": {"mev": 10, "mrv": 22},
+    "quads": {"mev": 8, "mrv": 18},
+    # ... all muscle groups
+}
+
+async def analyze_volume(db, user_id: str) -> dict:
+    """Returns per-muscle actual vs target with surplus/deficit flags."""
+    # Read muscle_group_series for last 2 weeks, average weekly sets
+    # Compare against VOLUME_TARGETS
+    # Return: { muscle_group: { actual_sets, mev, mrv, status: "deficit"|"optimal"|"surplus" } }
+```
+
+Output written to: `users/{uid}/analysis_insights/{autoId}` with `section: "volume_optimization"`.
+
+- [ ] **Step 4: Enhance post_workout.py**
+
+Add `progression_candidates` section. After post-workout analysis, check if any exercises in the workout hit target reps with RIR >= 2 (indicating ready for weight increase). Read the exercise's recent series to confirm trend.
+
+Output shape: `{ "progression_candidates": [{ "exercise_name": "Bench Press", "current_weight": 80, "suggested_weight": 82.5, "reason": "Hit 8 reps at RPE 7 for 2 consecutive sessions" }] }`
+
+- [ ] **Step 5: Enhance weekly_review.py**
+
+Add two new sections:
+
+**`periodization_status`:** Calculate Acute:Chronic Workload Ratio (ACWR) using weekly volume over 4-week acute and 8-week chronic windows. Flag if ACWR > 1.3 (injury risk) or < 0.8 (detraining). Suggest deload if ACWR > 1.2 for 2+ consecutive weeks.
+
+**`consistency_trends`:** Count training sessions per week over 4/8/12 week windows. Flag "dropout risk" if frequency has declined for 3+ consecutive weeks. Output: `{ "weeks_4": 3.5, "weeks_8": 3.2, "weeks_12": 2.8, "trend": "declining", "risk": "moderate" }`
+
+- [ ] **Step 5b: Wire new sections into context_builder.py**
+
+Update `adk_agent/agent_service/app/context_builder.py` to load the latest plateau_report, volume_optimization, and periodization_status from `analysis_insights` and include them in the "Active Alerts" section of the auto-loaded system context.
+
+- [ ] **Step 6: Run tests**
+
+```bash
+cd adk_agent/training_analyst && python -m pytest tests/ -v
+```
+
+- [ ] **Step 7: Deploy**
+
+```bash
+cd adk_agent/training_analyst && make deploy
+```
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add adk_agent/training_analyst/
+git commit -m "feat(analyst): Phase 6 — add plateau, volume, periodization, consistency sections"
+```
+
+---
+
+### Task 41: iOS Cleanup (Phase 7)
+
+**Files:**
+- Modify: Various iOS files
+
+- [ ] **Step 1: Identify oversized files**
+
+Check line counts:
+```bash
+wc -l Povver/Povver/Views/Workouts/FocusModeWorkoutScreen.swift
+wc -l Povver/Povver/Services/ActiveWorkoutManager.swift
+wc -l Povver/Povver/ViewModels/CanvasViewModel.swift
+```
+
+- [ ] **Step 2: Split FocusModeWorkoutScreen.swift** (~1904 lines)
+
+Extract into focused files. Build after each extraction to catch missing references:
+
+```bash
+# After each extraction:
+xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build
+```
+
+Extractions:
+- `FocusModeExerciseSection.swift` — extract the exercise list section (the `ForEach` over exercises with their sets)
+- `FocusModeSetRow.swift` — extract the individual set row view (weight/reps inputs, completion state)
+- `FocusModeRestTimer.swift` — extract the rest timer overlay component
+- `FocusModeWorkoutScreen.swift` — should retain: main layout, navigation, state management
+
+- [ ] **Step 3: Standardize naming**
+
+Run these greps to audit naming inconsistencies:
+```bash
+grep -rn "canvas" Povver/Povver/ --include="*.swift" -i | grep -v ".build/" | grep -v "ARCHITECTURE"
+grep -rn "Canvas" Povver/Povver/ --include="*.swift" | grep -v ".build/" | grep -v "ARCHITECTURE"
+```
+
+Known renames needed (from CLAUDE.md deprecated list):
+- `CanvasRepository.swift` → already deprecated, verify deleted
+- `CanvasViewModel.swift` → rename to `ConversationViewModel.swift` if it manages chat state
+- `CanvasService.swift` → rename to `ConversationService.swift` if it manages conversations
+- `CanvasDTOs.swift` → rename to `ConversationDTOs.swift`
+- `CanvasActions.swift` → rename to `ConversationActions.swift`
+
+For each rename, use Xcode's "Rename" refactoring to update all references, or manually search-and-replace. Build after each rename.
+
+- [ ] **Step 4: Remove dead code**
+
+Search for and remove references to deprecated patterns:
+```bash
+grep -rn "agent_sessions\|AGENT_VERSION\|SessionPreWarmer\|preWarmSession\|CanvasRepository" Povver/Povver/ --include="*.swift"
+```
+
+Remove any matches that are still present after Phase 3c cleanup.
+
+- [ ] **Step 5: Build to verify**
+
+```bash
+xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add Povver/
+git commit -m "refactor(ios): Phase 7 — split oversized files, standardize naming, remove dead code"
+```
+
+---
+
+### Task 42: Final Documentation Update
+
+**Files:**
+- Modify: `docs/SYSTEM_ARCHITECTURE.md`
+- Modify: `docs/FIREBASE_FUNCTIONS_ARCHITECTURE.md`
+- Modify: `docs/SHELL_AGENT_ARCHITECTURE.md`
+- Modify: `docs/IOS_ARCHITECTURE.md`
+- Modify: `docs/FIRESTORE_SCHEMA.md`
+- Create: `docs/MCP_SERVER_ARCHITECTURE.md`
+
+- [ ] **Step 1: Update SYSTEM_ARCHITECTURE.md**
+
+Add: shared business logic layer, Cloud Run agent service, MCP server, workout completion worker. Update architecture diagrams. Remove Vertex AI Agent Engine references.
+
+- [ ] **Step 2: Update FIREBASE_FUNCTIONS_ARCHITECTURE.md**
+
+Document shared/ modules, thin handler pattern, simplified triggers.
+
+- [ ] **Step 3: Update SHELL_AGENT_ARCHITECTURE.md**
+
+Rename or replace with `AGENT_SERVICE_ARCHITECTURE.md`. Document: Cloud Run deployment, LLM client abstraction, agent loop, memory system, 4-lane router, observability.
+
+- [ ] **Step 4: Update IOS_ARCHITECTURE.md**
+
+Remove session pre-warming, update streaming service docs.
+
+- [ ] **Step 5: Update FIRESTORE_SCHEMA.md**
+
+Add: `agent_memory/{auto-id}`, `mcp_api_keys/{key_hash}`, `workout_completion_jobs/{auto-id}`, conversation `session_vars` and `summary` fields. Mark `agent_sessions` as removed.
+
+- [ ] **Step 5b: Update CLAUDE.md**
+
+Update the Task Startup Sequence to reference `AGENT_SERVICE_ARCHITECTURE.md` instead of `SHELL_AGENT_ARCHITECTURE.md`. Update the Build & Development Commands section with the new `adk_agent/agent_service` commands. Add `mcp_server/` commands. Update the Deprecated section to add Vertex AI Agent Engine and ADK framework.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add docs/
+git commit -m "docs: update all architecture docs for redesigned system"
+```
+
+---
+
+### Task 43: Deferred Scaling Configuration (Reference)
+
+This task is NOT implemented now — it documents what to configure when revenue justifies monthly costs.
+
+**When ready:**
+- `minInstances: 1` on hot-path Firebase Functions (SSE proxy, log-set, get-active-workout)
+- `maxInstances` increase on SSE proxy (20 → 50+)
+- Cloud Run agent service: `min-instances: 1` to eliminate cold starts
+- Cloud Run MCP server: `min-instances: 1` if usage justifies
+- Consider Redis for rate limiting if Firestore-based limiting becomes a bottleneck
+
+No commit needed — this is a reference note in the plan.
