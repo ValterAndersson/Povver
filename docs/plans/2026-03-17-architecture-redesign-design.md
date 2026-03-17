@@ -126,6 +126,8 @@ async function getRoutineHandler(req, res) {
 | `shared/exercises.js` | get, list, search, resolve | Functions, MCP |
 | `shared/training-queries.js` | querySets, aggregateSets, getAnalysisSummary, getMuscleGroupSummary, getExerciseSummary | Functions, MCP |
 | `shared/planning-context.js` | getPlanningContext (user profile + history + routine state + strength summary) | Functions, MCP |
+| `shared/artifacts.js` | getArtifact, acceptArtifact, dismissArtifact, saveRoutineFromArtifact, saveTemplateFromArtifact, startWorkoutFromArtifact | Functions |
+| `shared/progressions.js` | applyProgression, suggestWeightIncrease, suggestDeload (with changelog + recommendation audit trail) | Functions |
 | `shared/errors.js` | ValidationError, NotFoundError, PermissionError | All |
 
 **Note on intentional duplication:** The Python agent service has its own `FirestoreClient` with equivalent query logic for `get_planning_context`, `get_routine`, etc. This is intentional — the Node.js shared modules serve Firebase Functions and MCP; the Python equivalents serve the agent. The Firestore schema is the shared contract. Both implementations read/write the same collections with the same document shapes. This avoids a cross-language dependency while maintaining data consistency.
@@ -135,6 +137,7 @@ async function getRoutineHandler(req, res) {
 - Subscription management — webhook verification, StoreKit sync
 - SSE streaming proxy — iOS transport concern
 - Firestore triggers and scheduled jobs — internal event handling
+- Canvas/conversation management (open, bootstrap, purge) — see conversation lifecycle changes in Section 5
 
 ### Error Contract
 
@@ -267,9 +270,17 @@ class FirestoreClient:
         doc = await self.db.document(f"users/{user_id}/routines/{routine_id}").get()
         if not doc.exists: raise NotFoundError("Routine not found")
         return {"id": doc.id, **doc.to_dict()}
+
+    async def get_active_snapshot_lite(self, user_id: str) -> dict:
+        # Active routine, streak, week summary — lightweight context
+        ...
+
+    async def get_active_events(self, user_id: str, limit: int = 10) -> list:
+        # Recent training events (workout completed, PR achieved, etc.)
+        ...
 ```
 
-Replaces `CanvasFunctionsClient` (HTTP client to Firebase Functions).
+Replaces `CanvasFunctionsClient` (HTTP client to Firebase Functions, 31 methods). All 31 methods are reimplemented as direct Firestore queries except active workout mutations (retained as HTTP).
 
 #### Cloud Run API Contract
 
@@ -280,9 +291,14 @@ Replaces `CanvasFunctionsClient` (HTTP client to Firebase Functions).
 {
   "user_id": "string",
   "conversation_id": "string",
-  "message": "string"
+  "message": "string",
+  "correlation_id": "string",
+  "workout_id": "string | null"
 }
 ```
+
+- `correlation_id` — end-to-end request tracing (proxy generates UUID if iOS doesn't provide one)
+- `workout_id` — present when user has an active workout; enables workout mode context loading
 
 **Auth:** IAM-authenticated. The SSE proxy Firebase Function calls Cloud Run with an identity token (`Authorization: Bearer <id_token>`). The Cloud Run service validates the token via IAM — no custom auth logic needed.
 
@@ -294,10 +310,15 @@ Replaces `CanvasFunctionsClient` (HTTP client to Firebase Functions).
 | `tool_start` | `{ "tool": "get_routine", "call_id": "..." }` | Tool execution began |
 | `tool_end` | `{ "tool": "get_routine", "call_id": "..." }` | Tool execution completed |
 | `artifact` | `{ "type": "routine", "data": {...} }` | Artifact for iOS to render |
+| `clarification` | `{ "question": "...", "options": [...] }` | Safety gate confirmation request |
+| `status` | `{ "text": "..." }` | Non-streamed status update (e.g., "Analyzing your training data...") |
+| `heartbeat` | `{}` | Connection keepalive (every 15s during long tool calls) |
 | `done` | `{}` | Stream complete |
 | `error` | `{ "code": "...", "message": "..." }` | Unrecoverable error |
 
-The SSE proxy relays these events to iOS, applying any event transformation needed (same as today's proxy behavior).
+**Event contract cleanup:** iOS currently handles 15 event types from the ADK/Vertex AI era. This redesign standardizes to 9 types. Dropped types: `thinking`, `thought` (ADK thinking indicators), `toolRunning`/`toolComplete` (renamed to `tool_start`/`tool_end`), `agentResponse` (redundant with `message`), `userPrompt`/`userResponse` (echo events), `pipeline` (ADK pipeline state), `card` (replaced by `artifact`). iOS `StreamEvent.swift` is updated in Phase 7 to match.
+
+The SSE proxy relays these events to iOS with no transformation — the Cloud Run agent emits the exact format iOS expects.
 
 #### Cloud Run Deployment
 
@@ -316,6 +337,7 @@ Every skill is refactored, not just moved:
 | `coach_skills.py` | HTTP to Firebase analysis endpoints | Direct Firestore queries | Same query logic, no HTTP serialization overhead |
 | `planner_skills.py` | Returns artifact data in SkillResult | Writes artifact to `conversations/{id}/artifacts` + yields SSE event | More explicit, no proxy-side artifact detection |
 | `workout_skills.py` | Singleton HTTP client (`_client_instance`) | Injected `FirestoreClient` | No singleton, no module-level state |
+| `progression_skills.py` | HTTP POST to `applyProgression` Firebase Function | HTTP POST retained | Background progression (auto-apply, deload). Uses `MYON_API_KEY`. Called by agent for user-requested changes, by training analyst for automated progressions. |
 | `tools.py` | ContextVar workarounds for ADK threads | Context passed as function args | Simpler, no ContextVar needed |
 | `gated_planner.py` | Reads ContextVar for confirmation | Reads message from function args | Same logic, simpler implementation |
 
@@ -332,13 +354,17 @@ The instruction (`instruction.py`, ~700 lines) is refactored:
 
 ### SSE Proxy Changes
 
-`stream-agent-normalized.js` changes minimally:
+`stream-agent-normalized.js` changes:
 
 - Calls Cloud Run agent service instead of Vertex AI Agent Engine `:streamQuery`
 - Token exchange simplifies (Cloud Run IAM auth, not Vertex AI session auth)
-- Session creation/reuse logic removed
-- Event transformation stays the same (Cloud Run service emits the same SSE event format)
+- Session creation/reuse logic removed entirely
+- Event relay simplifies (Cloud Run emits the 9-event contract directly, no transformation needed)
 - Auth, premium gate, rate limiting all stay in the proxy
+
+**Conversation initialization moves into the proxy:** The proxy now handles `conversation_id` resolution. If iOS sends no `conversation_id` (new chat), the proxy creates a `conversations/{id}` document and includes the ID in the Cloud Run request. This replaces `openCanvas`, `bootstrapCanvas`, and `initializeSession` — all deleted. The proxy also checks the 4-hour inactivity timeout: if the existing conversation's last message is >4 hours old and no active workout exists, it creates a new conversation instead.
+
+**Deleted endpoints:** `openCanvas`, `bootstrapCanvas`, `initializeSession`, `preWarmSession`, `invokeCanvasOrchestrator`, `getServiceToken` — all obsoleted by the stateless architecture.
 
 ### Latency Impact
 
@@ -426,6 +452,12 @@ conversations/{id}:
 **Generation mechanism:** Summaries are generated lazily — at the start of a *new* conversation, the agent service checks whether the user's most recent conversation lacks a summary. If so, it loads the last 10 messages from that conversation, makes a lightweight LLM call (single-shot, no tools, ~100 output tokens) to generate a summary, and writes it to the conversation doc. This avoids background polling infrastructure while ensuring summaries exist before they're needed. Cost: one cheap LLM call per conversation transition.
 
 **Loading:** Last 5 conversation summaries included in system prompt.
+
+### Firestore Collection: `canvases` → `conversations`
+
+The iOS app and Firestore currently use the collection name `canvases` (a legacy UI concept). This redesign renames to `conversations` — the universally understood term. With no active users, the rename has zero migration cost. The rename happens in Phase 7 (iOS Cleanup) and affects 5 Swift files with hardcoded `"canvases"` collection paths, plus Firestore security rules. The agent service and MCP server use `conversations` from day one.
+
+**Subcollection changes:** The old model uses `canvases/{id}/cards`, `canvases/{id}/events`, `canvases/{id}/workspace_entries`, `canvases/{id}/up_next`. The new model uses `conversations/{id}/messages` and `conversations/{id}/artifacts`. Old subcollections become dead data.
 
 ### Conversation Lifecycle
 
@@ -648,8 +680,9 @@ Workout Completion Worker
   5. Update weekly_stats
   6. Update exercise usage stats
   7. Update watermark
-  8. Enqueue training analysis (if premium)
-  9. Mark job complete
+  8. Advance routine cursor (if source_routine_id present)
+  9. Enqueue training analysis (if premium)
+  10. Mark job complete
 ```
 
 **Benefits:**
@@ -662,21 +695,38 @@ Workout Completion Worker
 
 **Triggering:** A lightweight Firestore `onCreate` trigger on the `workout_completion_jobs` collection invokes the Cloud Run Job via Cloud Tasks (same pattern as the training analyst's job enqueueing). This provides at-least-once delivery with automatic retries.
 
-**Trigger becomes trivial:**
+**Both workout completion triggers become trivial enqueues:**
 ```javascript
+// Fires when an active workout is completed (end_time added via update)
 exports.onWorkoutCompleted = onDocumentUpdated(
   "users/{userId}/workouts/{workoutId}",
   async (event) => {
     if (!event.data.after.data().end_time || event.data.before.data().end_time) return;
-    await db.collection("workout_completion_jobs").add({
-      user_id: event.params.userId,
-      workout_id: event.params.workoutId,
-      status: "pending",
-      created_at: FieldValue.serverTimestamp(),
-    });
+    await enqueueWorkoutCompletionJob(event.params.userId, event.params.workoutId);
   }
 );
+
+// Fires when an imported workout is created with end_time already present
+exports.onWorkoutCreatedWithEnd = onDocumentCreated(
+  "users/{userId}/workouts/{workoutId}",
+  async (event) => {
+    const data = event.data.data();
+    if (!data.end_time) return;
+    await enqueueWorkoutCompletionJob(event.params.userId, event.params.workoutId);
+  }
+);
+
+async function enqueueWorkoutCompletionJob(userId, workoutId) {
+  await db.collection("workout_completion_jobs").add({
+    user_id: userId,
+    workout_id: workoutId,
+    status: "pending",
+    created_at: FieldValue.serverTimestamp(),
+  });
+}
 ```
+
+**Routine cursor update folded into worker:** `onWorkoutCreatedUpdateRoutineCursor` (from `workout-routine-cursor.js`) is absorbed into the workout completion worker as step 9. The cursor advance is part of the same logical event — not a separate trigger. This eliminates a race condition where the cursor could update before analytics are written.
 
 ---
 
@@ -685,14 +735,14 @@ exports.onWorkoutCompleted = onDocumentUpdated(
 | Phase | Scope | Dependency | Cost Impact |
 |-------|-------|------------|-------------|
 | **Phase 1: Observability** | Cloud Monitoring dashboards, alerting, cost tracking. Retained from existing performance plan — no code changes. | None | $0 (free tier) |
-| **Phase 2: Shared Business Logic** | Extract pure functions from Firebase Functions into `shared/` modules. Typed errors. Unit tests. Functions become thin HTTP wrappers. | None | $0 |
-| **Phase 3a: Agent Core** | Cloud Run agent service. LLM client abstraction (Gemini first — the current model, already tested). Agent loop. Direct Firestore access via AsyncClient. Full skill migration and refactoring (copilot_skills retains HTTP calls for active workout mutations). Instruction migration. SSE proxy update to call Cloud Run instead of Vertex AI. Structured observability: request tracing (request ID, user ID, lane, model), per-tool-call latency, token counts, error rates, Cloud Trace integration for the full path (iOS → proxy → Cloud Run → LLM → tools → response). | None (can start immediately — Python agent does not import Node.js shared modules) | Cloud Run: pay-per-request |
+| **Phase 2: Shared Business Logic** | Extract pure functions from Firebase Functions into `shared/` modules (routines, templates, workouts, exercises, training-queries, planning-context, artifacts, progressions). Typed errors. Unit tests. Functions become thin HTTP wrappers. `agents/get-planning-context.js` becomes thin wrapper over `shared/planning-context.js`. | None | $0 |
+| **Phase 3a: Agent Core** | Cloud Run agent service. LLM client abstraction (Gemini first). Agent loop. Direct Firestore access via AsyncClient (all 31 CanvasFunctionsClient methods including `get_active_snapshot_lite`, `get_active_events`). Full skill migration: copilot_skills + workout_skills retain HTTP, coach_skills → direct Firestore, planner_skills → direct Firestore, progression_skills → HTTP retained. Instruction migration. SSE proxy update: call Cloud Run, add conversation initialization (replaces `openCanvas`/`bootstrapCanvas`/`initializeSession`), implement 4-hour inactivity timeout. Structured observability. | None (can start immediately) | Cloud Run: pay-per-request |
 | **Phase 3b: Agent Memory** | All 4 memory tiers: conversation history loading, session vars, agent memory (save/retire/list), conversation summaries (lazy generation). Auto-loaded system context assembly. Instruction updates for memory usage guidance. | Phase 3a | $0 (Firestore writes only) |
-| **Phase 3c: Session Elimination** | Remove session management from SSE proxy, iOS session pre-warming, Firestore session collection. iOS cleanup of SessionPreWarmer and related code. | Phase 3a | $0 |
-| **Phase 4: MCP Server** | Node.js Cloud Run service. Per-user API keys (generation UI in iOS, Firestore storage, premium gate). Imports shared business logic. Streamable HTTP transport. | Phase 2 | Cloud Run: pay-per-request |
-| **Phase 5: Trigger Cascade → Job Queue** | Workout completion worker (Cloud Run Job). Lease-based job queue. Trigger simplification. Cloud Tasks integration. | Independent | Cloud Run: pay-per-request |
+| **Phase 3c: Session Elimination + Dead Code Removal** | Remove: session management from SSE proxy, iOS `SessionPreWarmer`, Firestore `agent_sessions` collection, `getServiceToken` endpoint + iOS caller, `cleanupStaleSessions` scheduled function, `expireProposalsScheduled` scheduled function, `invokeCanvasOrchestrator` endpoint, dead index.js exports (`onWorkoutCreatedWeekly`, `onWorkoutFinalizedForUser`). | Phase 3a | $0 |
+| **Phase 4: MCP Server** | Node.js Cloud Run service. Per-user API keys (generation endpoint in Firebase Functions, UI in iOS, Firestore storage, premium gate). Imports shared business logic. Streamable HTTP transport. | Phase 2 | Cloud Run: pay-per-request |
+| **Phase 5: Trigger Cascade → Job Queue** | Workout completion worker (Cloud Run Job). Lease-based job queue. Both `onWorkoutCompleted` and `onWorkoutCreatedWithEnd` simplified to enqueue. Routine cursor update (`onWorkoutCreatedUpdateRoutineCursor`) absorbed into worker. Cloud Tasks integration. Move `post_workout_analyst.py` from `canvas_orchestrator` to `training_analyst`. | Independent | Cloud Run: pay-per-request |
 | **Phase 6: Training Analyst Enhancement** | New analysis sections: plateau_report, periodization_status, volume_optimization, consistency_trends, progression_candidates. These feed the agent's auto-loaded Active Alerts context. | Phase 3b (agent must be able to consume the new sections) | $0 (existing Cloud Run Job) |
-| **Phase 7: iOS Cleanup** | Deprecate ActiveWorkoutManager, split oversized files (FocusModeWorkoutScreen), standardize naming. | Phase 3c | $0 |
+| **Phase 7: iOS Cleanup** | Rename `canvases` → `conversations` in all Firestore collection paths (5 files). Rename iOS classes: `CanvasViewModel` → `ConversationViewModel`, `CanvasService` → `ConversationService`, etc. Update `StreamEvent.swift` to 9-event contract (drop 6 legacy types). Split oversized files (FocusModeWorkoutScreen). Remove dead code (`SessionPreWarmer`, `CanvasRepository`, `getServiceToken` caller). | Phase 3c | $0 |
 | **Scaling (deferred)** | `minInstances` on hot-path functions. Increase `maxInstances` on SSE proxy. Cloud Run scaling config. Flip-the-switch when revenue justifies monthly cost. | Post-Phase 1 | Monthly cost |
 
 **Parallelism:** Phase 2 and Phases 3a-c can run in parallel (the Python agent has its own FirestoreClient — it does not import Node.js shared modules). Phases 3a-c are sequential among themselves. Phase 4 depends on Phase 2 (MCP imports shared modules). Phase 5 is fully independent. Phase 6 depends on Phase 3b. Phase 7 follows Phase 3c.
@@ -726,6 +776,10 @@ Phase 7 (iOS Cleanup)   ─── waits for Phase 3c ─────────
 | Job queue (not triggers) | Atomic processing, no contention, observable, retriable | Triggers are simpler but fragile under load |
 | Agent memory as explicit tool (not post-conversation extraction) | Simpler, more reliable, no background process needed | Post-conversation extraction catches things agent misses but adds latency and complexity |
 | MCP server as Cloud Run (not local-only) | Multi-tenant, always available, user doesn't need local setup | Local MCP is simpler but limits to developer use |
+| Rename `canvases` → `conversations` in iOS + Firestore (not keep legacy name) | No active users means zero migration cost. "Canvas" is a confusing abstraction — "conversation" is universally understood. 5 Swift files to update. Clean break. | Keeping `canvases` avoids any risk but perpetuates confusing naming indefinitely |
+| Clean 9-event SSE contract (not backward-compat 15 types) | 6 of the 15 iOS event types are ADK/Vertex AI artifacts (`thinking`, `thought`, `pipeline`, `agentResponse`, `toolRunning`/`toolComplete`). Cleaning now prevents future confusion. No active users = no backward compat needed. | Keeping all 15 types means the new agent must emit legacy events it doesn't naturally produce |
+| Fold routine cursor into workout completion worker (not keep as separate trigger) | Same logical event (workout completed). Eliminates race condition where cursor updates before analytics. One fewer trigger to maintain. | Separate trigger is simpler initially but adds a race condition and operational surface |
+| Conversation init in SSE proxy (not separate endpoints) | Eliminates 4 endpoints (`openCanvas`, `bootstrapCanvas`, `initializeSession`, `preWarmSession`). Single code path for conversation lifecycle. | Separate endpoints give iOS more control but add complexity that sessions no longer justify |
 
 ---
 
@@ -734,17 +788,32 @@ Phase 7 (iOS Cleanup)   ─── waits for Phase 3c ─────────
 - **Vertex AI Agent Engine deployment** — replaced by Cloud Run agent service
 - **ADK framework** — replaced by focused agent loop + LLM client abstraction
 - **Session management** (initialize, pre-warm, cleanup) — eliminated entirely
-- **CanvasFunctionsClient** (agent HTTP client) — replaced by `FirestoreClient`
+- **CanvasFunctionsClient** (agent HTTP client, 31 methods) — replaced by `FirestoreClient` (direct Firestore) + retained HTTP for active workout mutations
+- **`getServiceToken` endpoint** — eliminated (no more Vertex AI token exchange)
+- **`invokeCanvasOrchestrator` endpoint** — replaced by SSE proxy → Cloud Run
+- **`openCanvas` / `bootstrapCanvas` / `initializeSession` / `preWarmSession` endpoints** — replaced by conversation initialization in SSE proxy
+- **`cleanupStaleSessions` scheduled function** — no more sessions to clean
+- **`expireProposalsScheduled` scheduled function** — no more canvas proposals (replaced by artifacts)
+- **`onWorkoutCreatedUpdateRoutineCursor` trigger** — absorbed into workout completion worker
+- **Dead exports** (`onWorkoutCreatedWeekly`, `onWorkoutFinalizedForUser`) — removed from index.js
+- **15-event SSE contract** — replaced by 9-event clean contract
 - **Performance plan Phases 1-3** (from `2026-03-04`) — replaced by this design. Phase 0 (Observability) is retained as Phase 1.
 - **`agent_engine_requirements.txt`** — replaced by standard `requirements.txt`
+- **`post_workout_analyst.py` in `canvas_orchestrator/`** — moved to `training_analyst/` where it belongs
 
 ## 12. What This Does NOT Change
 
-- **Firebase Functions HTTP API** — same endpoints, same auth, same behavior for iOS
-- **Firestore schema** — no migrations, same collections and document shapes
-- **iOS app architecture** — MVVM, repositories, services all stay (Phase 6 is cleanup only)
-- **Firestore security rules** — unchanged
-- **SSE event format** — iOS receives the same StreamEvent types
+- **Firebase Functions HTTP API** — same endpoints, same auth, same behavior for iOS (active workout, routines, templates, workouts, exercises, training queries all unchanged)
+- **Firestore schema** — no migrations needed. New collections added (`conversations`, `agent_memory`, `mcp_api_keys`, `workout_completion_jobs`). `canvases` collection will be renamed to `conversations` in iOS but data shape is compatible.
+- **iOS app architecture** — MVVM, repositories, services all stay (Phase 7 is cleanup + naming)
+- **Firestore security rules** — unchanged for existing collections. New collections added with appropriate rules.
+- **Active workout state machine** — all 12 active workout Firebase Functions unchanged (log_set, complete, patch, swap, add, autofill, propose, start, get, cancel, completeCurrentSet)
 - **Exercise catalog orchestrator** — independent system, unchanged
 - **Subscription system** — webhooks, StoreKit sync, premium gates all stay
-- **Training analyst core architecture** — same Cloud Run Jobs, same lease-based queue. Phase 6 adds new analysis sections but does not change the worker infrastructure
+- **Training analyst core architecture** — same Cloud Run Jobs, same lease-based queue. Phase 6 adds new analysis sections.
+- **Template analytics triggers** (`onTemplateCreated`, `onTemplateUpdated`, `onWorkoutCreated`) — simple, independent, rarely fire. Unchanged.
+- **Recommendation system triggers** (`onAnalysisInsightCreated`, `onWeeklyReviewCreated`) — event-driven, cleanly isolated. Unchanged.
+- **Three scheduled functions** — `weeklyStatsRecalculation` (daily 2 AM), `analyticsCompactionScheduled` (daily 3 AM), `expireStaleRecommendations` (daily midnight). All unchanged.
+- **`artifactAction` endpoint** — stays as Firebase Function (user-facing write with premium gates). Business logic extracted to `shared/artifacts.js`.
+- **`applyProgression` endpoint** — stays as Firebase Function. Business logic extracted to `shared/progressions.js`.
+- **Dual API key pattern** — `FIREBASE_API_KEY` (workout endpoints, x-user-id header auth) and `MYON_API_KEY` (planning/analytics, userId in body). Both retained. Consolidation is a separate follow-up.

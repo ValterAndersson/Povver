@@ -26,6 +26,8 @@ firebase_functions/functions/shared/
   exercises.js                 # get, list, search, resolve
   training-queries.js          # querySets, aggregateSets, getAnalysisSummary, getMuscleGroupSummary
   planning-context.js          # getPlanningContext (user + history + routine + strength)
+  artifacts.js                 # getArtifact, acceptArtifact, dismissArtifact, saveRoutineFromArtifact, saveTemplateFromArtifact
+  progressions.js              # applyProgression, suggestWeightIncrease, suggestDeload (with changelog + audit trail)
 firebase_functions/functions/tests/
   shared.errors.test.js
   shared.routines.test.js
@@ -34,6 +36,8 @@ firebase_functions/functions/tests/
   shared.exercises.test.js
   shared.training-queries.test.js
   shared.planning-context.test.js
+  shared.artifacts.test.js
+  shared.progressions.test.js
 ```
 
 **Phase 3a — Agent Service:**
@@ -65,6 +69,7 @@ adk_agent/agent_service/
       coach_skills.py          # Read tools — direct Firestore queries
       planner_skills.py        # Write tools — direct Firestore + SSE artifacts
       workout_skills.py        # Active workout — HTTP to Firebase Functions (retained)
+      progression_skills.py    # Background progression — HTTP to Firebase Functions (retained)
     tools/
       __init__.py
       registry.py              # Tool registry + execute_tool dispatcher
@@ -142,11 +147,20 @@ adk_agent/workout_completion_worker/
 | `firebase_functions/functions/workouts/*.js` | 2 | Thin wrappers calling `shared/workouts.js` |
 | `firebase_functions/functions/exercises/*.js` | 2 | Thin wrappers calling `shared/exercises.js` |
 | `firebase_functions/functions/training/*.js` | 2 | Thin wrappers calling `shared/training-queries.js` |
-| `firebase_functions/functions/strengthos/stream-agent-normalized.js` | 3a, 3c | Call Cloud Run instead of Vertex AI; remove session logic |
-| `firebase_functions/functions/triggers/weekly-analytics.js` | 5 | Replace analytics pipeline with job enqueue |
+| `firebase_functions/functions/strengthos/stream-agent-normalized.js` | 3a, 3c | Call Cloud Run instead of Vertex AI; add conversation init; remove session logic |
+| `firebase_functions/functions/triggers/weekly-analytics.js` | 5 | Replace analytics pipeline with job enqueue (both onWorkoutCompleted + onWorkoutCreatedWithEnd) |
+| `firebase_functions/functions/triggers/workout-routine-cursor.js` | 5 | Delete — routine cursor absorbed into workout completion worker |
+| `firebase_functions/functions/agents/get-planning-context.js` | 2 | Thin wrapper over shared/planning-context.js |
+| `firebase_functions/functions/agents/apply-progression.js` | 2 | Thin wrapper over shared/progressions.js |
+| `firebase_functions/functions/artifacts/artifact-action.js` | 2 | Thin wrapper over shared/artifacts.js |
+| `firebase_functions/functions/index.js` | 3c, 5 | Remove dead exports, remove deleted endpoints |
 | `Povver/Povver/Services/SessionPreWarmer.swift` | 3c | Delete |
 | `Povver/Povver/Services/SessionManager.swift` | 3c | Remove session pre-warming references |
-| `Povver/Povver/Services/DirectStreamingService.swift` | 3c | Remove session ID handling |
+| `Povver/Povver/Services/DirectStreamingService.swift` | 3c, 7 | Remove session ID handling, remove canvasId backward compat |
+| `Povver/Povver/Models/StreamEvent.swift` | 7 | Update to 9-event contract (drop 6 legacy types) |
+| `Povver/Povver/ViewModels/CanvasViewModel.swift` | 7 | Rename to ConversationViewModel, update collection paths |
+| `Povver/Povver/Services/CanvasService.swift` | 7 | Rename to ConversationService, remove openCanvas/bootstrapCanvas |
+| `adk_agent/canvas_orchestrator/workers/post_workout_analyst.py` | 5 | Move to adk_agent/training_analyst/ |
 
 ---
 
@@ -1040,6 +1054,169 @@ git commit -m "refactor(planning): extract getPlanningContext into shared module
 
 ---
 
+### Task 8b: Shared Artifacts Module
+
+**Files:**
+- Create: `firebase_functions/functions/shared/artifacts.js`
+- Test: `firebase_functions/functions/tests/shared.artifacts.test.js`
+- Modify: `firebase_functions/functions/artifacts/artifact-action.js`
+
+- [ ] **Step 1: Read the current artifact-action.js**
+
+Read `firebase_functions/functions/artifacts/artifact-action.js` (~401 lines). Understand all 6 action types: `accept`, `dismiss`, `save_routine`, `start_workout`, `save_template`, `save_as_new`.
+
+- [ ] **Step 2: Write tests for shared artifacts module**
+
+Test the core operations: getArtifact, acceptArtifact, dismissArtifact, saveRoutineFromArtifact. Focus on validation, error cases, and data transformation.
+
+- [ ] **Step 3: Write shared/artifacts.js**
+
+Extract the action dispatch logic into pure functions. Each function takes `(db, userId, conversationId, artifactId, options)` — no req/res:
+
+```javascript
+// shared/artifacts.js
+'use strict';
+const { ValidationError, NotFoundError } = require('./errors');
+const admin = require('firebase-admin');
+
+async function getArtifact(db, userId, conversationId, artifactId) {
+  const doc = await db.doc(
+    `users/${userId}/conversations/${conversationId}/artifacts/${artifactId}`
+  ).get();
+  if (!doc.exists) throw new NotFoundError('Artifact not found');
+  return { id: doc.id, ...doc.data() };
+}
+
+async function acceptArtifact(db, userId, conversationId, artifactId) {
+  const artifact = await getArtifact(db, userId, conversationId, artifactId);
+  await db.doc(
+    `users/${userId}/conversations/${conversationId}/artifacts/${artifactId}`
+  ).update({ status: 'accepted', accepted_at: admin.firestore.FieldValue.serverTimestamp() });
+  return { ...artifact, status: 'accepted' };
+}
+
+async function dismissArtifact(db, userId, conversationId, artifactId) {
+  await db.doc(
+    `users/${userId}/conversations/${conversationId}/artifacts/${artifactId}`
+  ).update({ status: 'dismissed', dismissed_at: admin.firestore.FieldValue.serverTimestamp() });
+}
+
+// saveRoutineFromArtifact, saveTemplateFromArtifact — port from artifact-action.js
+// These create real routines/templates from artifact data
+
+module.exports = { getArtifact, acceptArtifact, dismissArtifact /* ... */ };
+```
+
+- [ ] **Step 4: Refactor artifact-action.js to thin wrapper**
+
+Replace inline logic with calls to shared/artifacts.js.
+
+- [ ] **Step 5: Run tests, commit**
+
+```bash
+cd firebase_functions/functions && node --test tests/shared.artifacts.test.js && npm test
+git add firebase_functions/functions/shared/artifacts.js firebase_functions/functions/tests/shared.artifacts.test.js firebase_functions/functions/artifacts/artifact-action.js
+git commit -m "refactor(artifacts): extract artifact actions into shared module"
+```
+
+---
+
+### Task 8c: Shared Progressions Module
+
+**Files:**
+- Create: `firebase_functions/functions/shared/progressions.js`
+- Test: `firebase_functions/functions/tests/shared.progressions.test.js`
+- Modify: `firebase_functions/functions/agents/apply-progression.js`
+
+- [ ] **Step 1: Read apply-progression.js**
+
+Read `firebase_functions/functions/agents/apply-progression.js` (~327 lines). Understand: auto-apply mode, review mode, nested path handling (`setNestedValue`/`resolvePathValue`), changelog entries, recommendation audit trail.
+
+- [ ] **Step 2: Write tests for shared progressions module**
+
+Test: validation, nested path resolution, auto-apply write, review-mode recommendation creation.
+
+- [ ] **Step 3: Write shared/progressions.js**
+
+Extract core progression logic:
+
+```javascript
+// shared/progressions.js
+'use strict';
+const { ValidationError, NotFoundError } = require('./errors');
+const admin = require('firebase-admin');
+
+function setNestedValue(obj, path, value) {
+  // Port from apply-progression.js — handles paths like "exercises[0].sets[0].weight"
+  // ...
+}
+
+async function applyProgression(db, userId, { targetType, targetId, changes, summary, rationale, trigger, autoApply = true }) {
+  if (!targetId) throw new ValidationError('targetId required');
+  if (!changes || changes.length === 0) throw new ValidationError('changes required');
+
+  const targetPath = targetType === 'template'
+    ? `users/${userId}/templates/${targetId}`
+    : `users/${userId}/routines/${targetId}`;
+
+  const doc = await db.doc(targetPath).get();
+  if (!doc.exists) throw new NotFoundError(`${targetType} not found`);
+
+  // Create recommendation record (audit trail)
+  const recData = {
+    userId, targetType, targetId, changes, summary, rationale,
+    trigger: trigger || 'user_request',
+    state: autoApply ? 'applied' : 'pending_review',
+    created_at: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  if (autoApply) {
+    // Apply changes to target document
+    const data = doc.data();
+    for (const change of changes) {
+      setNestedValue(data, change.path, change.value);
+    }
+    data.updated_at = admin.firestore.FieldValue.serverTimestamp();
+    await db.doc(targetPath).set(data);
+
+    // Write changelog entry (for templates)
+    if (targetType === 'template') {
+      await db.collection(`users/${userId}/templates/${targetId}/changelog`).add({
+        changes, summary, trigger, applied_at: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+  }
+
+  const recRef = await db.collection(`users/${userId}/agent_recommendations`).add(recData);
+  return { id: recRef.id, ...recData };
+}
+
+module.exports = { applyProgression, setNestedValue };
+```
+
+- [ ] **Step 4: Refactor apply-progression.js to thin wrapper**
+
+Replace inline logic with calls to shared/progressions.js. Keep `withApiKey` auth wrapping.
+
+- [ ] **Step 5: Also refactor agents/get-planning-context.js**
+
+Make it a thin wrapper over `shared/planning-context.js`:
+
+```javascript
+const { getPlanningContext } = require('../shared/planning-context');
+// ... handler calls getPlanningContext(db, userId, options)
+```
+
+- [ ] **Step 6: Run tests, commit**
+
+```bash
+cd firebase_functions/functions && node --test tests/shared.progressions.test.js && npm test
+git add firebase_functions/functions/shared/progressions.js firebase_functions/functions/tests/shared.progressions.test.js firebase_functions/functions/agents/apply-progression.js firebase_functions/functions/agents/get-planning-context.js
+git commit -m "refactor(agents): extract progressions + planning-context into shared modules"
+```
+
+---
+
 ### Task 9: Phase 2 Integration Verification
 
 - [ ] **Step 1: Run full Firebase Functions test suite**
@@ -1074,6 +1251,8 @@ cd firebase_functions/functions && node -e "
   const e = require('./shared/exercises');
   const q = require('./shared/training-queries');
   const p = require('./shared/planning-context');
+  const a = require('./shared/artifacts');
+  const pr = require('./shared/progressions');
   const err = require('./shared/errors');
   console.log('All shared modules load successfully');
   console.log('Routines:', Object.keys(r));
@@ -1082,6 +1261,8 @@ cd firebase_functions/functions && node -e "
   console.log('Exercises:', Object.keys(e));
   console.log('Training:', Object.keys(q));
   console.log('Planning:', Object.keys(p));
+  console.log('Artifacts:', Object.keys(a));
+  console.log('Progressions:', Object.keys(pr));
   console.log('Errors:', Object.keys(err));
 "
 ```
@@ -1110,8 +1291,11 @@ Extracted pure business logic from all CRUD handlers into shared/ modules:
 - shared/exercises.js — exercise queries + search + resolve
 - shared/training-queries.js — querySets, series endpoints, analysis
 - shared/planning-context.js — getPlanningContext assembler
+- shared/artifacts.js — artifact actions (accept, dismiss, save)
+- shared/progressions.js — progression apply/suggest with audit trail
 
 All Firebase Function handlers refactored to thin HTTP wrappers.
+agents/get-planning-context.js and agents/apply-progression.js now use shared modules.
 All existing tests pass. Shared modules have dedicated unit tests."
 ```
 
@@ -1314,9 +1498,9 @@ class RequestContext:
     user_id: str
     conversation_id: str
     correlation_id: str
-    workout_mode: bool = False
-    active_workout_id: str | None = None
-    today: str | None = None  # YYYY-MM-DD, set from client timezone
+    workout_id: str | None = None  # Active workout ID from iOS (enables workout mode)
+    workout_mode: bool = False     # Set True when workout_id is present
+    today: str | None = None       # YYYY-MM-DD, set from client timezone
 ```
 
 - [ ] **Step 4: Run test — expect PASS**
@@ -2064,6 +2248,71 @@ class FirestoreClient:
             "weekly_stats": weekly,
         }
 
+    # --- Training Analytics v2 ---
+
+    async def get_muscle_group_summary(self, user_id: str, muscle_group: str, weeks: int = 8) -> dict:
+        """Weekly series for a muscle group (from analytics_series_muscle_group)."""
+        doc = await self.db.document(
+            f"users/{user_id}/analytics_series_muscle_group/{muscle_group}"
+        ).get()
+        if not doc.exists:
+            return {"muscle_group": muscle_group, "weeks": []}
+        return {"id": doc.id, **doc.to_dict()}
+
+    async def get_muscle_summary(self, user_id: str, muscle: str, weeks: int = 8) -> dict:
+        """Weekly series for a specific muscle (from analytics_series_muscle)."""
+        doc = await self.db.document(
+            f"users/{user_id}/analytics_series_muscle/{muscle}"
+        ).get()
+        if not doc.exists:
+            return {"muscle": muscle, "weeks": []}
+        return {"id": doc.id, **doc.to_dict()}
+
+    async def get_exercise_summary(self, user_id: str, exercise_name: str) -> dict:
+        """Per-exercise series with e1RM and volume trends (from analytics_series_exercise)."""
+        doc = await self.db.document(
+            f"users/{user_id}/analytics_series_exercise/{exercise_name}"
+        ).get()
+        if not doc.exists:
+            return {"exercise": exercise_name, "points_by_day": {}}
+        return {"id": doc.id, **doc.to_dict()}
+
+    async def query_sets(self, user_id: str, target: str, filters: dict | None = None) -> list[dict]:
+        """Raw set-level drilldown from set_facts collection."""
+        query = self.db.collection(f"users/{user_id}/set_facts")
+        if target:
+            query = query.where("exercise_name", "==", target)
+        if filters:
+            if filters.get("date_from"):
+                query = query.where("workout_date", ">=", filters["date_from"])
+            if filters.get("date_to"):
+                query = query.where("workout_date", "<=", filters["date_to"])
+        query = query.order_by("workout_date", direction="DESCENDING").limit(filters.get("limit", 50) if filters else 50)
+        return [{"id": doc.id, **doc.to_dict()} async for doc in query.stream()]
+
+    async def get_active_snapshot_lite(self, user_id: str) -> dict:
+        """Lightweight context: active routine, streak, this week summary."""
+        import asyncio
+        user_doc, weekly = await asyncio.gather(
+            self.db.document(f"users/{user_id}").get(),
+            self.db.document(f"users/{user_id}/weekly_stats/current").get(),
+        )
+        user = user_doc.to_dict() if user_doc.exists else {}
+        return {
+            "active_routine_id": user.get("activeRoutineId"),
+            "streak": user.get("streak", 0),
+            "weekly_stats": weekly.to_dict() if weekly.exists else None,
+        }
+
+    async def get_active_events(self, user_id: str, limit: int = 10) -> list[dict]:
+        """Recent training events (PR, workout completed, etc.) from agent_recommendations."""
+        query = (
+            self.db.collection(f"users/{user_id}/agent_recommendations")
+            .order_by("created_at", direction="DESCENDING")
+            .limit(limit)
+        )
+        return [{"id": doc.id, **doc.to_dict()} async for doc in query.stream()]
+
     # --- Exercises ---
 
     async def search_exercises(self, query: str, limit: int = 10) -> list[dict]:
@@ -2261,7 +2510,13 @@ logger = logging.getLogger(__name__)
 async def stream_handler(request: Request) -> StreamingResponse:
     """POST /stream — main agent streaming endpoint.
 
-    Request body: { "user_id": str, "conversation_id": str, "message": str }
+    Request body: {
+        "user_id": str,
+        "conversation_id": str,
+        "message": str,
+        "correlation_id": str,
+        "workout_id": str | null
+    }
     Response: SSE stream
     """
     try:
@@ -2272,6 +2527,8 @@ async def stream_handler(request: Request) -> StreamingResponse:
     user_id = body.get("user_id")
     conversation_id = body.get("conversation_id")
     message = body.get("message")
+    correlation_id = body.get("correlation_id", "")
+    workout_id = body.get("workout_id")
 
     if not all([user_id, conversation_id, message]):
         return JSONResponse(
@@ -2279,7 +2536,7 @@ async def stream_handler(request: Request) -> StreamingResponse:
             status_code=400,
         )
 
-    trace_id = new_trace_id()
+    trace_id = correlation_id or new_trace_id()
 
     async def event_stream():
         # Import here to avoid circular imports during startup
@@ -2294,6 +2551,7 @@ async def stream_handler(request: Request) -> StreamingResponse:
             user_id=user_id,
             conversation_id=conversation_id,
             correlation_id=trace_id,
+            workout_id=workout_id,
         )
 
         fs = get_firestore_client()
@@ -2790,22 +3048,27 @@ git commit -m "feat(agent): migrate planner skills with direct artifact writes"
 
 ---
 
-### Task 21: Copilot + Workout Skills Migration (HTTP-Retained)
+### Task 21: Copilot + Workout + Progression Skills Migration (HTTP-Retained)
 
 **Files:**
 - Create: `adk_agent/agent_service/app/skills/copilot_skills.py`
 - Create: `adk_agent/agent_service/app/skills/workout_skills.py`
+- Create: `adk_agent/agent_service/app/skills/progression_skills.py`
 - Reference: `adk_agent/canvas_orchestrator/app/skills/copilot_skills.py`
 - Reference: `adk_agent/canvas_orchestrator/app/skills/workout_skills.py`
+- Reference: `adk_agent/canvas_orchestrator/app/skills/progression_skills.py`
 
 - [ ] **Step 1: Read both source files**
 - [ ] **Step 2: Write implementation**
 
-These skills **retain HTTP calls** to Firebase Functions — active workout mutations are too critical to reimplement. Key changes:
+These skills **retain HTTP calls** to Firebase Functions — active workout mutations and progression writes are too critical to reimplement in Python. Key changes:
 - Replace `ContextVar` for user_id with `ctx: RequestContext`
 - Replace `_client_instance` singleton with injected HTTP client
 - Use `httpx.AsyncClient` instead of `requests`
 - Keep the same Firebase Function endpoints and API key auth
+- `copilot_skills.py`: Fast Lane workout ops. Uses `FIREBASE_API_KEY`. Calls `completeCurrentSet` (auto-cursor log) and `logSet` (explicit log). Also `getActiveWorkout` for get_next_set.
+- `workout_skills.py`: LLM-directed workout ops. Uses `FIREBASE_API_KEY` via `httpx`. Calls `logSet`, `swapExercise`, `addExercise`, `patchActiveWorkout`, `completeActiveWorkout`.
+- `progression_skills.py`: Background progression writes. Uses `MYON_API_KEY`. Calls `applyProgression` Firebase Function. Two modes: `auto_apply=True` (immediate) or `False` (pending_review). Also provides `suggest_weight_increase()` and `suggest_deload()` convenience wrappers.
 
 ```python
 # app/skills/copilot_skills.py
@@ -2847,12 +3110,77 @@ async def log_set(*, ctx: RequestContext, reps: int, weight_kg: float, **kwargs)
 # ... log_set_shorthand, get_next_set, swap_exercise, add_exercise, etc.
 ```
 
-- [ ] **Step 3: Register tools in definitions.py**
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Write progression_skills.py**
+
+```python
+# app/skills/progression_skills.py
+"""Progression skills — apply weight/volume changes via Firebase Function.
+
+Uses MYON_API_KEY to call applyProgression endpoint. Supports both
+user-requested changes (via chat agent) and automated progressions
+(via training analyst worker).
+"""
+
+from __future__ import annotations
+
+import os
+import httpx
+
+from app.context import RequestContext
+
+FUNCTIONS_URL = os.getenv("FIREBASE_FUNCTIONS_URL", "https://us-central1-myon-53d85.cloudfunctions.net")
+MYON_API_KEY = os.getenv("MYON_API_KEY", "")
+
+
+async def apply_progression(
+    *, ctx: RequestContext,
+    target_type: str,  # "template" or "routine"
+    target_id: str,
+    changes: list[dict],
+    summary: str,
+    rationale: str,
+    trigger: str = "user_request",
+    auto_apply: bool = True,
+) -> dict:
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(
+            f"{FUNCTIONS_URL}/applyProgression",
+            json={
+                "userId": ctx.user_id,
+                "targetType": target_type,
+                "targetId": target_id,
+                "changes": changes,
+                "summary": summary,
+                "rationale": rationale,
+                "trigger": trigger,
+                "autoApply": auto_apply,
+            },
+            headers={"x-api-key": MYON_API_KEY},
+        )
+        return resp.json()
+
+
+async def suggest_weight_increase(
+    *, ctx: RequestContext, template_id: str, exercise_index: int,
+    new_weight: float, rationale: str,
+) -> dict:
+    return await apply_progression(
+        ctx=ctx,
+        target_type="template",
+        target_id=template_id,
+        changes=[{"path": f"exercises[{exercise_index}].sets[0].weight", "value": new_weight}],
+        summary=f"Increase weight to {new_weight}kg",
+        rationale=rationale,
+        trigger="user_request",
+    )
+```
+
+- [ ] **Step 4: Register tools in definitions.py**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add adk_agent/agent_service/app/skills/copilot_skills.py adk_agent/agent_service/app/skills/workout_skills.py
-git commit -m "feat(agent): migrate copilot/workout skills (HTTP retained for active workout)"
+git add adk_agent/agent_service/app/skills/copilot_skills.py adk_agent/agent_service/app/skills/workout_skills.py adk_agent/agent_service/app/skills/progression_skills.py
+git commit -m "feat(agent): migrate copilot/workout/progression skills (HTTP retained)"
 ```
 
 ---
@@ -3023,47 +3351,95 @@ git commit -m "feat(agent): wire full lane support in /stream endpoint"
 
 Read `firebase_functions/functions/strengthos/stream-agent-normalized.js` (~1528 lines).
 
-- [ ] **Step 2: Modify to call Cloud Run instead of Vertex AI**
+- [ ] **Step 2: Add conversation initialization logic**
 
-Key changes:
-1. Replace Vertex AI `:streamQuery` call with Cloud Run `/stream` POST
-2. Use IAM identity token for Cloud Run auth (replace Vertex AI session auth)
-3. Remove session creation/reuse logic (calls to `initializeOrReuseSession`)
-4. Remove session pre-warming hooks
-5. Keep: auth, premium gate, rate limiting, SSE event relay, artifact handling
+The SSE proxy now handles conversation lifecycle (replaces `openCanvas`, `bootstrapCanvas`, `initializeSession`):
 
 ```javascript
-// Key change — replace Vertex AI call with Cloud Run call
+const INACTIVITY_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+async function resolveConversationId(userId, requestConversationId) {
+  if (requestConversationId) {
+    // Check inactivity timeout (skip if active workout)
+    const convDoc = await db.doc(`users/${userId}/conversations/${requestConversationId}`).get();
+    if (convDoc.exists) {
+      const lastMessageAt = convDoc.data().last_message_at?.toMillis() || 0;
+      const hasActiveWorkout = convDoc.data().active_workout_id != null;
+      if (!hasActiveWorkout && Date.now() - lastMessageAt > INACTIVITY_TIMEOUT_MS) {
+        // Stale conversation — create a new one
+        return createNewConversation(userId);
+      }
+      return requestConversationId;
+    }
+  }
+  return createNewConversation(userId);
+}
+
+async function createNewConversation(userId) {
+  const ref = await db.collection(`users/${userId}/conversations`).add({
+    created_at: admin.firestore.FieldValue.serverTimestamp(),
+    last_message_at: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  return ref.id;
+}
+```
+
+- [ ] **Step 3: Replace Vertex AI call with Cloud Run call**
+
+```javascript
 const { GoogleAuth } = require('google-auth-library');
 const auth = new GoogleAuth();
+const AGENT_SERVICE_URL = process.env.AGENT_SERVICE_URL;
+const { v4: uuidv4 } = require('uuid');
 
-const AGENT_SERVICE_URL = process.env.AGENT_SERVICE_URL || 'https://agent-service-HASH-uc.a.run.app';
-
-async function callAgentService(userId, conversationId, message) {
+async function callAgentService(userId, conversationId, message, correlationId, workoutId) {
   const client = await auth.getIdTokenClient(AGENT_SERVICE_URL);
   const response = await client.request({
     url: `${AGENT_SERVICE_URL}/stream`,
     method: 'POST',
-    data: { user_id: userId, conversation_id: conversationId, message },
+    data: {
+      user_id: userId,
+      conversation_id: conversationId,
+      message,
+      correlation_id: correlationId || uuidv4(),
+      workout_id: workoutId || null,
+    },
     responseType: 'stream',
   });
-  return response.data; // SSE stream
+  return response.data;
 }
 ```
 
-3. Update event relay — the Cloud Run service emits the same SSE event types defined in the spec (message, tool_start, tool_end, artifact, done, error), so the relay logic stays largely the same.
+- [ ] **Step 4: Remove all session logic**
 
-- [ ] **Step 3: Run Firebase Functions tests**
+Delete:
+- `initializeOrReuseSession()` function and all calls
+- Session creation/reuse/versioning code
+- Session pre-warming hooks
+- Any `agent_sessions` Firestore references
+
+Keep:
+- Auth (bearer token validation)
+- Premium gate (`isPremiumUser`)
+- Rate limiting
+- SSE event relay (simplified — Cloud Run emits the 9-event contract directly)
+- Artifact write-through to Firestore (`conversations/{id}/artifacts`)
+
+- [ ] **Step 5: Update event relay for new 9-event contract**
+
+The Cloud Run agent emits 9 event types directly in the format iOS expects: `message`, `tool_start`, `tool_end`, `artifact`, `clarification`, `status`, `heartbeat`, `done`, `error`. The proxy relays these without transformation. Remove any event type mapping or ADK-specific event handling.
+
+- [ ] **Step 6: Run Firebase Functions tests**
 
 ```bash
 cd firebase_functions/functions && npm test
 ```
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add firebase_functions/functions/strengthos/stream-agent-normalized.js
-git commit -m "feat(proxy): update SSE proxy to call Cloud Run agent service"
+git commit -m "feat(proxy): update SSE proxy — Cloud Run call, conversation init, 9-event contract"
 ```
 
 ---
@@ -3572,7 +3948,7 @@ async def list_memories(*, ctx: RequestContext, offset: int = 0, limit: int = 50
 
 
 async def set_session_var(*, ctx: RequestContext, key: str, value) -> dict:
-    fs = FirestoreClient()
+    fs = get_firestore_client()
     await fs.db.document(
         f"users/{ctx.user_id}/conversations/{ctx.conversation_id}"
     ).update({f"session_vars.{key}": value})
@@ -3581,7 +3957,7 @@ async def set_session_var(*, ctx: RequestContext, key: str, value) -> dict:
 
 async def delete_session_var(*, ctx: RequestContext, key: str) -> dict:
     from google.cloud.firestore import DELETE_FIELD
-    fs = FirestoreClient()
+    fs = get_firestore_client()
     await fs.db.document(
         f"users/{ctx.user_id}/conversations/{ctx.conversation_id}"
     ).update({f"session_vars.{key}": DELETE_FIELD})
@@ -3590,7 +3966,7 @@ async def delete_session_var(*, ctx: RequestContext, key: str) -> dict:
 
 async def search_past_conversations(*, ctx: RequestContext, query: str, limit: int = 5) -> dict:
     # Simple keyword search across recent conversation messages
-    fs = FirestoreClient()
+    fs = get_firestore_client()
     convs_query = (
         fs.db.collection(f"users/{ctx.user_id}/conversations")
         .order_by("created_at", direction="DESCENDING")
@@ -3653,7 +4029,7 @@ git commit -m "feat(agent): wire 360 view context builder into /stream endpoint"
 
 ---
 
-### Task 31: Session Elimination (Phase 3c)
+### Task 31: Session Elimination + Dead Code Removal (Phase 3c)
 
 **Files:**
 - Modify: `firebase_functions/functions/strengthos/stream-agent-normalized.js`
@@ -3661,21 +4037,23 @@ git commit -m "feat(agent): wire 360 view context builder into /stream endpoint"
 - Delete: `Povver/Povver/Services/SessionPreWarmer.swift`
 - Modify: `Povver/Povver/Services/DirectStreamingService.swift`
 - Modify: `firebase_functions/functions/index.js`
+- Delete: `firebase_functions/functions/auth/exchange-token.js` (getServiceToken)
+- Modify: `firebase_functions/functions/canvas/expire-proposals-scheduled.js` → delete scheduled function
 
-- [ ] **Step 1: Read session-related code**
+- [ ] **Step 1: Read session-related and dead code**
 
 Read:
 - `firebase_functions/functions/sessions/` — list all files, read each
 - `stream-agent-normalized.js` — identify all session logic
-- `DirectStreamingService.swift` — identify session ID handling
-- `index.js` — identify session-related exports
+- `DirectStreamingService.swift` — identify session ID handling and `getServiceToken` call
+- `index.js` — identify all exports to remove
+- `firebase_functions/functions/auth/exchange-token.js` — confirm `getServiceToken` scope
 
 - [ ] **Step 2: Remove session logic from SSE proxy**
 
-In `stream-agent-normalized.js`:
-- Remove `initializeOrReuseSession()` function
+In `stream-agent-normalized.js` (most of this was done in Task 25, verify clean):
+- Remove any remaining `initializeOrReuseSession()` references
 - Remove `agent_sessions` Firestore reads/writes
-- Remove session ID from request to Cloud Run (Cloud Run is stateless)
 - Remove session validation/invalidation logic
 
 - [ ] **Step 3: Delete session Firebase Functions**
@@ -3684,56 +4062,100 @@ In `stream-agent-normalized.js`:
 rm -rf firebase_functions/functions/sessions/
 ```
 
-Remove session-related exports from `index.js` (e.g., `initializeSession`, `preWarmSession`, `cleanupSessions`).
+- [ ] **Step 4: Delete `getServiceToken` endpoint**
 
-- [ ] **Step 4: Delete SessionPreWarmer.swift**
+```bash
+rm firebase_functions/functions/auth/exchange-token.js
+```
+
+This endpoint exchanged Firebase ID tokens for GCP access tokens to call Vertex AI directly. No longer needed — iOS no longer calls Vertex AI.
+
+- [ ] **Step 5: Remove deleted endpoints from index.js**
+
+Remove these exports from `firebase_functions/functions/index.js`:
+- `initializeSession` — replaced by conversation init in SSE proxy
+- `preWarmSession` — no more sessions
+- `cleanupStaleSessions` — scheduled function, no more sessions
+- `getServiceToken` — no more Vertex AI token exchange
+- `invokeCanvasOrchestrator` — replaced by SSE proxy → Cloud Run
+- `openCanvas` — replaced by conversation init in SSE proxy
+- `bootstrapCanvas` — replaced by conversation init in SSE proxy
+- `expireProposalsScheduled` — no more canvas proposals (replaced by artifacts)
+- `onWorkoutCreatedWeekly` — dead export (undefined symbol)
+- `onWorkoutFinalizedForUser` — dead export (undefined symbol)
+
+Verify with:
+```bash
+grep -n "onWorkoutCreatedWeekly\|onWorkoutFinalizedForUser\|getServiceToken\|cleanupStaleSessions\|expireProposals\|invokeCanvasOrchestrator\|openCanvas\|bootstrapCanvas\|initializeSession\|preWarmSession" firebase_functions/functions/index.js
+```
+
+- [ ] **Step 6: Delete SessionPreWarmer.swift**
 
 ```bash
 rm Povver/Povver/Services/SessionPreWarmer.swift
 ```
 
-- [ ] **Step 5: Update DirectStreamingService.swift**
+- [ ] **Step 7: Update DirectStreamingService.swift**
 
-Remove session ID from the SSE request. The service now sends only `conversation_id` and `message` — no session management.
+Remove:
+- Session ID from the SSE request body
+- `getServiceToken` call (line ~849) and all token exchange logic
+- The backward-compat `canvasId` field (keep only `conversationId`)
+- Any `sessionId` property or parameter
 
-- [ ] **Step 6: Remove SessionPreWarmer references from iOS**
+- [ ] **Step 8: Remove SessionPreWarmer references from iOS**
 
-Search for all references to `SessionPreWarmer` in the iOS codebase and remove them. Check:
-- `ChatHomeView` or similar (`.preWarmSession` modifier)
-- `CanvasViewModel` or `WorkoutCoachViewModel`
-- Any `import` statements
+```bash
+grep -rn "SessionPreWarmer\|preWarmSession\|getServiceToken\|initializeSession" Povver/Povver/ --include="*.swift"
+```
 
-- [ ] **Step 7: Delete agent_sessions Firestore collection data**
+Remove all matches. Check `CanvasService.swift` for `preWarmSession()`, `initializeSession()`, `openCanvas()`, `bootstrapCanvas()` methods — these are now dead code.
 
-The `users/{uid}/agent_sessions/` collection is no longer used. Add a note to `docs/FIRESTORE_SCHEMA.md` marking it as deprecated/removed.
+- [ ] **Step 9: Remove dead CanvasService methods**
 
-- [ ] **Step 8: Build iOS to verify no compilation errors**
+In `Povver/Povver/Services/CanvasService.swift`, remove:
+- `openCanvas(userId:purpose:)` — replaced by SSE proxy conversation init
+- `bootstrapCanvas(for:purpose:)` — replaced by SSE proxy conversation init
+- `preWarmSession(userId:purpose:)` — no more sessions
+- `initializeSession(canvasId:purpose:forceNew:)` — no more sessions
+- `applyAction(_:)` — canvas reducer pattern, replaced by artifacts
+
+Keep: `purgeCanvas` (may still be useful for cleanup)
+
+- [ ] **Step 10: Delete agent_sessions Firestore collection data**
+
+Mark `users/{uid}/agent_sessions/` as deprecated/removed in `docs/FIRESTORE_SCHEMA.md`.
+
+- [ ] **Step 11: Build iOS to verify no compilation errors**
 
 ```bash
 xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build
 ```
 
-- [ ] **Step 9: Run Firebase Functions tests**
+- [ ] **Step 12: Run Firebase Functions tests**
 
 ```bash
 cd firebase_functions/functions && npm test
 ```
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 13: Commit**
 
 ```bash
 git add -A
-git commit -m "feat: Phase 3c — eliminate session management
+git commit -m "feat: Phase 3c — eliminate sessions + remove dead code
 
 Removed:
 - SessionPreWarmer.swift (iOS)
 - firebase_functions/functions/sessions/ (all session endpoints)
-- Session logic from SSE proxy (stream-agent-normalized.js)
-- Session ID from DirectStreamingService.swift
-- agent_sessions Firestore collection references
+- getServiceToken (auth/exchange-token.js) — no more Vertex AI
+- invokeCanvasOrchestrator — replaced by Cloud Run
+- openCanvas, bootstrapCanvas, initializeSession, preWarmSession — SSE proxy handles it
+- cleanupStaleSessions, expireProposalsScheduled — obsolete scheduled functions
+- Dead exports: onWorkoutCreatedWeekly, onWorkoutFinalizedForUser
+- Session ID and canvasId backward compat from DirectStreamingService
+- Dead CanvasService methods (openCanvas, bootstrapCanvas, preWarm, initSession)
 
-The agent is now fully stateless. Conversation context is loaded
-from Firestore per-request via the context builder."
+10 endpoints removed. 2 scheduled functions removed. 2 dead exports removed."
 ```
 
 ---
@@ -4394,8 +4816,9 @@ async def process_workout_completion(db, user_id: str, workout_id: str):
     6. Update rollups (volume, sets, reps aggregates)
     7. Update weekly_stats
     8. Update exercise_usage_stats
-    9. Update watermark
-    10. Enqueue training analysis (if premium)
+    9. Advance routine cursor (if source_routine_id present)
+    10. Update watermark
+    11. Enqueue training analysis (if premium)
     """
     workout_doc = await db.document(f"users/{user_id}/workouts/{workout_id}").get()
     if not workout_doc.exists:
@@ -4464,11 +4887,28 @@ async def process_workout_completion(db, user_id: str, workout_id: str):
             "total_sets": firestore.Increment(len(exercise.get("sets", []))),
         }, merge=True)
 
-    # Step 8: Update watermark
+    # Step 9: Advance routine cursor (absorbed from workout-routine-cursor.js)
+    # If workout has source_routine_id + source_template_id, advance the cursor
+    source_routine_id = workout.get("source_routine_id")
+    source_template_id = workout.get("source_template_id")
+    if source_routine_id and source_template_id:
+        routine_ref = db.document(f"users/{user_id}/routines/{source_routine_id}")
+        batch.update(routine_ref, {
+            "last_completed_template_id": source_template_id,
+            "last_completed_at": _utcnow(),
+        })
+        # Auto-activate routine if user has no active routine
+        user_data = user_doc.to_dict() if user_doc.exists else {}
+        if not user_data.get("activeRoutineId"):
+            batch.update(db.document(f"users/{user_id}"), {
+                "activeRoutineId": source_routine_id,
+            })
+
+    # Step 10: Update watermark
     wm_ref = db.document(f"users/{user_id}/watermarks/analytics")
     batch.set(wm_ref, {"last_processed_workout": workout_id, "processed_at": _utcnow()}, merge=True)
 
-    # Step 9: Enqueue training analysis (if premium)
+    # Step 11: Enqueue training analysis (if premium)
     # Check user subscription, create training_analysis_jobs entry
     user_doc = await db.document(f"users/{user_id}").get()
     if user_doc.exists and user_doc.to_dict().get("subscription_status", {}).get("is_premium"):
@@ -4532,59 +4972,75 @@ git commit -m "feat(worker): implement workout completion processor"
 
 ---
 
-### Task 39: Simplify Workout Completion Trigger
+### Task 39: Simplify All Workout Completion Triggers
 
 **Files:**
 - Modify: `firebase_functions/functions/triggers/weekly-analytics.js`
+- Delete: `firebase_functions/functions/triggers/workout-routine-cursor.js`
 - Modify: `firebase_functions/functions/index.js`
 
-- [ ] **Step 1: Read the current trigger in full**
+- [ ] **Step 1: Read the current triggers in full**
 
-Read `firebase_functions/functions/triggers/weekly-analytics.js`.
+Read:
+- `firebase_functions/functions/triggers/weekly-analytics.js` — `onWorkoutCompleted` + `onWorkoutCreatedWithEnd`
+- `firebase_functions/functions/triggers/workout-routine-cursor.js` — `onWorkoutCreatedUpdateRoutineCursor`
 
-- [ ] **Step 2: Replace onWorkoutCompleted with job enqueue**
+- [ ] **Step 2: Replace both completion triggers with job enqueue**
 
 ```javascript
-// Replace the massive onWorkoutCompleted with a simple job enqueue
+// Shared helper — enqueue a workout completion job
+async function enqueueWorkoutCompletionJob(userId, workoutId) {
+  await db.collection("workout_completion_jobs").add({
+    user_id: userId,
+    workout_id: workoutId,
+    status: "pending",
+    created_at: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  logger.info("Enqueued workout completion job", { userId, workoutId });
+}
+
+// Fires when an active workout is completed (end_time added via update)
 exports.onWorkoutCompleted = onDocumentUpdated(
   "users/{userId}/workouts/{workoutId}",
   async (event) => {
     const before = event.data.before.data();
     const after = event.data.after.data();
-
-    // Only fire when end_time is added (workout completed)
     if (!after.end_time || before.end_time) return;
+    await enqueueWorkoutCompletionJob(event.params.userId, event.params.workoutId);
+  }
+);
 
-    await db.collection("workout_completion_jobs").add({
-      user_id: event.params.userId,
-      workout_id: event.params.workoutId,
-      status: "pending",
-      created_at: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    logger.info("Enqueued workout completion job", {
-      userId: event.params.userId,
-      workoutId: event.params.workoutId,
-    });
+// Fires when an imported workout is created with end_time already present
+exports.onWorkoutCreatedWithEnd = onDocumentCreated(
+  "users/{userId}/workouts/{workoutId}",
+  async (event) => {
+    const data = event.data.data();
+    if (!data.end_time) return;
+    await enqueueWorkoutCompletionJob(event.params.userId, event.params.workoutId);
   }
 );
 ```
 
-- [ ] **Step 3: Keep onWorkoutDeleted** — deletion analytics can stay as a trigger (simpler, less frequent)
-- [ ] **Step 4: Keep weeklyStatsRecalculation** — scheduled job stays unchanged
-- [ ] **Step 5: Add onCreate trigger for job dispatch**
+- [ ] **Step 3: Delete workout-routine-cursor.js**
+
+```bash
+rm firebase_functions/functions/triggers/workout-routine-cursor.js
+```
+
+The routine cursor advance is now step 8 in the workout completion worker (Task 38). This eliminates a race condition where the cursor could update before analytics.
+
+- [ ] **Step 4: Keep onWorkoutDeleted** — deletion analytics can stay as a trigger (simpler, less frequent)
+- [ ] **Step 5: Keep weeklyStatsRecalculation** — scheduled job stays unchanged
+- [ ] **Step 6: Add onCreate trigger for job dispatch**
 
 ```javascript
-// New trigger: dispatch Cloud Run Job when a completion job is created
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 
 exports.onWorkoutCompletionJobCreated = onDocumentCreated(
   "workout_completion_jobs/{jobId}",
   async (event) => {
-    // Execute the Cloud Run Job
     const { v2 } = require('@google-cloud/run');
     const runClient = new v2.JobsClient();
-
     const jobName = `projects/myon-53d85/locations/us-central1/jobs/workout-completion-worker`;
 
     try {
@@ -4604,24 +5060,95 @@ exports.onWorkoutCompletionJobCreated = onDocumentCreated(
 );
 ```
 
-Note: The Cloud Run Job (`workout-completion-worker`) also runs on a 15-minute schedule (like the training analyst) as a fallback, so even if the trigger fails, pending jobs will be picked up.
+Note: The Cloud Run Job also runs on a 15-minute schedule as a fallback.
 
-- [ ] **Step 6: Run tests**
+- [ ] **Step 7: Update index.js**
+
+Remove:
+- `onWorkoutCreatedUpdateRoutineCursor` export (trigger deleted)
+- The massive `onWorkoutCompleted` and `onWorkoutCreatedWithEnd` inline logic (replaced by enqueue)
+
+Add:
+- `onWorkoutCompletionJobCreated` export
+
+- [ ] **Step 8: Run tests**
 
 ```bash
 cd firebase_functions/functions && npm test
 ```
 
-- [ ] **Step 7: Deploy and verify**
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Deploy and verify**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add firebase_functions/functions/triggers/weekly-analytics.js firebase_functions/functions/index.js
+git add firebase_functions/functions/triggers/ firebase_functions/functions/index.js
 git commit -m "feat: Phase 5 — replace trigger cascade with job queue
 
-onWorkoutCompleted now enqueues a single job to workout_completion_jobs.
-The workout completion worker processes atomically with lease-based
-concurrency. No partial state, no contention, observable queue."
+Both onWorkoutCompleted and onWorkoutCreatedWithEnd now enqueue a single
+job. Routine cursor advance (workout-routine-cursor.js) absorbed into worker.
+No partial state, no contention, no race conditions."
+```
+
+---
+
+### Task 39b: Move post_workout_analyst.py to Training Analyst (Phase 5)
+
+**Files:**
+- Move: `adk_agent/canvas_orchestrator/workers/post_workout_analyst.py` → `adk_agent/training_analyst/workers/post_workout_analyst.py`
+- Modify: `adk_agent/training_analyst/Makefile`
+
+- [ ] **Step 1: Read the current post_workout_analyst.py**
+
+Read `adk_agent/canvas_orchestrator/workers/post_workout_analyst.py`. Understand:
+- It's a standalone CLI worker (`python post_workout_analyst.py --user-id X --workout-id Y`)
+- It calls `progression_skills.apply_progression()` via HTTP to the `applyProgression` Firebase Function
+- It imports from `app.skills.progression_skills` in the canvas_orchestrator
+
+- [ ] **Step 2: Move the file**
+
+```bash
+cp adk_agent/canvas_orchestrator/workers/post_workout_analyst.py adk_agent/training_analyst/workers/post_workout_analyst.py
+```
+
+- [ ] **Step 3: Update imports**
+
+The moved file needs to call `applyProgression` directly via HTTP (using `httpx`) instead of importing from `canvas_orchestrator`. Update the import to use a local HTTP client:
+
+```python
+# Replace: from app.skills.progression_skills import apply_progression
+# With: direct httpx call to applyProgression endpoint
+import httpx
+FUNCTIONS_URL = os.getenv("FIREBASE_FUNCTIONS_URL", "https://us-central1-myon-53d85.cloudfunctions.net")
+MYON_API_KEY = os.getenv("MYON_API_KEY", "")
+
+async def apply_progression(user_id, changes, **kwargs):
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(
+            f"{FUNCTIONS_URL}/applyProgression",
+            json={"userId": user_id, **kwargs},
+            headers={"x-api-key": MYON_API_KEY},
+        )
+        return resp.json()
+```
+
+- [ ] **Step 4: Add Makefile target**
+
+Add to `adk_agent/training_analyst/Makefile`:
+```makefile
+# Run post-workout analyst locally
+analyst-local:
+	python workers/post_workout_analyst.py
+```
+
+- [ ] **Step 5: Verify the original in canvas_orchestrator can be deleted after full migration**
+
+Note: Don't delete the original yet — it's still referenced by the current deployed system. It becomes dead code once the new agent service is deployed. Clean up in Phase 3c.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add adk_agent/training_analyst/workers/post_workout_analyst.py adk_agent/training_analyst/Makefile
+git commit -m "refactor: move post_workout_analyst from canvas_orchestrator to training_analyst"
 ```
 
 ---
@@ -4725,69 +5252,137 @@ git commit -m "feat(analyst): Phase 6 — add plateau, volume, periodization, co
 ### Task 41: iOS Cleanup (Phase 7)
 
 **Files:**
-- Modify: Various iOS files
+- Modify: Various iOS files (see steps below)
 
-- [ ] **Step 1: Identify oversized files**
+- [ ] **Step 1: Rename `canvases` → `conversations` in Firestore collection paths**
 
-Check line counts:
+These 5 files have hardcoded `"canvases"` Firestore collection paths:
+
+| File | Lines | Change |
+|------|-------|--------|
+| `CanvasRepository.swift` | 70, 94, 124, 146 | Replace `"canvases"` → `"conversations"` |
+| `CanvasViewModel.swift` | 802, 821, 905 | Replace `"canvases"` → `"conversations"` |
+| `CoachTabView.swift` | 250, 262, 268, 279 | Replace `"canvases"` → `"conversations"` |
+| `AllConversationsSheet.swift` | 187, 217 | Replace `"canvases"` → `"conversations"` |
+| `UserRepository.swift` | 92 | Replace `"canvases"` → `"conversations"` |
+
 ```bash
-wc -l Povver/Povver/Views/Workouts/FocusModeWorkoutScreen.swift
-wc -l Povver/Povver/Services/ActiveWorkoutManager.swift
-wc -l Povver/Povver/ViewModels/CanvasViewModel.swift
+# Verify all references found:
+grep -rn '"canvases"' Povver/Povver/ --include="*.swift" | grep -v ".build/"
 ```
 
-- [ ] **Step 2: Split FocusModeWorkoutScreen.swift** (~1904 lines)
-
-Extract into focused files. Build after each extraction to catch missing references:
-
-```bash
-# After each extraction:
-xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build
-```
-
-Extractions:
-- `FocusModeExerciseSection.swift` — extract the exercise list section (the `ForEach` over exercises with their sets)
-- `FocusModeSetRow.swift` — extract the individual set row view (weight/reps inputs, completion state)
-- `FocusModeRestTimer.swift` — extract the rest timer overlay component
-- `FocusModeWorkoutScreen.swift` — should retain: main layout, navigation, state management
-
-- [ ] **Step 3: Standardize naming**
-
-Run these greps to audit naming inconsistencies:
-```bash
-grep -rn "canvas" Povver/Povver/ --include="*.swift" -i | grep -v ".build/" | grep -v "ARCHITECTURE"
-grep -rn "Canvas" Povver/Povver/ --include="*.swift" | grep -v ".build/" | grep -v "ARCHITECTURE"
-```
-
-Known renames needed (from CLAUDE.md deprecated list):
-- `CanvasRepository.swift` → already deprecated, verify deleted
-- `CanvasViewModel.swift` → rename to `ConversationViewModel.swift` if it manages chat state
-- `CanvasService.swift` → rename to `ConversationService.swift` if it manages conversations
-- `CanvasDTOs.swift` → rename to `ConversationDTOs.swift`
-- `CanvasActions.swift` → rename to `ConversationActions.swift`
-
-For each rename, use Xcode's "Rename" refactoring to update all references, or manually search-and-replace. Build after each rename.
-
-- [ ] **Step 4: Remove dead code**
-
-Search for and remove references to deprecated patterns:
-```bash
-grep -rn "agent_sessions\|AGENT_VERSION\|SessionPreWarmer\|preWarmSession\|CanvasRepository" Povver/Povver/ --include="*.swift"
-```
-
-Remove any matches that are still present after Phase 3c cleanup.
-
-- [ ] **Step 5: Build to verify**
-
+Build after:
 ```bash
 xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 2: Update Firestore security rules**
+
+In `firestore.rules`, rename `canvases` match rules to `conversations`:
+```
+match /users/{userId}/conversations/{conversationId} {
+  // Same rules as canvases — admin-only write
+}
+```
+
+- [ ] **Step 3: Rename iOS classes**
+
+Rename files and all internal references. Build after each rename.
+
+| From | To |
+|------|----|
+| `CanvasViewModel.swift` | `ConversationViewModel.swift` |
+| `CanvasService.swift` | `ConversationService.swift` |
+| `CanvasRepository.swift` | `ConversationRepository.swift` |
+| `CanvasDTOs.swift` | `ConversationDTOs.swift` |
+| `CanvasActions.swift` | `ConversationActions.swift` |
+| `CanvasScreen.swift` | `ConversationScreen.swift` |
+
+Also rename variables: `recentCanvases` → `recentConversations` in `CoachTabView.swift`.
 
 ```bash
-git add Povver/
-git commit -m "refactor(ios): Phase 7 — split oversized files, standardize naming, remove dead code"
+# Verify no remaining Canvas references (except ARCHITECTURE docs):
+grep -rn "Canvas" Povver/Povver/ --include="*.swift" | grep -v ".build/" | grep -v "ARCHITECTURE" | grep -v "//.*deprecated"
+```
+
+- [ ] **Step 4: Update StreamEvent.swift to 9-event contract**
+
+Replace the 15-type `EventType` enum with 9 types:
+
+```swift
+enum EventType: String {
+    case message
+    case toolStart = "tool_start"
+    case toolEnd = "tool_end"
+    case artifact
+    case clarification
+    case status
+    case heartbeat
+    case done
+    case error
+}
+```
+
+Dropped types (no longer emitted by the new agent service):
+- `thinking`, `thought` — ADK thinking indicators
+- `toolRunning`, `toolComplete` — renamed to `tool_start`/`tool_end`
+- `agentResponse` / `agent_response` — redundant with `message`
+- `userPrompt`, `userResponse` — echo events
+- `pipeline` — ADK pipeline state
+- `card` — replaced by `artifact`
+
+Update event handlers in `CanvasViewModel` (now `ConversationViewModel`) and `DirectStreamingService` to handle the new types.
+
+- [ ] **Step 5: Remove DirectStreamingService backward compat**
+
+In `DirectStreamingService.swift`, remove:
+- `canvasId` field from request body (only send `conversationId`)
+- Any `sessionId` parameter
+- The `getServiceToken` call site
+
+- [ ] **Step 6: Split FocusModeWorkoutScreen.swift** (~1904 lines)
+
+Extract into focused files. Build after each extraction:
+
+- `FocusModeExerciseSection.swift` — exercise list section
+- `FocusModeSetRow.swift` — individual set row view
+- `FocusModeRestTimer.swift` — rest timer overlay
+- `FocusModeWorkoutScreen.swift` — retains: main layout, navigation, state
+
+- [ ] **Step 7: Remove any remaining dead code**
+
+```bash
+grep -rn "agent_sessions\|AGENT_VERSION\|SessionPreWarmer\|preWarmSession\|CanvasRepository\|getServiceToken\|openCanvas\|bootstrapCanvas\|initializeSession" Povver/Povver/ --include="*.swift" | grep -v ".build/"
+```
+
+Remove any matches that survived Phase 3c.
+
+- [ ] **Step 8: Update ARCHITECTURE.md files**
+
+Update the 4 iOS ARCHITECTURE.md files that reference "canvases":
+- `Povver/Povver/Models/ARCHITECTURE.md`
+- `Povver/Povver/Repositories/ARCHITECTURE.md`
+- `Povver/Povver/Views/Coach/ARCHITECTURE.md`
+- `Povver/Povver/Services/ARCHITECTURE.md` (if exists)
+
+- [ ] **Step 9: Build to verify**
+
+```bash
+xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build
+```
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add Povver/ firestore.rules
+git commit -m "refactor(ios): Phase 7 — canvases→conversations rename, 9-event SSE, split files
+
+- Renamed 'canvases' to 'conversations' in all Firestore collection paths (5 files)
+- Renamed 6 Canvas* classes to Conversation* classes
+- Updated StreamEvent.swift: 15 types → 9 (dropped ADK legacy types)
+- Removed DirectStreamingService backward compat (canvasId, sessionId)
+- Split FocusModeWorkoutScreen (1904 lines → 4 focused files)
+- Updated Firestore security rules and ARCHITECTURE.md files"
 ```
 
 ---
@@ -4820,11 +5415,11 @@ Remove session pre-warming, update streaming service docs.
 
 - [ ] **Step 5: Update FIRESTORE_SCHEMA.md**
 
-Add: `agent_memory/{auto-id}`, `mcp_api_keys/{key_hash}`, `workout_completion_jobs/{auto-id}`, conversation `session_vars` and `summary` fields. Mark `agent_sessions` as removed.
+Add: `agent_memory/{auto-id}`, `mcp_api_keys/{key_hash}`, `workout_completion_jobs/{auto-id}`, conversation `session_vars` and `summary` fields, `conversations/{id}/messages`, `conversations/{id}/artifacts`. Mark as removed: `agent_sessions`, `canvases` (renamed to `conversations`). Document that the canonical Firestore collection name is `conversations` (not `canvases`).
 
 - [ ] **Step 5b: Update CLAUDE.md**
 
-Update the Task Startup Sequence to reference `AGENT_SERVICE_ARCHITECTURE.md` instead of `SHELL_AGENT_ARCHITECTURE.md`. Update the Build & Development Commands section with the new `adk_agent/agent_service` commands. Add `mcp_server/` commands. Update the Deprecated section to add Vertex AI Agent Engine and ADK framework.
+Update the Task Startup Sequence to reference `AGENT_SERVICE_ARCHITECTURE.md` instead of `SHELL_AGENT_ARCHITECTURE.md`. Update the Build & Development Commands section with the new `adk_agent/agent_service` commands. Add `mcp_server/` commands. Update the Deprecated section to add: Vertex AI Agent Engine, ADK framework, `getServiceToken`, `invokeCanvasOrchestrator`, `openCanvas`/`bootstrapCanvas`/`initializeSession`/`preWarmSession`, `cleanupStaleSessions`/`expireProposalsScheduled`, `canvases` collection name (now `conversations`).
 
 - [ ] **Step 6: Commit**
 
