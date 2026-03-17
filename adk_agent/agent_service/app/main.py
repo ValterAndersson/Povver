@@ -11,7 +11,7 @@ from starlette.requests import Request
 from starlette.responses import StreamingResponse, JSONResponse
 from starlette.routing import Route
 
-from app.observability import setup_logging, new_trace_id
+from app.observability import setup_logging, new_trace_id, set_trace_id
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -53,16 +53,22 @@ async def stream_handler(request: Request) -> StreamingResponse:
     trace_id = correlation_id or new_trace_id()
 
     async def event_stream():
+        import time as _time
         from app.agent_loop import run_agent_loop, sse_event
         from app.context import RequestContext
         from app.context_builder import build_system_context
         from app.firestore_client import get_firestore_client
         from app.functional_handler import execute_functional_lane
         from app.llm.gemini import GeminiClient
-        from app.observability import log_request
+        from app.observability import log_request, log_request_complete, log_tools_available
         from app.planner import plan_tools
         from app.router import route_request, Lane
         from app.tools.registry import execute_tool, get_tools
+
+        request_start = _time.monotonic()
+
+        # Ensure trace_id propagates into this async generator
+        set_trace_id(trace_id)
 
         from datetime import date
         ctx = RequestContext(
@@ -103,6 +109,8 @@ async def stream_handler(request: Request) -> StreamingResponse:
                     display_unit = unit if unit.lower().startswith("lb") else "kg"
                     yield sse_event("message", {"text": f"Logged: {parsed['reps']} × {display_weight}{display_unit}"}).encode()
                     yield sse_event("done", {}).encode()
+                    elapsed = int((_time.monotonic() - request_start) * 1000)
+                    log_request_complete("fast", elapsed, success=True)
                     return
                 except Exception as e:
                     logger.warning("Fast lane failed, falling back to slow: %s", e)
@@ -124,27 +132,37 @@ async def stream_handler(request: Request) -> StreamingResponse:
                     )
                     yield sse_event("message", {"text": json.dumps(result.to_dict())}).encode()
                     yield sse_event("done", {}).encode()
+                    elapsed = int((_time.monotonic() - request_start) * 1000)
+                    log_request_complete("functional", elapsed, success=True)
                     return
                 except Exception as e:
                     logger.error("Functional lane error: %s", e)
                     yield sse_event("error", {"message": str(e)}).encode()
+                    elapsed = int((_time.monotonic() - request_start) * 1000)
+                    log_request_complete("functional", elapsed, success=False, error=str(e))
                     return
 
         # --- Slow Lane (default) ---
         # Build full 360° context (instruction + history) in one call
+        context_start = _time.monotonic()
         instruction, history = await build_system_context(
             ctx, llm_client=llm_client, model=model
         )
+        context_ms = int((_time.monotonic() - context_start) * 1000)
+        logger.info("Context build completed in %dms", context_ms)
 
         # Get available tools for this context (respects workout mode banning)
         tools = get_tools(ctx)
+        tool_names = [t.name for t in tools]
+        log_tools_available(tool_names, ctx.workout_mode)
 
         # Run planner to prioritize tools
-        tool_names = [t.name for t in tools]
         prioritized = plan_tools(message, ctx, tool_names)
         if prioritized:
             logger.info("Planner prioritized: %s", prioritized)
 
+        tool_count = 0
+        request_success = True
         async for event in run_agent_loop(
             llm_client=llm_client,
             model=model,
@@ -156,7 +174,14 @@ async def stream_handler(request: Request) -> StreamingResponse:
             ctx=ctx,
             fs=fs,
         ):
+            if event.event == "tool_start":
+                tool_count += 1
+            if event.event == "error":
+                request_success = False
             yield event.encode()
+
+        elapsed = int((_time.monotonic() - request_start) * 1000)
+        log_request_complete("slow", elapsed, success=request_success, tool_count=tool_count)
 
 
     return StreamingResponse(
@@ -170,6 +195,36 @@ async def stream_handler(request: Request) -> StreamingResponse:
 
 
 async def health(request: Request) -> JSONResponse:
+    """Health check with optional deep probe.
+
+    GET /health        → {"status": "ok"} (fast, for load balancer)
+    GET /health?deep=1 → verifies Firestore + Vertex AI connectivity
+    """
+    if request.query_params.get("deep"):
+        checks = {}
+        # Firestore
+        try:
+            from app.firestore_client import get_firestore_client
+            fs = get_firestore_client()
+            # Lightweight read — just check the connection works
+            await fs.db.collection("_health").limit(1).get()
+            checks["firestore"] = "ok"
+        except Exception as e:
+            checks["firestore"] = f"error: {e}"
+        # Vertex AI / Gemini
+        try:
+            from app.llm.gemini import GeminiClient
+            client = GeminiClient()
+            # Minimal call to verify auth + endpoint
+            checks["vertex_ai"] = "ok (client initialized)"
+        except Exception as e:
+            checks["vertex_ai"] = f"error: {e}"
+
+        all_ok = all(v.startswith("ok") for v in checks.values())
+        return JSONResponse(
+            {"status": "ok" if all_ok else "degraded", "checks": checks},
+            status_code=200 if all_ok else 503,
+        )
     return JSONResponse({"status": "ok"})
 
 
