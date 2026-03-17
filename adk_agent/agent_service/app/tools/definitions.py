@@ -349,6 +349,92 @@ def register_progression_skills():
     )
 
 
+def register_memory_tools():
+    """Register memory and session variable tools."""
+    from app.tools import memory_tools
+
+    register_tool(
+        "save_memory",
+        memory_tools.save_memory,
+        "Save a fact about the user to persistent memory (preferences, injuries, goals)",
+        {
+            "type": "object",
+            "properties": {
+                "content": {"type": "string", "description": "The fact to remember"},
+                "category": {
+                    "type": "string",
+                    "enum": ["preference", "injury", "goal", "schedule", "personal", "training_note"],
+                    "description": "Memory category",
+                },
+            },
+            "required": ["content", "category"],
+        },
+    )
+    register_tool(
+        "retire_memory",
+        memory_tools.retire_memory,
+        "Retire a memory that is no longer accurate or relevant",
+        {
+            "type": "object",
+            "properties": {
+                "memory_id": {"type": "string", "description": "ID of the memory to retire"},
+                "reason": {"type": "string", "description": "Why the memory is being retired"},
+            },
+            "required": ["memory_id", "reason"],
+        },
+    )
+    register_tool(
+        "list_memories",
+        memory_tools.list_memories,
+        "List all active memories for the current user",
+        {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "Max results (default 50)"},
+            },
+            "required": [],
+        },
+    )
+    register_tool(
+        "set_session_var",
+        memory_tools.set_session_var,
+        "Set a session variable for the current conversation",
+        {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string", "description": "Variable name"},
+                "value": {"type": "string", "description": "Variable value"},
+            },
+            "required": ["key", "value"],
+        },
+    )
+    register_tool(
+        "delete_session_var",
+        memory_tools.delete_session_var,
+        "Delete a session variable from the current conversation",
+        {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string", "description": "Variable name to delete"},
+            },
+            "required": ["key"],
+        },
+    )
+    register_tool(
+        "search_past_conversations",
+        memory_tools.search_past_conversations,
+        "Search past conversations by keyword",
+        {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search keyword"},
+                "limit": {"type": "integer", "description": "Max results (default 5)"},
+            },
+            "required": ["query"],
+        },
+    )
+
+
 def register_all_skills():
     """Register all skill tools. Called once at startup."""
     register_coach_skills()
@@ -356,3 +442,4 @@ def register_all_skills():
     register_copilot_skills()
     register_workout_skills()
     register_progression_skills()
+    register_memory_tools()

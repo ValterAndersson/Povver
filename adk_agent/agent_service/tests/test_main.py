@@ -39,7 +39,7 @@ async def test_stream_invalid_json():
 @pytest.mark.asyncio
 async def test_format_history():
     """_format_history converts Firestore message types to LLM roles."""
-    from app.main import _format_history
+    from app.context_builder import _format_history
     messages = [
         {"type": "user_prompt", "content": "Hi"},
         {"type": "agent_response", "content": "Hello!"},

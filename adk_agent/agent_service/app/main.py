@@ -55,9 +55,9 @@ async def stream_handler(request: Request) -> StreamingResponse:
     async def event_stream():
         from app.agent_loop import run_agent_loop, sse_event
         from app.context import RequestContext
+        from app.context_builder import build_system_context
         from app.firestore_client import get_firestore_client
         from app.functional_handler import execute_functional_lane
-        from app.instruction import build_system_instruction
         from app.llm.gemini import GeminiClient
         from app.observability import log_request
         from app.planner import plan_tools
@@ -122,13 +122,10 @@ async def stream_handler(request: Request) -> StreamingResponse:
                     return
 
         # --- Slow Lane (default) ---
-        # Load conversation history
-        history = await fs.get_conversation_messages(
-            user_id, conversation_id, limit=20
+        # Build full 360° context (instruction + history) in one call
+        instruction, history = await build_system_context(
+            ctx, llm_client=llm_client, model=model
         )
-
-        # Build system instruction with request context
-        instruction = build_system_instruction(ctx)
 
         # Get available tools for this context (respects workout mode banning)
         tools = get_tools(ctx)
@@ -144,7 +141,7 @@ async def stream_handler(request: Request) -> StreamingResponse:
             llm_client=llm_client,
             model=model,
             instruction=instruction,
-            history=_format_history(history),
+            history=history,
             message=message,
             tools=tools,
             tool_executor=lambda name, args, c: execute_tool(name, args, c),
@@ -178,21 +175,6 @@ async def stream_handler(request: Request) -> StreamingResponse:
             "X-Trace-Id": trace_id,
         },
     )
-
-
-def _format_history(messages: list[dict]) -> list[dict]:
-    """Convert Firestore message docs to LLM message format.
-
-    Firestore uses `type` field (user_prompt, agent_response, artifact).
-    LLM expects `role` field (user, assistant).
-    """
-    TYPE_TO_ROLE = {"user_prompt": "user", "agent_response": "assistant"}
-    formatted = []
-    for msg in messages:
-        role = TYPE_TO_ROLE.get(msg.get("type", "user_prompt"))
-        if role:
-            formatted.append({"role": role, "content": msg.get("content", "")})
-    return formatted
 
 
 async def health(request: Request) -> JSONResponse:
