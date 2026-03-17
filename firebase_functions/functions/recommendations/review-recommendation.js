@@ -40,7 +40,7 @@ const { isPremiumUser } = require('../utils/subscription-gate');
 const {
   applyChangesToTarget,
   resolvePathValue,
-} = require('../agents/apply-progression');
+} = require('../shared/progressions');
 
 if (!admin.apps.length) {
   admin.initializeApp();

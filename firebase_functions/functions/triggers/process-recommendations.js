@@ -34,7 +34,7 @@ const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const admin = require('firebase-admin');
 const logger = require('firebase-functions/logger');
-const { applyChangesToTarget } = require('../agents/apply-progression');
+const { applyChangesToTarget } = require('../shared/progressions');
 
 // ---------------------------------------------------------------------------
 // Triggers
