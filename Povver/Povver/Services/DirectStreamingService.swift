@@ -22,14 +22,6 @@ import Combine
 // - streamAgentNormalized → firebase_functions/functions/strengthos/stream-agent-normalized.js
 //   SSE endpoint that normalizes Agent Engine events into structured stream
 //
-// - getServiceToken → firebase_functions/functions/auth/get-service-token.js
-//   Exchanges Firebase ID token for GCP service account access token
-//
-// DIRECT AGENT ENGINE ENDPOINTS (fallback, not currently used):
-// - https://{location}-aiplatform.googleapis.com/v1beta1/.../reasoningEngines/{id}:streamQuery
-//   Direct Vertex AI Agent Engine streaming endpoint
-// - :query endpoints for session management (create_session, list_sessions, etc.)
-//
 // STREAM EVENT FLOW:
 // 1. User sends message → CanvasViewModel.sendMessage()
 // 2. CanvasViewModel calls DirectStreamingService.streamQuery()
@@ -44,7 +36,6 @@ import Combine
 //
 // EVENT TYPES RECEIVED:
 // - pipeline: CoT visibility (router, planner, critic steps)
-// - session: Contains sessionId for session continuity
 // - thinking: Agent is reasoning
 // - thought: Thought completion
 // - toolRunning: Agent is calling a tool (with name)
@@ -69,26 +60,10 @@ import Combine
 //
 // =============================================================================
 
-// MARK: - Session Details
-struct SessionDetails {
-    let id: String
-    let userId: String
-    let state: [String: Any]
-    let events: [[String: Any]]
-    let lastUpdateTime: Double
-}
-
 /// Service for direct streaming communication with the Agent Engine API
 class DirectStreamingService: ObservableObject {
     static let shared = DirectStreamingService()
-    
-    private let projectId = "myon-53d85"
-    private let location = "us-central1"
-    private let reasoningEngineId = "4683295011721183232"
-    
-    private var gcpAuthToken: String?
-    private var tokenExpiryTime: Date?
-    
+
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30       // 30s to establish connection
@@ -98,15 +73,6 @@ class DirectStreamingService: ObservableObject {
     }()
     
     // MARK: - Public Methods
-    
-    /// Feature flag to toggle normalized SSE endpoint
-    private var useNormalizedStream: Bool {
-        #if DEBUG
-        return true
-        #else
-        return true
-        #endif
-    }
 
     /// Query the agent with streaming response (AsyncSequence)
     func streamQuery(
@@ -114,7 +80,6 @@ class DirectStreamingService: ObservableObject {
         conversationId: String,
         message: String,
         correlationId: String,
-        sessionId: String?,
         workoutId: String? = nil,
         timeoutSeconds: Int = 300
     ) -> AsyncThrowingStream<StreamEvent, Error> {
@@ -128,7 +93,7 @@ class DirectStreamingService: ObservableObject {
                     AgentPipelineLogger.startRequest(
                         correlationId: correlationId,
                         canvasId: conversationId,
-                        sessionId: sessionId,
+                        sessionId: nil,
                         message: message
                     )
 
@@ -160,10 +125,8 @@ class DirectStreamingService: ObservableObject {
                     let body: [String: Any] = [
                         "userId": userId,
                         "conversationId": conversationId,
-                        "canvasId": conversationId,  // backward compat: production backend still reads canvasId
                         "message": message,
                         "correlationId": correlationId,
-                        "sessionId": sessionId as Any,
                         "workoutId": workoutId as Any
                     ].compactMapValues { $0 }
                     request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -264,289 +227,6 @@ class DirectStreamingService: ObservableObject {
             
             continuation.onTermination = { @Sendable _ in
                 task.cancel()
-            }
-        }
-    }
-    
-    /// Query the agent with streaming response (Legacy version)
-    func streamQuery(
-        message: String,
-        userId: String,
-        sessionId: String? = nil,
-        progressHandler: @escaping (_ partialText: String?, _ action: String?) -> Void,
-        completion: @escaping (Result<(response: String, sessionId: String?), Error>) -> Void
-    ) {
-        Task {
-            do {
-                // Ensure we have a valid auth token
-                let token = try await getAuthToken()
-                
-                var asyncBytes: URLSession.AsyncBytes
-                var response: URLResponse
-                
-                if useNormalizedStream {
-                    // Use Firebase Function SSE normalizer
-                    guard let sseURL = URL(string: "https://us-central1-myon-53d85.cloudfunctions.net/streamAgentNormalized") else {
-                        throw StreamingError.invalidURL
-                    }
-                    var req = URLRequest(url: sseURL)
-                    req.httpMethod = "POST"
-                    // For server auth, use Firebase ID token, not GCP access token
-                    guard let currentUser = AuthService.shared.currentUser else { throw StreamingError.notAuthenticated }
-                    let idToken = try await currentUser.getIDToken()
-                    req.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
-                    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                    let body: [String: Any] = [
-                        "message": message,
-                        "sessionId": sessionId as Any,
-                        "markdown_policy": [
-                            "bullets": "-",
-                            "max_bullets": 6,
-                            "no_headers": true
-                        ]
-                    ].compactMapValues { $0 }
-                    req.httpBody = try JSONSerialization.data(withJSONObject: body)
-                    (asyncBytes, response) = try await session.bytes(for: req)
-                } else {
-                    // Direct Vertex Agent Engine fallback
-                    let url = URL(string: "https://\(location)-aiplatform.googleapis.com/v1beta1/projects/\(projectId)/locations/\(location)/reasoningEngines/\(reasoningEngineId):streamQuery")!
-                    var request = URLRequest(url: url)
-                    request.httpMethod = "POST"
-                    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                    let payload: [String: Any] = [
-                        "class_method": "stream_query",
-                        "input": [
-                            "user_id": userId,
-                            "message": message,
-                            "session_id": sessionId as Any
-                        ].compactMapValues { $0 }
-                    ]
-                    request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-                    (asyncBytes, response) = try await session.bytes(for: request)
-                }
-                
-                guard let httpResponse = response as? HTTPURLResponse,
-                      httpResponse.statusCode == 200 else {
-                    throw StreamingError.invalidResponse
-                }
-                
-                var fullResponse = ""
-                var pendingBuffer = ""
-                var lastFlushedTail = ""
-                var seenChunkFingerprints: Set<String> = []
-                var seenActions: Set<String> = []
-                var returnedSessionId: String?
-                
-                
-                // Process streaming response
-                for try await line in asyncBytes.lines {
-                    if useNormalizedStream {
-                        // Canonical SSE NDJSON events
-                        guard let event = parseStreamingEvent(line) else { continue }
-                        if let type = event["type"] as? String {
-                            switch type {
-                            case "session":
-                                returnedSessionId = event["sessionId"] as? String
-                            case "list_item":
-                                if let text = event["text"] as? String, !text.isEmpty {
-                                    let bullet = "- " + text + "\n"
-                                    pendingBuffer += bullet
-                                    let (commit, keep) = Self.segmentAndSanitizeMarkdown(pendingBuffer)
-                                    if !commit.isEmpty {
-                                        var addition = Self.ensureJoinSpacing(base: fullResponse, addition: commit)
-                                        addition = Self.cleanLeadingFiller(addition)
-                                        let commitToAppend = Self.dedupeTrailing(base: fullResponse, addition: addition, lastTail: lastFlushedTail)
-                                        if !commitToAppend.isEmpty {
-                                            let fp = Self.fingerprint(commitToAppend)
-                                            if !seenChunkFingerprints.contains(fp) {
-                                                fullResponse += commitToAppend
-                                                lastFlushedTail = String(fullResponse.suffix(200))
-                                                seenChunkFingerprints.insert(fp)
-                                                progressHandler(fullResponse, nil)
-                                            }
-                                        }
-                                    }
-                                    pendingBuffer = keep
-                                }
-                            case "code_block":
-                                // For now, ignore open/close; text comes via deltas. Later: render monospace blocks.
-                                break
-                            case "text_delta":
-                                if let text = event["text"] as? String, !text.isEmpty {
-                                    pendingBuffer += text
-                                    let (commit, keep) = Self.segmentAndSanitizeMarkdown(pendingBuffer)
-                                    if !commit.isEmpty {
-                                        var addition = Self.ensureJoinSpacing(base: fullResponse, addition: commit)
-                                        addition = Self.cleanLeadingFiller(addition)
-                                        let commitToAppend = Self.dedupeTrailing(base: fullResponse, addition: addition, lastTail: lastFlushedTail)
-                                        if !commitToAppend.isEmpty {
-                                            let fp = Self.fingerprint(commitToAppend)
-                                            if !seenChunkFingerprints.contains(fp) {
-                                                fullResponse += commitToAppend
-                                                lastFlushedTail = String(fullResponse.suffix(200))
-                                                seenChunkFingerprints.insert(fp)
-                                                progressHandler(fullResponse, nil)
-                                            }
-                                        }
-                                    }
-                                    pendingBuffer = keep
-                                }
-                            case "text_commit":
-                                if let text = event["text"] as? String, !text.isEmpty {
-                                    var addition = Self.ensureJoinSpacing(base: fullResponse, addition: text)
-                                    addition = Self.cleanLeadingFiller(addition)
-                                    // Drop overlap if commit contains the pending buffer prefix
-                                    if !pendingBuffer.isEmpty && addition.hasPrefix(pendingBuffer) {
-                                        addition = String(addition.dropFirst(pendingBuffer.count))
-                                    }
-                                    let commitToAppend = Self.dedupeTrailing(base: fullResponse, addition: addition, lastTail: lastFlushedTail)
-                                    if !commitToAppend.isEmpty {
-                                        fullResponse += commitToAppend
-                                        lastFlushedTail = String(fullResponse.suffix(200))
-                                        progressHandler(fullResponse, nil)
-                                    }
-                                    pendingBuffer = ""
-                                }
-                            case "tool_started":
-                                if let name = event["name"] as? String {
-                                    let human = getHumanReadableFunctionName(name)
-                                    if !seenActions.contains(human) {
-                                        seenActions.insert(human)
-                                        progressHandler(nil, human)
-                                    }
-                                }
-                            case "tool_result":
-                                if let name = event["name"] as? String {
-                                    let human = getHumanReadableFunctionResponseName(name)
-                                    var detail = ""
-                                    if let counts = event["counts"] as? [String: Any], let items = counts["items"] as? Int {
-                                        detail = " - found \(items) item\(items == 1 ? "" : "s")"
-                                    }
-                                    let actionLine = human + detail
-                                    if !seenActions.contains(actionLine) {
-                                        seenActions.insert(actionLine)
-                                        progressHandler(nil, actionLine)
-                                    }
-                                }
-                            case "error":
-                                // Optionally surface error
-                                break
-                            default:
-                                break
-                            }
-                        }
-                    } else {
-                        // Fallback: raw Agent Engine stream
-                        if let event = parseStreamingEvent(line) {
-                            // Extract session ID if present
-                            if let actions = event["actions"] as? [String: Any] {
-                                if let sid = actions["session_id"] as? String {
-                                    returnedSessionId = sid
-                                }
-                            }
-                            
-                            // Extract and handle content
-                            if let content = event["content"] as? [String: Any],
-                               let parts = content["parts"] as? [[String: Any]] {
-                                for part in parts {
-                                    // Handle regular text
-                                    if let text = part["text"] as? String {
-                                        if !text.isEmpty {
-                                            // Append to pending buffer and flush only safe segments
-                                            pendingBuffer += text
-                                            let (commit, keep) = Self.segmentAndSanitizeMarkdown(pendingBuffer)
-                                            if !commit.isEmpty {
-                                                var addition = Self.ensureJoinSpacing(base: fullResponse, addition: commit)
-                                                addition = Self.cleanLeadingFiller(addition)
-                                                let commitToAppend = Self.dedupeTrailing(base: fullResponse, addition: addition, lastTail: lastFlushedTail)
-                                                if !commitToAppend.isEmpty {
-                                                    let fp = Self.fingerprint(commitToAppend)
-                                                    if !seenChunkFingerprints.contains(fp) {
-                                                        fullResponse += commitToAppend
-                                                        lastFlushedTail = String(fullResponse.suffix(200))
-                                                        seenChunkFingerprints.insert(fp)
-                                                        progressHandler(fullResponse, nil)
-                                                    }
-                                                }
-                                            }
-                                            pendingBuffer = keep
-                                        }
-                                    }
-                                    
-                                    // Handle function calls
-                                    if let functionCall = part["function_call"] as? [String: Any],
-                                       let name = functionCall["name"] as? String {
-                                        let args = functionCall["args"] as? [String: Any]
-                                        let argsString = formatFunctionArgs(args)
-                                        let humanReadableName = getHumanReadableFunctionName(name)
-                                        let actionLine = "\(humanReadableName)\(argsString)"
-                                        if !seenActions.contains(actionLine) {
-                                            seenActions.insert(actionLine)
-                                            progressHandler(nil, actionLine)
-                                        }
-                                    }
-                                    
-                                    // Handle function responses
-                                    if let functionResponse = part["function_response"] as? [String: Any],
-                                       let name = functionResponse["name"] as? String {
-                                        let humanReadableName = getHumanReadableFunctionResponseName(name)
-                                        var responseJson: [String: Any]? = nil
-                                        if let responseDict = functionResponse["response"] as? [String: Any] {
-                                            responseJson = responseDict
-                                        } else if let response = functionResponse["response"] as? String,
-                                                  let responseData = response.data(using: .utf8),
-                                                  let parsed = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any] {
-                                            responseJson = parsed
-                                        }
-                                        if let responseJson = responseJson {
-                                            var responseDetail = ""
-                                            switch name {
-                                            case "get_user_templates":
-                                                if let data = responseJson["data"] as? [[String: Any]] { responseDetail = " - found \(data.count) template\(data.count == 1 ? "" : "s")" }
-                                            case "get_user_workouts":
-                                                if let data = responseJson["data"] as? [[String: Any]] { responseDetail = " - found \(data.count) workout\(data.count == 1 ? "" : "s")" }
-                                            case "search_exercises", "list_exercises":
-                                                if let data = responseJson["data"] as? [[String: Any]] { responseDetail = " - found \(data.count) exercise\(data.count == 1 ? "" : "s")" }
-                                            case "get_user_routines":
-                                                if let data = responseJson["data"] as? [[String: Any]] { responseDetail = " - found \(data.count) routine\(data.count == 1 ? "" : "s")" }
-                                            default:
-                                                break
-                                            }
-                                            let actionLine = "\(humanReadableName)\(responseDetail)"
-                                            if !seenActions.contains(actionLine) {
-                                                seenActions.insert(actionLine)
-                                                progressHandler(nil, actionLine)
-                                            }
-                                        } else {
-                                            if !seenActions.contains(humanReadableName) {
-                                                seenActions.insert(humanReadableName)
-                                                progressHandler(nil, humanReadableName)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // Flush any remaining buffered text at stream end
-                if !pendingBuffer.isEmpty {
-                    let (commit, keep) = Self.segmentAndSanitizeMarkdown(pendingBuffer, allowPartial: true)
-                    var finalAdd = Self.ensureJoinSpacing(base: fullResponse, addition: commit + keep)
-                    finalAdd = Self.cleanLeadingFiller(finalAdd)
-                    let commitToAppend = Self.dedupeTrailing(base: fullResponse, addition: finalAdd, lastTail: lastFlushedTail)
-                    if !commitToAppend.isEmpty {
-                        fullResponse += commitToAppend
-                        progressHandler(fullResponse, nil)
-                    }
-                }
-                completion(.success((fullResponse, returnedSessionId ?? sessionId)))
-                
-            } catch {
-                completion(.failure(error))
             }
         }
     }
@@ -653,244 +333,8 @@ class DirectStreamingService: ObservableObject {
         return lines.joined(separator: "\n").replacingOccurrences(of: "  ", with: " ")
     }
 
-    /// Create a new session
-    func createSession(userId: String) async throws -> String {
-        let token = try await getAuthToken()
-        
-        let url = URL(string: "https://\(location)-aiplatform.googleapis.com/v1beta1/projects/\(projectId)/locations/\(location)/reasoningEngines/\(reasoningEngineId):query")!
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        let payload: [String: Any] = [
-            "class_method": "create_session",
-            "input": [
-                "user_id": userId,
-                "state": [
-                    "user:id": userId
-                ]
-            ]
-        ]
-        
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        
-        let (data, response) = try await session.data(for: request)
-        
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw StreamingError.sessionCreationFailed
-        }
-        
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        guard let output = json?["output"] as? [String: Any],
-              let sessionId = output["id"] as? String else {
-            throw StreamingError.invalidSessionResponse
-        }
-        
-        return sessionId
-    }
-    
-    /// List sessions for a user
-    func listSessions(userId: String) async throws -> [String] {
-        let token = try await getAuthToken()
-        
-        let url = URL(string: "https://\(location)-aiplatform.googleapis.com/v1beta1/projects/\(projectId)/locations/\(location)/reasoningEngines/\(reasoningEngineId):query")!
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        let payload: [String: Any] = [
-            "class_method": "list_sessions",
-            "input": [
-                "user_id": userId
-            ]
-        ]
-        
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        
-        let (data, response) = try await session.data(for: request)
-        
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw StreamingError.listSessionsFailed
-        }
-        
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        
-        // ADK response examples:
-        // 1. { "output": [ { "id": "123" }, ... ] }
-        // 2. { "output": { "sessions": [ { "id": "123" }, ... ] } }
-        
-        var sessionArray: [[String: Any]] = []
-        
-        if let arr = json?["output"] as? [[String: Any]] {
-            sessionArray = arr
-        } else if let dict = json?["output"] as? [String: Any],
-                  let arr = dict["sessions"] as? [[String: Any]] {
-            sessionArray = arr
-        } else {
-            if json != nil {
-                AppLogger.shared.error(.agent, "unexpected list_sessions response")
-            }
-            return []
-        }
-        
-        // Extract IDs
-        return sessionArray.compactMap { sessionObj in
-            if let sid = sessionObj["id"] as? String {
-                return sid
-            }
-            return sessionObj["session_id"] as? String
-        }
-    }
-    
-    /// Delete a session
-    func deleteSession(sessionId: String, userId: String) async throws {
-        let token = try await getAuthToken()
-        
-        let url = URL(string: "https://\(location)-aiplatform.googleapis.com/v1beta1/projects/\(projectId)/locations/\(location)/reasoningEngines/\(reasoningEngineId):query")!
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        let payload: [String: Any] = [
-            "class_method": "delete_session",
-            "input": [
-                "user_id": userId,
-                "session_id": sessionId
-            ]
-        ]
-        
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        
-        let (_, response) = try await session.data(for: request)
-        
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw StreamingError.deleteSessionFailed
-        }
-    }
-    
-    /// Get session details including conversation history
-    func getSession(sessionId: String, userId: String) async throws -> SessionDetails {
-        // Ensure we have a valid auth token
-        let token = try await getAuthToken()
-        
-        // Use the :query endpoint with class_method
-        let url = URL(string: "https://\(location)-aiplatform.googleapis.com/v1beta1/projects/\(projectId)/locations/\(location)/reasoningEngines/\(reasoningEngineId):query")!
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        let payload: [String: Any] = [
-            "class_method": "get_session",
-            "input": [
-                "user_id": userId,
-                "session_id": sessionId
-            ]
-        ]
-        
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        
-        let (data, response) = try await URLSession.shared.data(for: request)
-        
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw StreamingError.invalidResponse
-        }
-        
-        guard httpResponse.statusCode == 200 else {
-            throw StreamingError.httpError(statusCode: httpResponse.statusCode)
-        }
-        
-        // Parse the session details from the output
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-        let output = json["output"] as? [String: Any] ?? [:]
-        
-        return SessionDetails(
-            id: output["id"] as? String ?? sessionId,
-            userId: output["user_id"] as? String ?? userId,
-            state: output["state"] as? [String: Any] ?? [:],
-            events: output["events"] as? [[String: Any]] ?? [],
-            lastUpdateTime: output["last_update_time"] as? Double ?? Date().timeIntervalSince1970
-        )
-    }
-    
     // MARK: - Private Methods
-    
-    private func getAuthToken() async throws -> String {
-        // Check if we have a valid cached token
-        if let token = gcpAuthToken,
-           let expiry = tokenExpiryTime,
-           expiry > Date() {
-            return token
-        }
-        
-        // Get new token using Firebase Auth
-        guard let user = AuthService.shared.currentUser else {
-            throw StreamingError.notAuthenticated
-        }
-        
-        AppLogger.shared.info(.agent, "authenticated uid=\(user.uid.prefix(8))")
 
-        // Get Firebase ID token
-        do {
-            AppLogger.shared.info(.agent, "getting Firebase ID token")
-            let idToken = try await user.getIDToken()
-
-            // Call HTTP endpoint with auth token
-            let url = URL(string: "https://us-central1-myon-53d85.cloudfunctions.net/getServiceToken")!
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-            AppLogger.shared.info(.agent, "getting service account token")
-            let (data, response) = try await session.data(for: request)
-
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200 else {
-                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-                AppLogger.shared.error(.agent, "token exchange HTTP \(statusCode)")
-                throw StreamingError.tokenExchangeFailed
-            }
-
-            AppLogger.shared.info(.agent, "token exchange response received")
-            let resultData = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-
-            guard let resultData = resultData,
-                  let accessToken = resultData["accessToken"] as? String else {
-                AppLogger.shared.error(.agent, "failed to extract accessToken")
-                throw StreamingError.invalidTokenResponse
-            }
-
-            // Extract expiry time if available
-            if let expiryTimestamp = resultData["expiryDate"] as? TimeInterval {
-                self.tokenExpiryTime = Date(timeIntervalSince1970: expiryTimestamp / 1000)
-            } else {
-                // Default to 1 hour if no expiry provided
-                self.tokenExpiryTime = Date().addingTimeInterval(3600)
-            }
-
-            self.gcpAuthToken = accessToken
-            AppLogger.shared.info(.agent, "GCP access token obtained")
-            return accessToken
-        } catch let error as NSError {
-            AppLogger.shared.error(.agent, "auth token error", error)
-            throw StreamingError.tokenExchangeFailed
-        } catch {
-            AppLogger.shared.error(.agent, "auth token error", error)
-            throw StreamingError.tokenExchangeFailed
-        }
-    }
-    
     private func parseStreamingEvent(_ line: String) -> [String: Any]? {
         // Remove "data: " prefix if present
         let jsonString = line.hasPrefix("data: ") ? String(line.dropFirst(6)) : line
@@ -1098,13 +542,7 @@ class DirectStreamingService: ObservableObject {
 
 enum StreamingError: LocalizedError {
     case notAuthenticated
-    case tokenExchangeFailed
-    case invalidTokenResponse
     case invalidResponse
-    case sessionCreationFailed
-    case invalidSessionResponse
-    case listSessionsFailed
-    case deleteSessionFailed
     case invalidURL
     case httpError(statusCode: Int)
     case premiumRequired
@@ -1113,20 +551,8 @@ enum StreamingError: LocalizedError {
         switch self {
         case .notAuthenticated:
             return "User not authenticated"
-        case .tokenExchangeFailed:
-            return "Failed to exchange Firebase token for GCP access token"
-        case .invalidTokenResponse:
-            return "Invalid token exchange response"
         case .invalidResponse:
             return "Invalid response from Agent Engine API"
-        case .sessionCreationFailed:
-            return "Failed to create session"
-        case .invalidSessionResponse:
-            return "Invalid session creation response"
-        case .listSessionsFailed:
-            return "Failed to list sessions"
-        case .deleteSessionFailed:
-            return "Failed to delete session"
         case .invalidURL:
             return "Invalid URL"
         case .httpError(let statusCode):

@@ -292,11 +292,8 @@ final class CanvasService: CanvasServiceProtocol {
     //
     // This is the RECOMMENDED entry point for opening a canvas.
     //
-    // PRE-WARMING:
-    // If SessionPreWarmer.preWarmIfNeeded() was called earlier, the session may already
-    // exist in Firestore. The backend will detect this and return isNewSession=false.
-    //
     // Called by: CanvasViewModel.bootstrap()
+    // Note: Sessions eliminated (Phase 3c) — backend returns no-op stub with sessionId=nil.
     // =========================================================================
     func openCanvas(userId: String, purpose: String) async throws -> (canvasId: String, sessionId: String) {
         struct Req: Codable { let userId: String; let purpose: String }

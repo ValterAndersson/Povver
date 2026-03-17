@@ -17,7 +17,7 @@ if (!admin.apps.length) {
 
 // Middleware
 const { withApiKey } = require('./auth/middleware');
-const { getServiceToken } = require('./auth/exchange-token');
+const { getAuthenticatedUserId } = require('./utils/auth-helpers');
 
 // Health Check
 const { health } = require('./health/health');
@@ -98,12 +98,8 @@ const { artifactAction } = require('./artifacts/artifact-action');
 const { applyAction } = require('./canvas/apply-action');
 const { proposeCards } = require('./canvas/propose-cards');
 const { expireProposals } = require('./canvas/expire-proposals');
-const { expireProposalsScheduledHandler } = require('./canvas/expire-proposals-scheduled');
-const { bootstrapCanvas } = require('./canvas/bootstrap-canvas');
 const { emitEvent } = require('./canvas/emit-event');
 const { purgeCanvas } = require('./canvas/purge-canvas');
-const { initializeSessionHandler } = require('./canvas/initialize-session');
-const { openCanvas, preWarmSession } = require('./canvas/open-canvas');
 
 // Analytics
 const { runAnalyticsForUser } = require('./analytics/controller');
@@ -111,7 +107,6 @@ const { analyticsCompactionScheduled, compactAnalyticsForUser } = require('./ana
 const { publishWeeklyJob } = require('./analytics/publish-weekly-job');
 const { recalculateWeeklyForUser } = require('./analytics/recalculate-weekly-for-user');
 // Agents
-const { invokeCanvasOrchestrator } = require('./agents/invoke-canvas-orchestrator');
 const { getPlanningContext } = require('./agents/get-planning-context');
 const { applyProgression } = require('./agents/apply-progression');
 
@@ -141,8 +136,6 @@ const {
   onWorkoutDeleted,
   weeklyStatsRecalculation,
   manualWeeklyStatsRecalculation,
-  onWorkoutCreatedWeekly,
-  onWorkoutFinalizedForUser
 } = require('./triggers/weekly-analytics');
 const { onWorkoutCreatedUpdateRoutineCursor } = require('./triggers/workout-routine-cursor');
 const { onAnalysisInsightCreated, onWeeklyReviewCreated, expireStaleRecommendations } = require('./triggers/process-recommendations');
@@ -247,25 +240,44 @@ exports.reviewRecommendation = reviewRecommendation;
 exports.applyAction = functions.https.onRequest((req, res) => requireFlexibleAuth(applyAction)(req, res));
 exports.proposeCards = functions.https.onRequest((req, res) => withApiKey(proposeCards)(req, res));
 exports.expireProposals = functions.https.onRequest((req, res) => withApiKey(expireProposals)(req, res));
-exports.bootstrapCanvas = functions.https.onRequest((req, res) => requireFlexibleAuth(bootstrapCanvas)(req, res));
 exports.emitEvent = functions.https.onRequest((req, res) => withApiKey(emitEvent)(req, res));
 exports.purgeCanvas = functions.https.onRequest((req, res) => requireFlexibleAuth(purgeCanvas)(req, res));
-exports.initializeSession = functions.https.onRequest((req, res) => requireFlexibleAuth(initializeSessionHandler)(req, res));
-// Optimized canvas initialization (combines bootstrap + session in one call, with min instances)
-exports.openCanvas = openCanvas;
-exports.preWarmSession = preWarmSession;
+// No-op stubs — iOS calls these until Phase 7 coordinated cleanup (AD-4).
+exports.initializeSession = onRequestV2(async (req, res) => {
+  getAuthenticatedUserId(req);
+  const { ok } = require('./utils/response');
+  return ok(res, { sessionId: null, isReused: false });
+});
+exports.openCanvas = onRequestV2(async (req, res) => {
+  getAuthenticatedUserId(req);
+  const { ok } = require('./utils/response');
+  const { v4: uuidv4 } = require('uuid');
+  return ok(res, {
+    canvasId: req.body.canvasId || uuidv4(),
+    sessionId: null,
+    isNewSession: true,
+    resumeState: { cards: [], cardCount: 0 },
+  });
+});
+exports.bootstrapCanvas = onRequestV2(async (req, res) => {
+  getAuthenticatedUserId(req);
+  const { ok } = require('./utils/response');
+  const { v4: uuidv4 } = require('uuid');
+  return ok(res, { canvasId: req.body.canvasId || uuidv4(), bootstrapped: true });
+});
+exports.preWarmSession = onRequestV2(async (req, res) => {
+  getAuthenticatedUserId(req);
+  const { ok } = require('./utils/response');
+  return ok(res, { preWarmed: true });
+});
 exports.runAnalyticsForUser = functions.https.onRequest((req, res) => requireFlexibleAuth(runAnalyticsForUser)(req, res));
 exports.compactAnalyticsForUser = functions.https.onRequest((req, res) => requireFlexibleAuth(compactAnalyticsForUser)(req, res));
 exports.publishWeeklyJob = functions.https.onRequest((req, res) => requireFlexibleAuth(publishWeeklyJob)(req, res));
 exports.recalculateWeeklyForUser = functions.https.onRequest((req, res) => requireFlexibleAuth(recalculateWeeklyForUser)(req, res));
 // Agents
-exports.invokeCanvasOrchestrator = functions.https.onRequest((req, res) => requireFlexibleAuth(invokeCanvasOrchestrator)(req, res));
 exports.getPlanningContext = functions.https.onRequest((req, res) => requireFlexibleAuth(getPlanningContext)(req, res));
 // applyProgression is a v2 onRequest function with built-in CORS
 exports.applyProgression = applyProgression;
-
-// Auth Operations
-exports.getServiceToken = getServiceToken;
 
 // Firestore Triggers (these don't need API key middleware)
 exports.onTemplateCreated = onTemplateCreated;
@@ -274,8 +286,6 @@ exports.onWorkoutCreated = onWorkoutCreated;
 exports.onWorkoutCreatedWithEnd = onWorkoutCreatedWithEnd;
 exports.onWorkoutCompleted = onWorkoutCompleted;
 exports.onWorkoutDeleted = onWorkoutDeleted;
-exports.onWorkoutCreatedWeekly = onWorkoutCreatedWeekly;
-exports.onWorkoutFinalizedForUser = onWorkoutFinalizedForUser;
 exports.onWorkoutCreatedUpdateRoutineCursor = onWorkoutCreatedUpdateRoutineCursor;
 exports.onAnalysisInsightCreated = onAnalysisInsightCreated;
 exports.onWeeklyReviewCreated = onWeeklyReviewCreated;
@@ -284,34 +294,6 @@ exports.onWeeklyReviewCreated = onWeeklyReviewCreated;
 exports.expireStaleRecommendations = expireStaleRecommendations;
 exports.weeklyStatsRecalculation = weeklyStatsRecalculation;
 exports.analyticsCompactionScheduled = analyticsCompactionScheduled;
-// Guard scheduled export for environments without scheduler helper
-if (functions.pubsub && typeof functions.pubsub.schedule === 'function') {
-  exports.expireProposalsScheduled = functions.pubsub.schedule('every 15 minutes').onRun(async (context) => {
-    try {
-      const result = await expireProposalsScheduledHandler();
-      console.log('expireProposalsScheduled result', result);
-    } catch (e) {
-      console.error('expireProposalsScheduled error', e);
-    }
-    return null;
-  });
-} else {
-  console.log('Skipping expireProposalsScheduled export: scheduler not available in current runtime');
-}
-
-// Session Cleanup
-const { cleanupStaleSessions } = require('./sessions/cleanup-sessions');
-if (functions.pubsub && typeof functions.pubsub.schedule === 'function') {
-  exports.cleanupStaleSessions = functions.pubsub.schedule('every 6 hours').onRun(async (context) => {
-    try {
-      const result = await cleanupStaleSessions();
-      console.log('cleanupStaleSessions result', result);
-    } catch (e) {
-      console.error('cleanupStaleSessions error', e);
-    }
-    return null;
-  });
-}
 
 // Callable Functions
 exports.manualWeeklyStatsRecalculation = manualWeeklyStatsRecalculation;

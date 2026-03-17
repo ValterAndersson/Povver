@@ -63,7 +63,6 @@ struct CoachTabView: View {
             }
         }
         .onAppear {
-            preWarmSession()
             loadRecentCanvases()
             // Auto-navigate to canvas if coming from onboarding "Adjust with coach"
             if let context = initialCanvasContext, !context.isEmpty {
@@ -232,17 +231,6 @@ struct CoachTabView: View {
     }
 
     // MARK: - Helpers
-
-    private func preWarmSession() {
-        guard let uid = AuthService.shared.currentUser?.uid else { return }
-        Task { @MainActor in
-            SessionPreWarmer.shared.preWarmIfNeeded(
-                userId: uid,
-                purpose: "ad_hoc",
-                trigger: "coach_appear"
-            )
-        }
-    }
 
     private func loadRecentCanvases() {
         guard let uid = AuthService.shared.currentUser?.uid else { return }

@@ -21,7 +21,6 @@ final class WorkoutCoachViewModel: ObservableObject {
     private(set) var workoutId: String
     /// Per-workout session isolation — prevents context bleed across workouts
     var conversationId: String { "workout-\(workoutId)" }
-    private var currentSessionId: String?
 
     init(workoutId: String) {
         self.workoutId = workoutId
@@ -32,7 +31,6 @@ final class WorkoutCoachViewModel: ObservableObject {
         guard workoutId != self.workoutId else { return }
         self.workoutId = workoutId
         self.messages = []
-        self.currentSessionId = nil
         self.thinkingState.reset()
     }
 
@@ -85,7 +83,6 @@ final class WorkoutCoachViewModel: ObservableObject {
                 conversationId: conversationId,
                 message: text,
                 correlationId: UUID().uuidString,
-                sessionId: currentSessionId,
                 workoutId: workoutId
             )
 
@@ -103,9 +100,7 @@ final class WorkoutCoachViewModel: ObservableObject {
                     }
 
                 case .status:
-                    if let sid = event.content?["session_id"]?.value as? String {
-                        currentSessionId = sid
-                    }
+                    break
 
                 case .done:
                     // Flush: use accumulated buffer as final response

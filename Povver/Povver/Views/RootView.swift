@@ -69,10 +69,9 @@ struct RootView: View {
             AnalyticsService.shared.screenViewed(String(describing: newFlow))
             AppLogger.shared.nav("screen:\(String(describing: newFlow))")
         }
-        // Pre-warm agent session and prefetch workout data after successful auth
+        // Prefetch workout data after successful auth
         .onChange(of: flow) { _, newFlow in
-            if newFlow == .main, let uid = authService.currentUser?.uid {
-                SessionPreWarmer.shared.preWarmIfNeeded(userId: uid, trigger: "auth_complete")
+            if newFlow == .main {
                 // Prefetch templates, routines, next workout, and active workout in parallel.
                 // Fires here (before MainTabsView.task) so data is ready when user taps Train.
                 Task { await FocusModeWorkoutService.shared.prefetchLibraryData() }

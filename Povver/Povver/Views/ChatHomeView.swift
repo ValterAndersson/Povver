@@ -33,20 +33,6 @@ struct ChatHomeView: View {
         .navigationDestination(isPresented: $navigateToCanvas) {
             canvasDestination
         }
-        // === PRE-WARM SESSION ===
-        // Start warming the Vertex AI session as soon as user lands on homepage.
-        // By the time they finish typing, the session should be ready (~2-3s cold start hidden).
-        .onAppear {
-            if let uid = userId {
-                Task { @MainActor in
-                    SessionPreWarmer.shared.preWarmIfNeeded(
-                        userId: uid,
-                        purpose: "ad_hoc",
-                        trigger: "homepage_appear"
-                    )
-                }
-            }
-        }
     }
 
     private var header: some View {

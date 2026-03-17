@@ -252,7 +252,7 @@ final class OnboardingViewModel: ObservableObject {
 
             do {
                 let canvasService = CanvasService()
-                let (canvasId, sessionId) = try await canvasService.openCanvas(
+                let (canvasId, _) = try await canvasService.openCanvas(
                     userId: uid,
                     purpose: "onboarding"
                 )
@@ -265,7 +265,6 @@ final class OnboardingViewModel: ObservableObject {
                     conversationId: canvasId,
                     message: prompt,
                     correlationId: correlationId,
-                    sessionId: sessionId,
                     timeoutSeconds: 60
                 ) {
                     // Check for cancellation between events

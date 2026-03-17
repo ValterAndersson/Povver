@@ -313,9 +313,11 @@ Audit trail for template mutations from all sources. Written by Cloud Functions 
       - Scoped idempotency guard.
       - Fields: `key: string`, `created_at: Timestamp`
 
-11) agent_sessions/{purpose}
-   - Vertex AI session references for conversation continuity.
-   - Fields:
+11) agent_sessions/{purpose} **(DEPRECATED — removed in Phase 3c)**
+   - Was: Vertex AI session references for conversation continuity.
+   - Sessions are now ephemeral per-request. This subcollection is no longer written
+     and will be cleaned up in a future migration. Existing docs are harmless.
+   - Fields (legacy):
      - `session_id: string` (Vertex AI Agent Engine session ID)
      - `purpose: string` (e.g., 'chat', 'planning')
      - `created_at, updated_at: Timestamp`
@@ -611,7 +613,7 @@ Notes:
 - `users/{uid}/conversations/**`: read allowed to the authenticated owner; writes to `messages` and `artifacts` disallowed directly (Admin SDK only — agent writes via Functions).
 - `users/{uid}/canvases/**` (DEPRECATED): read allowed to the authenticated owner; writes are disallowed directly (single-writer via Functions only). All canvas mutations flow through HTTPS endpoints (e.g., `applyAction`, `proposeCards`, `bootstrapCanvas`).
 - `users/{uid}/exercise_usage_stats/**`: read allowed to the authenticated owner; writes disallowed directly (admin SDK only via triggers and backfill scripts).
-- Other user subcollections under `users/{uid}`: read/write allowed to the authenticated owner (excluding `canvases`, `artifacts`, and `exercise_usage_stats`). This includes `workouts`, `weekly_stats`, `templates`, `routines`, `user_attributes`, `linked_devices`, `progress_reports`, `active_workouts`, `agent_sessions`, and analytics collections under `analytics_*` prefixes.
+- Other user subcollections under `users/{uid}`: read/write allowed to the authenticated owner (excluding `canvases`, `artifacts`, and `exercise_usage_stats`). This includes `workouts`, `weekly_stats`, `templates`, `routines`, `user_attributes`, `linked_devices`, `progress_reports`, `active_workouts`, and analytics collections under `analytics_*` prefixes. (`agent_sessions` is deprecated — no longer written.)
 - Admin/agents: Function-layer auth (API keys, service accounts) mediates privileged writes.
 - Analytics: lives under `users/{uid}/analytics_*` and inherits owner read/write. Backend Functions (triggers/HTTPS) write these docs on behalf of the user.
 
@@ -735,7 +737,7 @@ users/{uid}
   ├─ conversations/{conversationId}
   │    ├─ messages/{messageId}
   │    └─ artifacts/{artifactId}
-  ├─ agent_sessions/{purpose}
+  ├─ agent_sessions/{purpose} (DEPRECATED)
   ├─ subscription_events/{auto-id}
   ├─ set_facts/{setId}
   ├─ exercise_usage_stats/{exerciseId}

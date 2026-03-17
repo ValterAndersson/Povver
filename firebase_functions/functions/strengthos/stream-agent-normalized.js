@@ -61,12 +61,6 @@
  * If present, complete text is used as the toolComplete label.
  * See: adk_agent/canvas_orchestrator/app/libs/tools_common/response_helpers.py
  *
- * SESSION MANAGEMENT:
- * - Sessions are stored in: users/{uid}/agent_sessions/{purpose}
- * - If no sessionId provided, creates new session via :query
- * - Stale sessions (empty stream) are auto-invalidated
- * - AGENT_VERSION tracks breaking changes requiring session reset
- *
  * WORKSPACE ENTRIES:
  * Persists events to Firestore for debugging and replay:
  * - Path: users/{uid}/canvases/{canvasId}/workspace_entries
@@ -80,8 +74,6 @@
  *
  * RELATED FILES:
  * - ./config.js: VERTEX_AI_CONFIG (projectId, location)
- * - ../canvas/initialize-session.js: Session initialization (shares AGENT_VERSION)
- * - ../canvas/open-canvas.js: Combined bootstrap + session
  *
  * =============================================================================
  */
@@ -104,10 +96,6 @@ if (!admin.apps.length) {
   admin.initializeApp();
 }
 const db = admin.firestore();
-
-// Agent version - MUST MATCH initialize-session.js
-// When this changes, all existing sessions become stale
-const AGENT_VERSION = '2.6.0'; // Session-canvas lifecycle binding
 
 // ============================================================================
 // GCP AUTH TOKEN CACHE (1hr TTL - tokens are valid for ~1hr)
@@ -788,56 +776,6 @@ class TextNormalizer {
   nextSeq() { this.seq += 1; return this.seq; }
 }
 
-// Create a fresh Vertex AI session (bypassing cache)
-async function createFreshSession(userId, purpose, token, agentId, projectId, location) {
-  const createUrl = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/reasoningEngines/${agentId}:query`;
-  
-  logger.info('[createFreshSession] Creating new Vertex AI session...');
-  const response = await axios.post(createUrl, {
-    class_method: 'create_session',
-    input: { user_id: userId, state: { 'user:id': userId } },
-  }, { 
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    timeout: 30000 
-  });
-  
-  const sessionId = response.data?.output?.id || response.data?.output?.session_id || response.data?.id;
-  if (!sessionId) {
-    throw new Error('Failed to create Vertex AI session - no ID returned');
-  }
-  
-  // Store the new session in Firestore
-  const sessionDocRef = db.collection('users').doc(userId).collection('agent_sessions').doc(purpose || 'default');
-  await sessionDocRef.set({
-    sessionId,
-    purpose: purpose || 'default',
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    lastUsedAt: admin.firestore.FieldValue.serverTimestamp()
-  });
-  
-  logger.info('[createFreshSession] Created new session', { sessionId });
-  return sessionId;
-}
-
-// Invalidate all cached sessions for a user
-async function invalidateUserSessions(userId) {
-  try {
-    const sessionsRef = db.collection('users').doc(userId).collection('agent_sessions');
-    const sessions = await sessionsRef.get();
-    if (sessions.empty) return 0;
-    
-    const deleteBatch = db.batch();
-    sessions.docs.forEach(doc => deleteBatch.delete(doc.ref));
-    await deleteBatch.commit();
-    
-    logger.info('[invalidateUserSessions] Deleted stale sessions', { userId, count: sessions.size });
-    return sessions.size;
-  } catch (err) {
-    logger.warn('[invalidateUserSessions] Failed to delete sessions', { error: String(err) });
-    return 0;
-  }
-}
-
 // ============================================================================
 // CLOUD RUN AGENT SERVICE (Phase 3a — replaces Vertex AI when AGENT_SERVICE_URL is set)
 // ============================================================================
@@ -1116,7 +1054,6 @@ async function streamAgentNormalizedHandler(req, res) {
       return;
     }
 
-    const sessionId = req.body?.sessionId || null;
     // Accept both conversationId (new) and canvasId (legacy) during migration
     const conversationId = req.body?.conversationId || req.body?.canvasId;
     const correlationId = req.body?.correlationId || null;
@@ -1213,20 +1150,19 @@ async function streamAgentNormalizedHandler(req, res) {
     const token = await getGcpAuthToken();
     logger.info('[streamAgentNormalized] Got Vertex AI auth token');
 
-    // If no session, create one first
-    let sessionToUse = sessionId;
-    if (!sessionToUse) {
-      logger.info('[streamAgentNormalized] Creating new session...');
+    // Sessions eliminated (Phase 3c) — Vertex AI sessions are ephemeral per-request now.
+    // The Cloud Run path (above) is the primary path; this legacy Vertex AI path
+    // creates a throwaway session per request when AGENT_SERVICE_URL is not set.
+    let sessionToUse = null;
+    {
+      logger.info('[streamAgentNormalized] Creating ephemeral session...');
       const createUrl = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/reasoningEngines/${agentId}:query`;
       const createResp = await axios.post(createUrl, {
         class_method: 'create_session',
         input: { user_id: userId, state: { 'user:id': userId } },
       }, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } });
       sessionToUse = createResp.data?.output?.id || createResp.data?.output?.session_id || createResp.data?.id;
-      logger.info('[streamAgentNormalized] Created session', { sessionId: sessionToUse });
-      sse.write({ type: 'session', sessionId: sessionToUse });
-    } else {
-      logger.info('[streamAgentNormalized] Using existing session', { sessionId: sessionToUse });
+      logger.info('[streamAgentNormalized] Created ephemeral session', { sessionId: sessionToUse });
     }
 
     const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/reasoningEngines/${agentId}:streamQuery`;
@@ -1286,13 +1222,10 @@ async function streamAgentNormalizedHandler(req, res) {
       });
       logger.error('[streamAgentNormalized] Vertex AI returned error', { status: response.status, body: errorBody.slice(0, 1000) });
       
-      // Invalidate token cache AND session on auth errors (401/403)
-      // 401 often means the session was created with an old agent version
+      // Invalidate token cache on auth errors (401/403)
       if (response.status === 401 || response.status === 403) {
         invalidateTokenCache();
-        // Also invalidate the session - it was likely created with old agent
-        await invalidateUserSessions(userId);
-        sse.write({ type: 'error', error: 'Session expired after agent update. Please try again.', text: 'Session expired after agent update. Please try again.' });
+        sse.write({ type: 'error', error: 'Authentication failed. Please try again.', text: 'Authentication failed. Please try again.' });
         done(false, new Error(`Vertex AI returned ${response.status}`));
         return;
       }
@@ -1621,27 +1554,10 @@ async function streamAgentNormalizedHandler(req, res) {
           .catch(err => logger.warn('[streamAgentNormalized] title generation failed', { error: String(err?.message || err) }));
       }
 
-      // If no data chunks received, the session is likely corrupted/stale
+      // If no data chunks received, something went wrong
       if (dataChunkCount === 0) {
-        logger.warn('[streamAgentNormalized] Stream ended with NO data - invalidating session', { 
-          sessionId: sessionToUse 
-        });
-        
-        // Invalidate the cached session so a fresh one is created next time
-        // The session is stored at: users/{userId}/agent_sessions/{purpose}
-        try {
-          // Delete all agent sessions for this user to force refresh
-          const sessionsRef = db.collection('users').doc(userId).collection('agent_sessions');
-          const sessions = await sessionsRef.get();
-          const deleteBatch = db.batch();
-          sessions.docs.forEach(doc => deleteBatch.delete(doc.ref));
-          await deleteBatch.commit();
-          logger.info('[streamAgentNormalized] Deleted stale sessions for user', { userId, count: sessions.size });
-        } catch (err) {
-          logger.warn('[streamAgentNormalized] Failed to delete stale sessions', { error: String(err) });
-        }
-        
-        sse.write({ type: 'error', error: 'Session expired. Please try again.' });
+        logger.warn('[streamAgentNormalized] Stream ended with NO data', { sessionId: sessionToUse });
+        sse.write({ type: 'error', error: 'No response received. Please try again.' });
       }
 
       logger.info('stream_completed', {

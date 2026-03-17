@@ -101,7 +101,7 @@ final class CanvasViewModel: ObservableObject {
     private var eventsListener: ListenerRegistration?
     private var workspaceListener: ListenerRegistration?
     private var currentUserId: String?
-    private var currentSessionId: String?
+    // Session ID eliminated (Phase 3c) — backend creates ephemeral sessions per request
     
     // Overlay synthesis state
     private var messageBuffer: String = ""
@@ -155,24 +155,8 @@ final class CanvasViewModel: ObservableObject {
                 let elapsed = String(format: "%.2f", Date().timeIntervalSince(startTime))
                 AppLogger.shared.info(.app, "Listeners attached elapsed_s=\(elapsed)")
                 
-                // PHASE 1 OPTIMIZATION: Start session initialization in parallel
-                // Use forceNew: false to enable session reuse
-                let sessionTask = Task<String?, Never> {
-                    let sessionStart = Date()
-                    do {
-                        let sessionId = try await self.service.initializeSession(canvasId: canvasId, purpose: "general", forceNew: false)
-                        let sessionDuration = Date().timeIntervalSince(sessionStart)
-                        AppLogger.shared.info(.app, "Session initialized session_id=\(sessionId) duration_s=\(String(format: "%.2f", sessionDuration)) reuse_enabled=true")
-                        return sessionId
-                    } catch {
-                        AppLogger.shared.error(.app, "initializeSession failed - will create new on first message", error)
-                        return nil
-                    }
-                }
-                
-                // PHASE 1 OPTIMIZATION: Skip purgeCanvas
-                // Purging workspace_entries on every open adds latency and loses conversation history
-                AppLogger.shared.info(.app, "Skipping purgeCanvas (optimization)")
+                // Sessions eliminated (Phase 3c) — backend creates ephemeral sessions per request.
+                // No initializeSession call needed.
 
                 let subElapsed = String(format: "%.2f", Date().timeIntervalSince(startTime))
                 AppLogger.shared.info(.app, "Starting subscription elapsed_s=\(subElapsed)")
@@ -202,11 +186,6 @@ final class CanvasViewModel: ObservableObject {
                     }
                 }
                 
-                // Resolve session in background (don't block UI)
-                if let sessionId = await sessionTask.value {
-                    await MainActor.run { self.currentSessionId = sessionId }
-                }
-
             } catch {
                 self.errorMessage = error.localizedDescription
                 AppLogger.shared.error(.app, "Canvas subscribe error", error)
@@ -234,16 +213,14 @@ final class CanvasViewModel: ObservableObject {
             do {
                 self.currentUserId = userId
                 
-                // PHASE 2 OPTIMIZATION: Use combined openCanvas endpoint (1 call instead of 2)
-                // This creates canvas + session in parallel on the server, saving a network round trip
+                // openCanvas returns canvasId (sessionId is now always nil — sessions eliminated Phase 3c)
                 let openStart = Date()
-                let (cid, sessionId) = try await self.service.openCanvas(userId: userId, purpose: purpose)
+                let (cid, _) = try await self.service.openCanvas(userId: userId, purpose: purpose)
                 let openDuration = Date().timeIntervalSince(openStart)
 
-                AppLogger.shared.info(.app, "openCanvas completed canvas_id=\(cid) session_id=\(sessionId) duration_s=\(String(format: "%.2f", openDuration))")
-                
+                AppLogger.shared.info(.app, "openCanvas completed canvas_id=\(cid) duration_s=\(String(format: "%.2f", openDuration))")
+
                 self.canvasId = cid
-                self.currentSessionId = sessionId
                 await MainActor.run { CanvasRepository.shared.currentCanvasId = cid }
                 
                 // Clear UI state and attach listeners IMMEDIATELY
@@ -318,7 +295,6 @@ final class CanvasViewModel: ObservableObject {
         workspaceListener?.remove()
         workspaceListener = nil
         isReady = false
-        currentSessionId = nil
     }
 
     // MARK: - Actions
@@ -358,7 +334,7 @@ final class CanvasViewModel: ObservableObject {
 
     func startSSEStream(userId: String, canvasId: String, message: String, correlationId: String) {
         AppLogger.shared.user("message", String(message.prefix(80)))
-        AppLogger.shared.info(.app, "SSE stream BEGIN corr=\(correlationId) sessionId=\(currentSessionId ?? "nil")")
+        AppLogger.shared.info(.app, "SSE stream BEGIN corr=\(correlationId)")
 
         // Increment conversation depth synchronously before async Task block
         conversationDepth += 1
@@ -418,8 +394,7 @@ final class CanvasViewModel: ObservableObject {
                     userId: userId,
                     conversationId: canvasId,
                     message: message,
-                    correlationId: correlationId,
-                    sessionId: self.currentSessionId
+                    correlationId: correlationId
                 ) {
                     // Check for timeout (only heartbeats for too long)
                     let isMeaningfulEvent = event.eventType != .heartbeat && event.eventType != .status
@@ -533,9 +508,6 @@ final class CanvasViewModel: ObservableObject {
         case .status:
             currentAgentStatus = event.displayText
             streamEvents.append(event)
-            if let sessionId = event.content?["session_id"]?.value as? String {
-                currentSessionId = sessionId
-            }
             
         case .userPrompt:
             streamEvents.append(event)
