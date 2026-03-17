@@ -10,7 +10,6 @@ class RequestContext:
     user_id: str
     conversation_id: str
     correlation_id: str
-    workout_id: str | None = None
-    workout_mode: bool = False
-    active_workout_id: str | None = None
+    workout_id: str | None = None  # Active workout ID from iOS (enables workout mode)
+    workout_mode: bool = False     # True when workout_id is present
     today: str | None = None  # YYYY-MM-DD, set from client timezone

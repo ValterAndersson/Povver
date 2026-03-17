@@ -53,6 +53,8 @@ class GeminiClient:
                     "output_tokens": getattr(meta, "candidates_token_count", 0) or 0,
                 }
 
+            if not response.candidates or not response.candidates[0].content:
+                continue
             for part in response.candidates[0].content.parts:
                 if part.text:
                     yield LLMChunk(text=part.text, usage=usage)

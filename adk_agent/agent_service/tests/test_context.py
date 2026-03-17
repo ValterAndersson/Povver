@@ -13,7 +13,7 @@ def test_request_context_creation():
     assert ctx.conversation_id == "conv456"
     assert ctx.correlation_id == "corr789"
     assert ctx.workout_mode is False
-    assert ctx.active_workout_id is None
+    assert ctx.workout_id is None
 
 
 def test_request_context_workout_mode():
@@ -22,10 +22,10 @@ def test_request_context_workout_mode():
         conversation_id="conv456",
         correlation_id="corr789",
         workout_mode=True,
-        active_workout_id="aw001",
+        workout_id="aw001",
     )
     assert ctx.workout_mode is True
-    assert ctx.active_workout_id == "aw001"
+    assert ctx.workout_id == "aw001"
 
 
 def test_request_context_is_immutable():
