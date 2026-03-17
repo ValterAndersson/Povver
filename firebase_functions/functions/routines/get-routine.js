@@ -1,44 +1,30 @@
 const { onRequest } = require('firebase-functions/v2/https');
 const { logger } = require('firebase-functions');
 const { requireFlexibleAuth } = require('../auth/middleware');
-const FirestoreHelper = require('../utils/firestore-helper');
-const { ok, fail } = require('../utils/response');
+const { ok } = require('../utils/response');
 const { getAuthenticatedUserId } = require('../utils/auth-helpers');
+const { getRoutine } = require('../shared/routines');
+const { mapErrorToResponse } = require('../shared/errors');
 const admin = require('firebase-admin');
-
-const db = new FirestoreHelper();
 
 /**
  * Firebase Function: Get Specific Routine
  *
- * Description: Gets a specific routine by ID.
- * Enriches the response with `is_active` derived from the user's `activeRoutineId`.
+ * Thin HTTP wrapper — business logic lives in shared/routines.js
  */
 async function getRoutineHandler(req, res) {
-  // Bearer-lane: derive userId from verified token; API-key-lane: from params
   const userId = getAuthenticatedUserId(req);
-  if (!userId) return fail(res, 'UNAUTHENTICATED', 'Authentication required', null, 401);
+  if (!userId) return mapErrorToResponse(res, new (require('../shared/errors').AuthenticationError)());
+
   const routineId = req.query.routineId || req.body?.routineId;
-  if (!routineId) return fail(res, 'INVALID_ARGUMENT', 'Missing required parameters', ['routineId'], 400);
 
   try {
-    const [routine, userSnap] = await Promise.all([
-      db.getDocumentFromSubcollection('users', userId, 'routines', routineId),
-      admin.firestore().collection('users').doc(userId).get(),
-    ]);
-    if (!routine) return fail(res, 'NOT_FOUND', 'Routine not found', null, 404);
-
-    // Derive is_active from user-level activeRoutineId
-    const activeRoutineId = userSnap.exists ? userSnap.data().activeRoutineId : null;
-    routine.is_active = routine.id === activeRoutineId;
-
+    const routine = await getRoutine(admin.firestore(), userId, routineId);
     return ok(res, routine);
-
-  } catch (error) {
-    logger.error('[getRoutine] Failed to get routine', { userId, routineId, error: error.message });
-    return fail(res, 'INTERNAL', 'Failed to get routine', { message: error.message }, 500);
+  } catch (e) {
+    logger.error('[getRoutine] Failed to get routine', { userId, routineId, error: e.message });
+    return mapErrorToResponse(res, e);
   }
 }
 
-// Export Firebase Function
-exports.getRoutine = onRequest(requireFlexibleAuth(getRoutineHandler)); 
+exports.getRoutine = onRequest(requireFlexibleAuth(getRoutineHandler));

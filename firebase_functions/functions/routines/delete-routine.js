@@ -1,38 +1,27 @@
 const { onRequest } = require('firebase-functions/v2/https');
 const { requireFlexibleAuth } = require('../auth/middleware');
-const FirestoreHelper = require('../utils/firestore-helper');
-const { ok, fail } = require('../utils/response');
-
-const db = new FirestoreHelper();
+const { ok } = require('../utils/response');
+const { deleteRoutine } = require('../shared/routines');
+const { mapErrorToResponse } = require('../shared/errors');
+const admin = require('firebase-admin');
 
 /**
  * Firebase Function: Delete Routine
+ *
+ * Thin HTTP wrapper — business logic lives in shared/routines.js
+ *
+ * Note: This handler reads userId from req.body (API-key lane pattern).
  */
 async function deleteRoutineHandler(req, res) {
   const { userId, routineId } = req.body || {};
-  if (!userId || !routineId) return fail(res, 'INVALID_ARGUMENT', 'Missing required parameters', ['userId','routineId'], 400);
 
   try {
-    const routine = await db.getDocumentFromSubcollection('users', userId, 'routines', routineId);
-    if (!routine) return fail(res, 'NOT_FOUND', 'Routine not found', null, 404);
-
-    // Check if this is the active routine and clear it
-    const user = await db.getDocument('users', userId);
-    if (user?.activeRoutineId === routineId) {
-      await db.updateDocument('users', userId, {
-        activeRoutineId: null
-        // Remove manual timestamp - FirestoreHelper handles this
-      });
-    }
-
-    await db.deleteDocumentFromSubcollection('users', userId, 'routines', routineId);
-
-    return ok(res, { message: 'Routine deleted', routineId, activeRoutineCleared: user?.activeRoutineId === routineId });
-
-  } catch (error) {
-    console.error('delete-routine function error:', error);
-    return fail(res, 'INTERNAL', 'Failed to delete routine', { message: error.message }, 500);
+    const result = await deleteRoutine(admin.firestore(), userId, routineId);
+    return ok(res, result);
+  } catch (e) {
+    console.error('delete-routine function error:', e);
+    return mapErrorToResponse(res, e);
   }
 }
 
-exports.deleteRoutine = onRequest(requireFlexibleAuth(deleteRoutineHandler)); 
+exports.deleteRoutine = onRequest(requireFlexibleAuth(deleteRoutineHandler));
