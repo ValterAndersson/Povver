@@ -1,12 +1,7 @@
 # Security Architecture
 
-> **AI AGENT CONTEXT DOCUMENT**
->
-> This document defines security invariants, constraints, and patterns that MUST be followed
-> when modifying any layer of the Povver system. Violations of these invariants can expose
-> user data, enable privilege escalation, or create financial liability.
->
-> **Last Updated**: 2026-02-28
+> Authoritative reference for security invariants, auth lanes, and constraints.
+> Violations of these invariants can expose user data, enable privilege escalation, or create financial liability.
 
 ---
 

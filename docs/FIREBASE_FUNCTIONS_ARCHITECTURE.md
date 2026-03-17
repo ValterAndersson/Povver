@@ -61,36 +61,9 @@ Firebase Functions serve as the backend API layer for the Povver fitness platfor
 
 ### Authentication Lanes
 
-Firebase Functions use **two mutually exclusive authentication lanes**. Never mix these in a single endpoint.
+See `docs/SECURITY.md` → "Authentication Model" for the authoritative reference on auth lanes, middleware types (`requireFlexibleAuth`, `withApiKey`, `requireAuth`), and IDOR prevention.
 
-| Lane | Auth Method | userId Source | Use Cases |
-|------|-------------|---------------|-----------|
-| **Bearer** | Firebase Auth Token | `req.auth.uid` **only** | iOS app, user-facing endpoints |
-| **Service** | API Key (`x-api-key`) | `req.body.userId` or `req.query.userId` | Agent system, service-to-service |
-
-**Security Rule**: Bearer-authenticated endpoints must derive userId exclusively from the auth token. Any client-provided userId parameters are **ignored**. This prevents cross-user data exposure.
-
-### Auth Middleware Types
-
-**`withApiKey`** - Service lane API key validation:
-```javascript
-const { withApiKey } = require('./auth/middleware');
-// Service lane: userId from request params (trusted service-to-service)
-exports.getUser = functions.https.onRequest((req, res) => withApiKey(getUser)(req, res));
-```
-
-**`requireFlexibleAuth`** - Bearer lane (Firebase Auth token):
-```javascript
-const { requireFlexibleAuth } = require('./auth/middleware');
-// Bearer lane: userId from req.auth.uid ONLY, client userId params IGNORED
-exports.artifactAction = functions.https.onRequest((req, res) => requireFlexibleAuth(artifactAction)(req, res));
-```
-
-### Service Token Exchange
-
-`getServiceToken` provides service-to-service authentication for agent-to-function calls:
-- Validates service credentials
-- Returns short-lived tokens for internal API calls
+Each endpoint below is annotated with its auth lane. The per-endpoint auth lane annotations in this doc are the source of truth for *which* lane each endpoint uses.
 
 ---
 

@@ -1519,48 +1519,9 @@ async function writeSetFactsInChunks(userId, setFacts) {
 
 ## 11. Authentication & Authorization
 
-### 11.1 Auth Lane Enforcement
+All training analytics endpoints use bearer-lane auth. See `docs/SECURITY.md` → "Authentication Model" for the authoritative reference on auth lanes and IDOR prevention.
 
-**Critical**: All public endpoints must derive `userId` from Firebase Auth, never from request body.
-
-```javascript
-/**
- * Auth enforcement for all training endpoints
- */
-function requireAuth(request) {
-  if (!request.auth?.uid) {
-    throw new HttpsError('unauthenticated', 'Authentication required');
-  }
-  return request.auth.uid;
-}
-
-// In each endpoint:
-exports.querySets = onCall(async (request) => {
-  const userId = requireAuth(request);  // NEVER accept userId from request.data
-  
-  // ... rest of implementation uses userId from auth
-});
-```
-
-### 11.2 Lane Summary
-
-| Lane | User ID Source | Use Case |
-|------|----------------|----------|
-| **App/Agent Callable** | `request.auth.uid` | All public endpoints |
-| **Backfill Job** | Service account iteration | Cross-user batch processing |
-| **Triggers** | `event.params.userId` | Firestore document paths |
-
-### 11.3 Request Body Validation
-
-```javascript
-// NEVER do this:
-// const userId = request.data.userId;  // ❌ WRONG
-
-// ALWAYS do this:
-const userId = requireAuth(request);   // ✅ CORRECT
-```
-
-**Rationale**: Accepting `userId` in request bodies would allow any authenticated user to query another user's training data. All training endpoints are user-scoped and must enforce this at the auth layer.
+All public endpoints derive `userId` from `request.auth.uid` (Firebase Auth token), never from request body. Backfill jobs use service account iteration. Triggers use `event.params.userId` from Firestore document paths.
 
 ---
 

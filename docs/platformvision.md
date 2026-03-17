@@ -1,6 +1,8 @@
 # Povver Platform: Agent-Driven Canvas System
 
-> **Document Purpose**: Single source of truth for the Povver platform architecture. Written for LLM/agentic coding agents with maximum context and verbosity. Describes implemented functionality, not aspirational features.
+> **DEPRECATED**: This document is superseded by `SYSTEM_ARCHITECTURE.md`, `IOS_ARCHITECTURE.md`, and `SHELL_AGENT_ARCHITECTURE.md`. Kept for historical reference only — do not use as a source of truth for current architecture.
+>
+> **Original Purpose**: Single source of truth for the Povver platform architecture. Written for LLM/agentic coding agents with maximum context and verbosity. Describes implemented functionality, not aspirational features.
 >
 > **Related Documentation**:
 > - `IOS_ARCHITECTURE.md` — Complete iOS application architecture and component catalog
