@@ -8,6 +8,7 @@
  */
 
 const { toSlug } = require('../utils/strings');
+const { ValidationError } = require('./errors');
 
 // ---------------------------------------------------------------------------
 // getExercise
@@ -26,9 +27,7 @@ const { toSlug } = require('../utils/strings');
  */
 async function getExercise(db, { exerciseId, name, slug } = {}) {
   if (!exerciseId && !name && !slug) {
-    throw Object.assign(new Error('Provide exerciseId or name or slug'), {
-      code: 'INVALID_ARGUMENT',
-    });
+    throw new ValidationError('Provide exerciseId or name or slug');
   }
 
   let exercise = null;
@@ -415,7 +414,7 @@ function scoreCandidate(ex, context) {
  */
 async function resolveExercise(db, { q, context = {} } = {}) {
   if (!q) {
-    throw Object.assign(new Error('Missing q'), { code: 'INVALID_ARGUMENT' });
+    throw new ValidationError('Missing q');
   }
 
   const slug = toSlug(String(q));

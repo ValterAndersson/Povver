@@ -108,7 +108,7 @@ async function getTemplate(db, userId, templateId) {
  * @returns {Promise<{items: Object[], count: number}>}
  */
 async function listTemplates(db, userId) {
-  const snapshot = await templatesCol(db, userId).get();
+  const snapshot = await templatesCol(db, userId).limit(500).get();
   const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
   return { items, count: items.length };
 }

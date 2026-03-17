@@ -1,9 +1,10 @@
 const { onRequest } = require('firebase-functions/v2/https');
 const admin = require('firebase-admin');
 const { requireFlexibleAuth } = require('../auth/middleware');
-const { ok, fail } = require('../utils/response');
+const { ok } = require('../utils/response');
 const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const { listWorkouts } = require('../shared/workouts');
+const { mapErrorToResponse } = require('../shared/errors');
 
 const db = admin.firestore();
 
@@ -29,11 +30,7 @@ async function getUserWorkoutsHandler(req, res) {
       filters: { userId, limit, startDate: startDate || null, endDate: endDate || null },
     });
   } catch (error) {
-    if (error.code && error.http) {
-      return fail(res, error.code, error.message, null, error.http);
-    }
-    console.error('get-user-workouts function error:', error);
-    return fail(res, 'INTERNAL', 'Failed to get user workouts', { message: error.message }, 500);
+    return mapErrorToResponse(res, error);
   }
 }
 

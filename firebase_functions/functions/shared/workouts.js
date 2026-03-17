@@ -11,6 +11,7 @@
  */
 
 const admin = require('firebase-admin');
+const { ValidationError, NotFoundError, AuthenticationError } = require('./errors');
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -191,11 +192,11 @@ function computeListAnalytics(workouts) {
  * @returns {{ workout, template, metrics }} or throws
  */
 async function getWorkout(db, userId, workoutId) {
-  if (!userId) throw Object.assign(new Error('Missing userId'), { http: 400, code: 'INVALID_ARGUMENT' });
-  if (!workoutId) throw Object.assign(new Error('Missing workoutId'), { http: 400, code: 'INVALID_ARGUMENT' });
+  if (!userId) throw new ValidationError('Missing userId');
+  if (!workoutId) throw new ValidationError('Missing workoutId');
 
   const doc = await db.collection('users').doc(userId).collection('workouts').doc(workoutId).get();
-  if (!doc.exists) throw Object.assign(new Error('Workout not found'), { http: 404, code: 'NOT_FOUND' });
+  if (!doc.exists) throw new NotFoundError('Workout not found');
 
   const workout = { id: doc.id, ...doc.data() };
 
@@ -228,7 +229,7 @@ async function getWorkout(db, userId, workoutId) {
  * @returns {{ items, analytics, hasMore, nextCursor }}
  */
 async function listWorkouts(db, userId, opts = {}) {
-  if (!userId) throw Object.assign(new Error('Missing userId'), { http: 400, code: 'INVALID_ARGUMENT' });
+  if (!userId) throw new ValidationError('Missing userId');
 
   const limit = Math.min(Math.max(1, parseInt(opts.limit) || DEFAULT_LIST_LIMIT), MAX_LIST_LIMIT);
 
@@ -288,9 +289,9 @@ async function listWorkouts(db, userId, opts = {}) {
  * @returns {{ workout_id, created, user_id, set_facts_synced }}
  */
 async function upsertWorkout(db, userId, input, deps) {
-  if (!userId) throw Object.assign(new Error('Missing userId'), { http: 400, code: 'INVALID_ARGUMENT' });
+  if (!userId) throw new ValidationError('Missing userId');
   if (!input || !Array.isArray(input.exercises)) {
-    throw Object.assign(new Error('workout.exercises array is required'), { http: 400, code: 'INVALID_ARGUMENT' });
+    throw new ValidationError('workout.exercises array is required');
   }
 
   const col = db.collection('users').doc(String(userId)).collection('workouts');
@@ -299,7 +300,7 @@ async function upsertWorkout(db, userId, input, deps) {
   const startTs = toTimestamp(input.start_time) || toTimestamp(input.startTime);
   const endTs = toTimestamp(input.end_time) || toTimestamp(input.endTime);
   if (!endTs) {
-    throw Object.assign(new Error('end_time is required (ISO string or millis)'), { http: 400, code: 'INVALID_ARGUMENT' });
+    throw new ValidationError('end_time is required (ISO string or millis)');
   }
 
   const exercises = normalizeExercises(input.exercises, true);
@@ -423,12 +424,12 @@ async function upsertWorkout(db, userId, input, deps) {
  * @returns {{ deleted: true, workout_id }}
  */
 async function deleteWorkout(db, userId, workoutId) {
-  if (!userId) throw Object.assign(new Error('Missing userId'), { http: 401, code: 'UNAUTHENTICATED' });
-  if (!workoutId) throw Object.assign(new Error('Missing workout_id'), { http: 400, code: 'INVALID_ARGUMENT' });
+  if (!userId) throw new AuthenticationError('Missing userId');
+  if (!workoutId) throw new ValidationError('Missing workout_id');
 
   const ref = db.collection('users').doc(userId).collection('workouts').doc(workoutId);
   const doc = await ref.get();
-  if (!doc.exists) throw Object.assign(new Error('Workout not found'), { http: 404, code: 'NOT_FOUND' });
+  if (!doc.exists) throw new NotFoundError('Workout not found');
 
   await ref.delete();
   console.log(`Deleted workout ${workoutId} for user ${userId}`);

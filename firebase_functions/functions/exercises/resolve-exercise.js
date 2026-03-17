@@ -3,6 +3,7 @@ const { requireFlexibleAuth } = require('../auth/middleware');
 const admin = require('firebase-admin');
 const { ok, fail } = require('../utils/response');
 const { resolveExercise } = require('../shared/exercises');
+const { mapErrorToResponse } = require('../shared/errors');
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
@@ -20,8 +21,7 @@ async function resolveExerciseHandler(req, res) {
     const result = await resolveExercise(db, { q, context });
     return ok(res, result);
   } catch (error) {
-    console.error('resolve-exercise error:', error);
-    return fail(res, 'INTERNAL', 'Failed to resolve exercise', { message: error.message }, 500);
+    return mapErrorToResponse(res, error);
   }
 }
 

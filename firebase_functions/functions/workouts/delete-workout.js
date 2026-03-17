@@ -19,8 +19,9 @@
 const { onRequest } = require('firebase-functions/v2/https');
 const { requireFlexibleAuth } = require('../auth/middleware');
 const admin = require('firebase-admin');
-const { ok, fail } = require('../utils/response');
+const { ok } = require('../utils/response');
 const { deleteWorkout } = require('../shared/workouts');
+const { mapErrorToResponse } = require('../shared/errors');
 
 const db = admin.firestore();
 
@@ -37,11 +38,7 @@ async function deleteWorkoutHandler(req, res) {
     const result = await deleteWorkout(db, userId, workout_id);
     return ok(res, result);
   } catch (error) {
-    if (error.code && error.http) {
-      return fail(res, error.code, error.message, null, error.http);
-    }
-    console.error('delete-workout error:', error);
-    return fail(res, 'INTERNAL', 'Failed to delete workout', { message: error.message }, 500);
+    return mapErrorToResponse(res, error);
   }
 }
 

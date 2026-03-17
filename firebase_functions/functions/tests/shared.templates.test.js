@@ -71,6 +71,7 @@ function createMockDb(store = {}) {
         store[fullPath] = { ...data };
         return makeDocRef(fullPath);
       },
+      limit: () => makeColRef(path),
       get: async () => {
         const prefix = path + '/';
         const docs = Object.keys(store)

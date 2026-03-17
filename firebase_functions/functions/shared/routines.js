@@ -152,6 +152,10 @@ async function createRoutine(db, userId, routineInput) {
   await routineRef.update({ id: routineId });
 
   // Auto-activate if user has no active routine
+  // Note: Non-atomic read-then-write — preserved from original handler.
+  // A concurrent routine create could race here, but the impact is benign
+  // (worst case: a different routine becomes active). Not worth the transaction
+  // overhead given routine creation is infrequent and user-initiated.
   const userDoc = await db.collection('users').doc(userId).get();
   const hasActiveRoutine = userDoc.exists && userDoc.data().activeRoutineId;
   if (!hasActiveRoutine) {
@@ -294,6 +298,9 @@ async function deleteRoutine(db, userId, routineId) {
   }
 
   // Check if this is the active routine and clear it
+  // Note: Non-atomic read-then-write — preserved from original handler.
+  // Benign race: concurrent delete + set-active could leave stale pointer,
+  // but set-active always validates routine existence first.
   const userRef = db.collection('users').doc(userId);
   const userSnap = await userRef.get();
   const user = userSnap.exists ? { id: userSnap.id, ...userSnap.data() } : null;

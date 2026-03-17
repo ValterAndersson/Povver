@@ -27,6 +27,7 @@ const {
 } = require('../training/set-facts-generator');
 const { CAPS } = require('../utils/caps');
 const { upsertWorkout } = require('../shared/workouts');
+const { mapErrorToResponse } = require('../shared/errors');
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -59,11 +60,7 @@ async function upsertWorkoutHandler(req, res) {
 
     return ok(res, result);
   } catch (error) {
-    if (error.code && error.http) {
-      return fail(res, error.code, error.message, null, error.http);
-    }
-    console.error('upsert-workout error:', error);
-    return fail(res, 'INTERNAL', 'Failed to upsert workout', { message: error.message }, 500);
+    return mapErrorToResponse(res, error);
   }
 }
 

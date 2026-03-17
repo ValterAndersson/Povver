@@ -259,7 +259,7 @@ describe('getWorkout', () => {
     const db = fakeDb();
     await assert.rejects(() => getWorkout(db, null, 'w1'), (err) => {
       assert.equal(err.code, 'INVALID_ARGUMENT');
-      assert.equal(err.http, 400);
+      assert.equal(err.httpStatus, 400);
       return true;
     });
   });
@@ -276,7 +276,7 @@ describe('getWorkout', () => {
     const db = fakeDb();
     await assert.rejects(() => getWorkout(db, 'u1', 'missing'), (err) => {
       assert.equal(err.code, 'NOT_FOUND');
-      assert.equal(err.http, 404);
+      assert.equal(err.httpStatus, 404);
       return true;
     });
   });
@@ -340,7 +340,7 @@ describe('deleteWorkout', () => {
   test('throws if userId missing', async () => {
     const db = fakeDb();
     await assert.rejects(() => deleteWorkout(db, null, 'w1'), (err) => {
-      assert.equal(err.http, 401);
+      assert.equal(err.httpStatus, 401);
       return true;
     });
   });
@@ -357,7 +357,7 @@ describe('deleteWorkout', () => {
     const db = fakeDb();
     await assert.rejects(() => deleteWorkout(db, 'u1', 'gone'), (err) => {
       assert.equal(err.code, 'NOT_FOUND');
-      assert.equal(err.http, 404);
+      assert.equal(err.httpStatus, 404);
       return true;
     });
   });

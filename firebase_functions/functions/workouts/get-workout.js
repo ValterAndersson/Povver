@@ -1,9 +1,10 @@
 const { onRequest } = require('firebase-functions/v2/https');
 const admin = require('firebase-admin');
 const { requireFlexibleAuth } = require('../auth/middleware');
-const { ok, fail } = require('../utils/response');
+const { ok } = require('../utils/response');
 const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const { getWorkout } = require('../shared/workouts');
+const { mapErrorToResponse } = require('../shared/errors');
 
 const db = admin.firestore();
 
@@ -20,11 +21,7 @@ async function getWorkoutHandler(req, res) {
     const result = await getWorkout(db, userId, workoutId);
     return ok(res, result);
   } catch (error) {
-    if (error.code && error.http) {
-      return fail(res, error.code, error.message, null, error.http);
-    }
-    console.error('get-workout function error:', error);
-    return fail(res, 'INTERNAL', 'Failed to get workout', { message: error.message }, 500);
+    return mapErrorToResponse(res, error);
   }
 }
 
