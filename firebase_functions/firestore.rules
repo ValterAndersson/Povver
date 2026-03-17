@@ -113,6 +113,12 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // Agent memory: owner can read, server-only writes
+      match /agent_memory/{memoryId} {
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow write: if false;
+      }
+
       // All other user subcollections: owner read/write
       // (workouts, templates, routines, set_facts, weekly_stats, etc.)
       match /{collection}/{document=**} {
@@ -123,7 +129,8 @@ service cloud.firestore {
           && collection != "conversations"
           && collection != "agent_sessions"
           && collection != "agent_recommendations"
-          && collection != "subscription_events";
+          && collection != "subscription_events"
+          && collection != "agent_memory";
       }
     }
 
@@ -161,6 +168,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
     match /processed_webhook_notifications/{notificationId} {
+      allow read, write: if false;
+    }
+    // MCP API keys — server-only (hash-indexed, Admin SDK reads/writes)
+    match /mcp_api_keys/{keyHash} {
       allow read, write: if false;
     }
 

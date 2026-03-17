@@ -158,6 +158,17 @@ struct MoreView: View {
 
             Divider().padding(.leading, 56)
 
+            NavigationLink(destination: ConnectedAppsView()) {
+                ProfileRowLinkContent(
+                    icon: "cable.connector",
+                    title: "Connected Apps",
+                    subtitle: "API keys for AI assistants"
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+
+            Divider().padding(.leading, 56)
+
             NavigationLink(destination: DevicesPlaceholderView()) {
                 ProfileRowLinkContent(
                     icon: "applewatch",

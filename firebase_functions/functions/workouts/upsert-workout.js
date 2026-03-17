@@ -28,6 +28,7 @@ const {
 const { CAPS } = require('../utils/caps');
 const { upsertWorkout } = require('../shared/workouts');
 const { mapErrorToResponse } = require('../shared/errors');
+const { enqueueWorkoutCompletion } = require('../utils/enqueue-workout-task');
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -57,6 +58,17 @@ async function upsertWorkoutHandler(req, res) {
       updateSeriesForWorkout,
       FIRESTORE_BATCH_LIMIT: CAPS.FIRESTORE_BATCH_LIMIT,
     });
+
+    // Enqueue Cloud Task for post-completion analytics pipeline
+    // upsertWorkout requires end_time, so every upserted workout is completed
+    if (result.workout_id) {
+      try {
+        await enqueueWorkoutCompletion(uid, result.workout_id);
+      } catch (enqueueErr) {
+        // Non-fatal — watchdog will catch missed completions
+        console.warn('[upsertWorkout] Failed to enqueue completion task:', enqueueErr?.message || enqueueErr);
+      }
+    }
 
     return ok(res, result);
   } catch (error) {

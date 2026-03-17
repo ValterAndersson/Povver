@@ -71,6 +71,7 @@ const admin = require('firebase-admin');
 const AnalyticsCalc = require('../utils/analytics-calculator');
 const { generateTemplateDiff } = require('../utils/template-diff-generator');
 const { logger } = require('firebase-functions');
+const { enqueueWorkoutCompletion } = require('../utils/enqueue-workout-task');
 
 const firestore = admin.firestore();
 
@@ -331,6 +332,16 @@ async function completeActiveWorkoutHandler(req, res) {
           userId, templateId: active.source_template_id, error: syncErr?.message || String(syncErr),
         });
       }
+    }
+
+    // Enqueue Cloud Task for post-completion analytics pipeline
+    try {
+      await enqueueWorkoutCompletion(userId, result.workout_id);
+    } catch (enqueueErr) {
+      // Non-fatal — watchdog will catch missed completions
+      logger.warn('[completeActiveWorkout] Failed to enqueue completion task', {
+        userId, workoutId: result.workout_id, error: enqueueErr?.message || String(enqueueErr),
+      });
     }
 
     logger.info(`[completeActiveWorkout] Completed workout ${workout_id}, archived as ${result.workout_id}`);

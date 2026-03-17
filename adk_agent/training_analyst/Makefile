@@ -1,7 +1,7 @@
 # Training Analyst Makefile
 # =========================
 
-.PHONY: help install test worker-local watchdog-local scheduler-local \
+.PHONY: help install test analyst-local worker-local watchdog-local scheduler-local \
         docker-push deploy-worker deploy-watchdog deploy-scheduler \
         trigger-worker trigger-watchdog trigger-scheduler deploy deploy-schedulers \
         eval eval-category eval-single eval-analyze eval-compare
@@ -20,6 +20,7 @@ help:
 	@echo "  make test            - Run tests"
 	@echo ""
 	@echo "Local Testing:"
+	@echo "  make analyst-local   - Run post-workout analyst locally (needs USER_ID, WORKOUT_ID)"
 	@echo "  make worker-local    - Run worker locally"
 	@echo "  make watchdog-local  - Run watchdog locally"
 	@echo "  make scheduler-local - Run scheduler locally"
@@ -67,6 +68,10 @@ eval-analyze:
 
 eval-compare:
 	python -m tests.eval.analyze --compare -B $(B) -N $(N)
+
+# Run post-workout analyst locally
+analyst-local:
+	python workers/post_workout_analyst.py --user-id $(USER_ID) --workout-id $(WORKOUT_ID) --dry-run
 
 # Run worker locally
 worker-local:

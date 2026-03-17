@@ -117,6 +117,11 @@ const { getActiveSnapshotLite } = require('./training/context-pack');
 const { getActiveEvents } = require('./training/active-events');
 const { getAnalysisSummary } = require('./training/get-analysis-summary');
 
+// MCP API Key Operations
+const { generateMcpApiKey } = require('./mcp/generate-api-key');
+const { listMcpApiKeys } = require('./mcp/list-api-keys');
+const { revokeMcpApiKey } = require('./mcp/revoke-api-key');
+
 // Subscription Operations
 const { appStoreWebhook } = require('./subscriptions/app-store-webhook');
 const { syncSubscriptionStatus } = require('./subscriptions/sync-subscription-status');
@@ -131,13 +136,12 @@ const {
   onWorkoutCreated
 } = require('./triggers/muscle-volume-calculations');
 const {
-  onWorkoutCompleted,
-  onWorkoutCreatedWithEnd,
   onWorkoutDeleted,
   weeklyStatsRecalculation,
   manualWeeklyStatsRecalculation,
 } = require('./triggers/weekly-analytics');
-const { onWorkoutCreatedUpdateRoutineCursor } = require('./triggers/workout-routine-cursor');
+const { processWorkoutCompletionTask } = require('./triggers/workout-completion-task');
+const { workoutCompletionWatchdog } = require('./triggers/workout-completion-watchdog');
 const { onAnalysisInsightCreated, onWeeklyReviewCreated, expireStaleRecommendations } = require('./triggers/process-recommendations');
 
 // Export all functions as Firebase HTTPS functions
@@ -243,13 +247,11 @@ exports.expireProposals = functions.https.onRequest((req, res) => withApiKey(exp
 exports.emitEvent = functions.https.onRequest((req, res) => withApiKey(emitEvent)(req, res));
 exports.purgeCanvas = functions.https.onRequest((req, res) => requireFlexibleAuth(purgeCanvas)(req, res));
 // No-op stubs — iOS calls these until Phase 7 coordinated cleanup (AD-4).
-exports.initializeSession = onRequestV2(async (req, res) => {
-  getAuthenticatedUserId(req);
+exports.initializeSession = onRequestV2(requireFlexibleAuth(async (req, res) => {
   const { ok } = require('./utils/response');
   return ok(res, { sessionId: null, isReused: false });
-});
-exports.openCanvas = onRequestV2(async (req, res) => {
-  getAuthenticatedUserId(req);
+}));
+exports.openCanvas = onRequestV2(requireFlexibleAuth(async (req, res) => {
   const { ok } = require('./utils/response');
   const { v4: uuidv4 } = require('uuid');
   return ok(res, {
@@ -258,18 +260,16 @@ exports.openCanvas = onRequestV2(async (req, res) => {
     isNewSession: true,
     resumeState: { cards: [], cardCount: 0 },
   });
-});
-exports.bootstrapCanvas = onRequestV2(async (req, res) => {
-  getAuthenticatedUserId(req);
+}));
+exports.bootstrapCanvas = onRequestV2(requireFlexibleAuth(async (req, res) => {
   const { ok } = require('./utils/response');
   const { v4: uuidv4 } = require('uuid');
   return ok(res, { canvasId: req.body.canvasId || uuidv4(), bootstrapped: true });
-});
-exports.preWarmSession = onRequestV2(async (req, res) => {
-  getAuthenticatedUserId(req);
+}));
+exports.preWarmSession = onRequestV2(requireFlexibleAuth(async (req, res) => {
   const { ok } = require('./utils/response');
   return ok(res, { preWarmed: true });
-});
+}));
 exports.runAnalyticsForUser = functions.https.onRequest((req, res) => requireFlexibleAuth(runAnalyticsForUser)(req, res));
 exports.compactAnalyticsForUser = functions.https.onRequest((req, res) => requireFlexibleAuth(compactAnalyticsForUser)(req, res));
 exports.publishWeeklyJob = functions.https.onRequest((req, res) => requireFlexibleAuth(publishWeeklyJob)(req, res));
@@ -283,10 +283,9 @@ exports.applyProgression = applyProgression;
 exports.onTemplateCreated = onTemplateCreated;
 exports.onTemplateUpdated = onTemplateUpdated;
 exports.onWorkoutCreated = onWorkoutCreated;
-exports.onWorkoutCreatedWithEnd = onWorkoutCreatedWithEnd;
-exports.onWorkoutCompleted = onWorkoutCompleted;
 exports.onWorkoutDeleted = onWorkoutDeleted;
-exports.onWorkoutCreatedUpdateRoutineCursor = onWorkoutCreatedUpdateRoutineCursor;
+exports.processWorkoutCompletionTask = processWorkoutCompletionTask;
+exports.workoutCompletionWatchdog = workoutCompletionWatchdog;
 exports.onAnalysisInsightCreated = onAnalysisInsightCreated;
 exports.onWeeklyReviewCreated = onWeeklyReviewCreated;
 
@@ -330,3 +329,10 @@ exports.appStoreWebhook = appStoreWebhook;
 
 // Client subscription sync (v2 onRequest with requireFlexibleAuth - iOS app only)
 exports.syncSubscriptionStatus = syncSubscriptionStatus;
+
+// ============================================================================
+// MCP API Key Management (v2 onRequest with requireFlexibleAuth - iOS app only)
+// ============================================================================
+exports.generateMcpApiKey = generateMcpApiKey;
+exports.listMcpApiKeys = listMcpApiKeys;
+exports.revokeMcpApiKey = revokeMcpApiKey;
