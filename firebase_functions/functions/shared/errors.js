@@ -38,6 +38,12 @@ class ConflictError extends AppError {
   }
 }
 
+class PremiumRequiredError extends AppError {
+  constructor(message = 'Premium subscription required') {
+    super(message, 'PREMIUM_REQUIRED', 403);
+  }
+}
+
 function mapErrorToResponse(res, err) {
   if (err instanceof AppError) {
     return res.status(err.httpStatus).json({
@@ -52,4 +58,4 @@ function mapErrorToResponse(res, err) {
   });
 }
 
-module.exports = { AppError, ValidationError, NotFoundError, PermissionError, PermissionDeniedError, ConflictError, mapErrorToResponse };
+module.exports = { AppError, ValidationError, NotFoundError, PermissionError, PermissionDeniedError, ConflictError, PremiumRequiredError, mapErrorToResponse };
