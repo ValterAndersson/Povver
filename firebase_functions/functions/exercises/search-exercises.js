@@ -100,7 +100,7 @@ async function searchExercisesHandler(req, res) {
       query, category, movementType, split, equipment, muscleGroup,
       primaryMuscle, secondaryMuscle, difficulty, planeOfMotion,
       unilateral, stimulusTag, programmingUseCase, limit,
-      includeMerged, canonicalOnly
+      includeMerged, canonicalOnly, fields
     };
     const cacheKey = getCacheKey(cacheParams);
 
