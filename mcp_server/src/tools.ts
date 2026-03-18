@@ -155,7 +155,7 @@ export function registerTools(server: McpServer, userId: string) {
     query: z.string().describe('Search query'),
     limit: z.number().default(10).describe('Max results')
   }, async ({ query, limit }) => {
-    const result = await exercises.searchExercises(db, { query, limit: limit || 10 });
+    const result = await exercises.searchExercises(db, { query, limit: limit || 10, fields: 'lean' });
     return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
   });
 
@@ -184,9 +184,18 @@ export function registerTools(server: McpServer, userId: string) {
   });
 
   server.tool('query_sets', 'Query raw set-level training data', {
-    target: z.record(z.string(), z.any()).describe('Target filter (exercise, muscle_group, or muscle)'),
+    exercise_name: z.string().optional().describe('Exercise name (fuzzy match)'),
+    muscle_group: z.string().optional().describe('Muscle group (e.g., "chest", "back", "shoulders")'),
+    muscle: z.string().optional().describe('Specific muscle (e.g., "posterior deltoid")'),
+    exercise_ids: z.array(z.string()).optional().describe('Exercise IDs (max 10)'),
     limit: z.number().default(50).describe('Max results')
-  }, async ({ target, limit }) => {
+  }, async ({ exercise_name, muscle_group, muscle, exercise_ids, limit }) => {
+    const target: Record<string, any> = {};
+    if (exercise_name) target.exercise = exercise_name;
+    if (muscle_group) target.muscle_group = muscle_group;
+    if (muscle) target.muscle = muscle;
+    if (exercise_ids) target.exercise_ids = exercise_ids;
+
     const data = await trainingQueries.querySets(db, userId, { target, limit: limit || 50 });
     return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
   });
@@ -211,7 +220,17 @@ export function registerTools(server: McpServer, userId: string) {
 
   server.tool('create_template', 'Create a new workout template', {
     name: z.string().describe('Template name'),
-    exercises: z.array(z.any()).describe('Exercise list with sets')
+    exercises: z.array(z.object({
+      exercise_id: z.string().describe('Exercise ID from search_exercises'),
+      name: z.string().optional().describe('Exercise name'),
+      position: z.number().describe('Order in template (0-based)'),
+      sets: z.array(z.object({
+        type: z.enum(['warmup', 'working']).default('working'),
+        reps: z.number().describe('Target reps'),
+        weight: z.number().nullable().describe('Target weight (kg) or null for bodyweight'),
+        rir: z.number().optional().describe('Reps in reserve (0-5)'),
+      })),
+    })).describe('Exercises with set prescriptions'),
   }, async (args) => {
     const tmpl = await templates.createTemplate(db, userId, args);
     return { content: [{ type: 'text' as const, text: JSON.stringify(tmpl, null, 2) }] };
@@ -219,7 +238,21 @@ export function registerTools(server: McpServer, userId: string) {
 
   server.tool('update_template', 'Update an existing template', {
     template_id: z.string().describe('Template ID'),
-    updates: z.record(z.string(), z.any()).describe('Fields to update')
+    updates: z.object({
+      name: z.string().optional(),
+      description: z.string().optional(),
+      exercises: z.array(z.object({
+        exercise_id: z.string().describe('Exercise ID'),
+        name: z.string().optional().describe('Exercise name'),
+        position: z.number().describe('Order (0-based)'),
+        sets: z.array(z.object({
+          type: z.enum(['warmup', 'working']).default('working'),
+          reps: z.number().describe('Target reps'),
+          weight: z.number().nullable().describe('Target weight (kg)'),
+          rir: z.number().optional().describe('Reps in reserve (0-5)'),
+        })),
+      })).optional(),
+    }).describe('Fields to update'),
   }, async ({ template_id, updates }) => {
     const tmpl = await templates.patchTemplate(db, userId, template_id, updates);
     return { content: [{ type: 'text' as const, text: JSON.stringify(tmpl, null, 2) }] };
