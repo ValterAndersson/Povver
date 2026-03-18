@@ -17,12 +17,80 @@ const planningContext = require('../shared/planning-context');
 
 const db = admin.firestore();
 
+/** Compact a workout to summary-only (no set-level data) */
+function summarizeWorkout(w: any) {
+  const exercises = (w.exercises || []).map((ex: any) => ({
+    name: ex.name,
+    exercise_id: ex.exercise_id,
+    sets: (ex.sets || []).length,
+  }));
+  return {
+    id: w.id,
+    end_time: w.end_time,
+    source_template_id: w.source_template_id,
+    name: w.name || null,
+    exercises,
+    analytics: w.analytics ? {
+      total_sets: w.analytics.total_sets,
+      total_reps: w.analytics.total_reps,
+      total_volume: w.analytics.total_weight,
+    } : null,
+  };
+}
+
+/** Compact planning context to fit within MCP token limits */
+function compactSnapshot(ctx: any) {
+  return {
+    user: ctx.user ? {
+      id: ctx.user.id,
+      name: ctx.user.name,
+      weight_unit: ctx.weight_unit,
+      attributes: ctx.user.attributes ? {
+        fitness_level: ctx.user.attributes.fitness_level,
+        fitness_goal: ctx.user.attributes.fitness_goal,
+        weight_format: ctx.user.attributes.weight_format,
+      } : null,
+    } : null,
+    activeRoutine: ctx.activeRoutine ? {
+      id: ctx.activeRoutine.id,
+      name: ctx.activeRoutine.name,
+      template_ids: ctx.activeRoutine.template_ids,
+      frequency: ctx.activeRoutine.frequency,
+    } : null,
+    nextWorkout: ctx.nextWorkout ? {
+      templateId: ctx.nextWorkout.templateId,
+      templateIndex: ctx.nextWorkout.templateIndex,
+      templateCount: ctx.nextWorkout.templateCount,
+      templateName: ctx.nextWorkout.template?.name || null,
+    } : null,
+    templates: (ctx.templates || []).map((t: any) => ({
+      id: t.id,
+      name: t.name,
+      exerciseCount: t.exerciseCount || t.exercises?.length || 0,
+    })),
+    recentWorkouts: (ctx.recentWorkoutsSummary || []).slice(0, 10).map((w: any) => ({
+      id: w.id,
+      end_time: w.end_time,
+      source_template_id: w.source_template_id,
+      exercises: (w.exercises || []).map((ex: any) => ({
+        name: ex.name,
+        working_sets: ex.working_sets,
+      })),
+    })),
+    strengthSummary: ctx.strengthSummary || [],
+  };
+}
+
 export function registerTools(server: McpServer, userId: string) {
   // Read tools
-  server.tool('get_training_snapshot', 'Get user training snapshot', {},
+  server.tool('get_training_snapshot', 'Get compact overview: user profile, active routine, next workout, recent workouts (summary), strength records', {},
     async () => {
-      const ctx = await planningContext.getPlanningContext(db, userId);
-      return { content: [{ type: 'text' as const, text: JSON.stringify(ctx, null, 2) }] };
+      const ctx = await planningContext.getPlanningContext(db, userId, {
+        includeTemplateExercises: false,
+        workoutLimit: 10,
+      });
+      const compact = compactSnapshot(ctx);
+      return { content: [{ type: 'text' as const, text: JSON.stringify(compact, null, 2) }] };
     }
   );
 
@@ -33,7 +101,7 @@ export function registerTools(server: McpServer, userId: string) {
     }
   );
 
-  server.tool('get_routine', 'Get a specific routine', {
+  server.tool('get_routine', 'Get a specific routine with template IDs', {
     routine_id: z.string().describe('Routine ID')
   }, async ({ routine_id }) => {
     const routine = await routines.getRoutine(db, userId, routine_id);
@@ -41,14 +109,14 @@ export function registerTools(server: McpServer, userId: string) {
   });
 
   // --- Templates ---
-  server.tool('list_templates', 'List all workout templates', {},
+  server.tool('list_templates', 'List all workout templates (names + IDs, no exercises)', {},
     async () => {
       const items = await templates.listTemplates(db, userId);
       return { content: [{ type: 'text' as const, text: JSON.stringify(items, null, 2) }] };
     }
   );
 
-  server.tool('get_template', 'Get a specific template', {
+  server.tool('get_template', 'Get a specific template with full exercise list', {
     template_id: z.string().describe('Template ID')
   }, async ({ template_id }) => {
     const tmpl = await templates.getTemplate(db, userId, template_id);
@@ -56,14 +124,19 @@ export function registerTools(server: McpServer, userId: string) {
   });
 
   // --- Workouts ---
-  server.tool('list_workouts', 'List recent workouts', {
-    limit: z.number().default(20).describe('Max results (default 20)')
+  server.tool('list_workouts', 'List recent workouts (summaries: date, exercises, set counts). Use get_workout for full set data.', {
+    limit: z.number().default(10).describe('Max results (default 10)')
   }, async ({ limit }) => {
-    const items = await workouts.listWorkouts(db, userId, { limit: limit || 20 });
-    return { content: [{ type: 'text' as const, text: JSON.stringify(items, null, 2) }] };
+    const result = await workouts.listWorkouts(db, userId, { limit: limit || 10 });
+    const summaries = (result.items || []).map(summarizeWorkout);
+    return { content: [{ type: 'text' as const, text: JSON.stringify({
+      workouts: summaries,
+      analytics: result.analytics,
+      hasMore: result.hasMore,
+    }, null, 2) }] };
   });
 
-  server.tool('get_workout', 'Get a specific workout', {
+  server.tool('get_workout', 'Get a specific workout with full exercise and set data', {
     workout_id: z.string().describe('Workout ID')
   }, async ({ workout_id }) => {
     const w = await workouts.getWorkout(db, userId, workout_id);
