@@ -95,29 +95,29 @@ docker-push:
 # Deploy worker job
 deploy-worker:
 	@echo "Deploying training-analyst-worker to Cloud Run Jobs..."
-	gcloud run jobs replace cloud-run-worker.yaml --region=$(REGION)
+	gcloud run jobs replace cloud-run-worker.yaml --region=$(REGION) --project=$(PROJECT_ID)
 
 # Deploy watchdog job
 deploy-watchdog:
 	@echo "Deploying training-analyst-watchdog to Cloud Run Jobs..."
-	gcloud run jobs replace cloud-run-watchdog.yaml --region=$(REGION)
+	gcloud run jobs replace cloud-run-watchdog.yaml --region=$(REGION) --project=$(PROJECT_ID)
 
 # Deploy scheduler job
 deploy-scheduler:
 	@echo "Deploying training-analyst-scheduler to Cloud Run Jobs..."
-	gcloud run jobs replace cloud-run-scheduler.yaml --region=$(REGION)
+	gcloud run jobs replace cloud-run-scheduler.yaml --region=$(REGION) --project=$(PROJECT_ID)
 
 # Trigger worker execution
 trigger-worker:
-	gcloud run jobs execute training-analyst-worker --region=$(REGION) --wait
+	gcloud run jobs execute training-analyst-worker --region=$(REGION) --project=$(PROJECT_ID) --wait
 
 # Trigger watchdog execution
 trigger-watchdog:
-	gcloud run jobs execute training-analyst-watchdog --region=$(REGION) --wait
+	gcloud run jobs execute training-analyst-watchdog --region=$(REGION) --project=$(PROJECT_ID) --wait
 
 # Trigger scheduler execution
 trigger-scheduler:
-	gcloud run jobs execute training-analyst-scheduler --region=$(REGION) --wait
+	gcloud run jobs execute training-analyst-scheduler --region=$(REGION) --project=$(PROJECT_ID) --wait
 
 # Deploy all jobs
 deploy: docker-push deploy-worker deploy-watchdog deploy-scheduler

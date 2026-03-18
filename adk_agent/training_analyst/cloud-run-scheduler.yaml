@@ -11,7 +11,7 @@ spec:
       template:
         spec:
           containers:
-            - image: europe-west1-docker.pkg.dev/myon-53d85/cloud-run-source-deploy/training-analyst-worker:latest
+            - image: gcr.io/myon-53d85/training-analyst-worker:latest
 
               # Run scheduler mode
               command: ["python", "workers/scheduler.py"]
