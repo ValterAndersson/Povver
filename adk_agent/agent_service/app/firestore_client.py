@@ -54,9 +54,24 @@ class FirestoreClient:
             raise ValueError(f"Template {template_id} not found")
         return {"id": doc.id, **doc.to_dict()}
 
-    async def list_templates(self, user_id: str) -> list[dict]:
+    async def list_templates(self, user_id: str, include_exercises: bool = False) -> list[dict]:
         docs = self.db.collection(f"users/{user_id}/templates").stream()
-        return [{"id": doc.id, **doc.to_dict()} async for doc in docs]
+        results = []
+        async for doc in docs:
+            data = doc.to_dict()
+            if include_exercises:
+                results.append({"id": doc.id, **data})
+            else:
+                results.append({
+                    "id": doc.id,
+                    "name": data.get("name"),
+                    "description": data.get("description"),
+                    "exercise_count": len(data.get("exercises", [])),
+                    "exercise_names": [e.get("name") for e in data.get("exercises", [])],
+                    "created_at": data.get("created_at"),
+                    "updated_at": data.get("updated_at"),
+                })
+        return results
 
     # --- User ---
 
@@ -81,8 +96,28 @@ class FirestoreClient:
             .order_by("end_time", direction="DESCENDING")
             .limit(limit)
         )
-        docs = query.stream()
-        return [{"id": doc.id, **doc.to_dict()} async for doc in docs]
+        results = []
+        async for doc in query.stream():
+            data = doc.to_dict()
+            exercises = data.get("exercises", [])
+            results.append({
+                "id": doc.id,
+                "name": data.get("name"),
+                "source_template_id": data.get("source_template_id"),
+                "start_time": data.get("start_time"),
+                "end_time": data.get("end_time"),
+                "exercises": [{
+                    "name": ex.get("name"),
+                    "exercise_id": ex.get("exercise_id"),
+                    "sets": len(ex.get("sets", [])),
+                } for ex in exercises],
+                "analytics": {
+                    "total_sets": (data.get("analytics") or {}).get("total_sets"),
+                    "total_reps": (data.get("analytics") or {}).get("total_reps"),
+                    "total_volume": (data.get("analytics") or {}).get("total_weight"),
+                } if data.get("analytics") else None,
+            })
+        return results
 
     # --- Training Data ---
 

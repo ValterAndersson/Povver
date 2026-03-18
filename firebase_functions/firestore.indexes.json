@@ -137,6 +137,14 @@
         { "fieldPath": "is_warmup", "order": "ASCENDING" },
         { "fieldPath": "workout_date", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "agent_memory",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "active", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

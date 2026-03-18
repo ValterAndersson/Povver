@@ -109,10 +109,17 @@ export function registerTools(server: McpServer, userId: string) {
   });
 
   // --- Templates ---
-  server.tool('list_templates', 'List all workout templates (names + IDs, no exercises)', {},
+  server.tool('list_templates', 'List all workout templates (names + IDs, no exercises). Use get_template for full exercise list.', {},
     async () => {
       const items = await templates.listTemplates(db, userId);
-      return { content: [{ type: 'text' as const, text: JSON.stringify(items, null, 2) }] };
+      const summaries = (items || []).map((t: any) => ({
+        id: t.id,
+        name: t.name,
+        description: t.description,
+        exercise_count: t.exercises?.length || 0,
+        exercise_names: (t.exercises || []).map((e: any) => e.name),
+      }));
+      return { content: [{ type: 'text' as const, text: JSON.stringify(summaries, null, 2) }] };
     }
   );
 
