@@ -161,9 +161,10 @@ export function registerTools(server: McpServer, userId: string) {
 
   // --- Training Analysis ---
   server.tool('get_training_analysis', 'Get training analysis insights', {
-    sections: z.array(z.string()).optional().describe('Sections to include')
-  }, async ({ sections }) => {
-    const analysis = await trainingQueries.getAnalysisSummary(db, userId, { sections }, admin);
+    sections: z.array(z.string()).optional().describe('Sections: insights, weekly_review, recommendation_history'),
+    include_expired: z.boolean().default(false).describe('Include expired/applied recommendations')
+  }, async ({ sections, include_expired }) => {
+    const analysis = await trainingQueries.getAnalysisSummary(db, userId, { sections, include_expired }, admin);
     return { content: [{ type: 'text' as const, text: JSON.stringify(analysis, null, 2) }] };
   });
 
