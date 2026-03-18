@@ -97,7 +97,10 @@ def test_add_exercise():
             assert result["success"] is True
             payload = mock_client.post.call_args.kwargs.get("json") or mock_client.post.call_args[1].get("json")
             assert payload["name"] == "Lateral Raise"
-            assert payload["sets"] == 4
+            assert len(payload["sets"]) == 4
+            assert all(s["set_type"] == "working" for s in payload["sets"])
+            assert all(s["target_reps"] == 12 for s in payload["sets"])
+            assert all(s["target_weight"] == 10.0 for s in payload["sets"])
 
     _run(_test())
 
@@ -116,8 +119,10 @@ def test_prescribe_set_weight_only():
             )
             assert result["success"] is True
             payload = mock_client.post.call_args.kwargs.get("json") or mock_client.post.call_args[1].get("json")
-            assert payload["weight_kg"] == 85.0
-            assert "reps" not in payload
+            assert len(payload["ops"]) == 1
+            assert payload["ops"][0]["op"] == "set_field"
+            assert payload["ops"][0]["field"] == "weight"
+            assert payload["ops"][0]["value"] == 85.0
 
     _run(_test())
 
@@ -136,8 +141,10 @@ def test_prescribe_set_reps_only():
             )
             assert result["success"] is True
             payload = mock_client.post.call_args.kwargs.get("json") or mock_client.post.call_args[1].get("json")
-            assert payload["reps"] == 6
-            assert "weight_kg" not in payload
+            assert len(payload["ops"]) == 1
+            assert payload["ops"][0]["op"] == "set_field"
+            assert payload["ops"][0]["field"] == "reps"
+            assert payload["ops"][0]["value"] == 6
 
     _run(_test())
 

@@ -36,14 +36,6 @@ const PrescribeSchema = z.object({
   context: z.any().optional()
 });
 
-// Legacy LogSetSchema - deprecated, use LogSetSchemaV2
-const LogSetSchema = z.object({
-  workout_id: IdSchema,
-  exercise_id: IdSchema,
-  set_index: z.number().int().min(0),
-  actual: z.object({ reps: z.number().int().min(0).max(MAX_REPS), rir: z.number().int().min(0).max(5), weight: z.number().nonnegative().max(MAX_WEIGHT_KG).optional(), tempo: z.string().optional(), notes: z.string().max(MAX_NOTES_LENGTH).optional() })
-});
-
 /**
  * LogSetSchemaV2 - Per FOCUS_MODE_WORKOUT_EXECUTION.md spec
  * Uses stable IDs (exercise_instance_id + set_id) instead of position-based (exercise_id + set_index)
@@ -204,7 +196,6 @@ module.exports = {
   PreferencesSchema,
   PlanSchema,
   PrescribeSchema,
-  LogSetSchema,
   LogSetSchemaV2,
   ScoreSetSchema,
   PatchOpSchema,
@@ -247,15 +238,7 @@ const RoutineSchema = z.object({
   templateIds: z.array(z.string().min(1)).max(50).optional(),
   frequency: z.number().int().min(1).max(7).optional(),
   days: z.array(z.any()).max(7).optional(),  // Legacy field
-}).refine(
-  (data) => {
-    // At least one of template_ids or templateIds should have content if provided
-    const tids = data.template_ids || data.templateIds || [];
-    // Empty is allowed (creating empty routine), but if provided must be strings
-    return true;
-  },
-  { message: 'template_ids must be an array of non-empty strings' }
-);
+});
 
 module.exports.TemplateSchema = TemplateSchema;
 module.exports.RoutineSchema = RoutineSchema;

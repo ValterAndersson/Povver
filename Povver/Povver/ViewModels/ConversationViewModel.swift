@@ -55,7 +55,6 @@
  */
 
 import Foundation
-import Combine
 import FirebaseFirestore
 
 struct ClarificationCue: Identifiable, Equatable {
@@ -96,7 +95,6 @@ final class ConversationViewModel: ObservableObject {
     private let service: ConversationServiceProtocol
     private var streamTask: Task<Void, Never>?
     private var sseStreamTask: Task<Void, Never>?
-    private var cancellables: Set<AnyCancellable> = []
     private var eventsListener: ListenerRegistration?
     private var workspaceListener: ListenerRegistration?
     private var currentUserId: String?
@@ -586,24 +584,6 @@ final class ConversationViewModel: ObservableObject {
         // Auto-hide overlay if cards start appearing
         if !cards.isEmpty {
             showStreamOverlay = false
-        }
-    }
-    
-    private func humanReadableToolName(_ name: String) -> String {
-        switch name {
-        case "tool_set_canvas_context": return "canvas context"
-        case "tool_fetch_profile": return "athlete profile"
-        case "tool_fetch_recent_sessions": return "recent sessions"
-        case "tool_emit_agent_event": return "telemetry"
-        case "tool_format_workout_plan_cards": return "workout plan formatter"
-        case "tool_format_analysis_cards": return "analysis formatter"
-        case "tool_publish_cards": return "card publisher"
-        case "get_user_workouts": return "activity history"
-        case "get_user_routines": return "routines"
-        case "list_exercises", "search_exercises": return "exercise library"
-        case "get_user_templates": return "templates"
-        case "get_active_workout": return "active workout"
-        default: return name.replacingOccurrences(of: "_", with: " ")
         }
     }
     

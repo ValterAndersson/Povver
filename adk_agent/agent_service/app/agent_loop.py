@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any, AsyncIterator, Callable, Awaitable
 
 from app.context import RequestContext
-from app.llm.protocol import LLMClient, LLMChunk, ModelConfig, ToolDef
+from app.llm.protocol import LLMClient, ModelConfig, ToolDef
 from app.observability import log_tokens, log_tool_call, set_trace_id
 
 logger = logging.getLogger(__name__)

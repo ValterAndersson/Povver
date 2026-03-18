@@ -1,19 +1,6 @@
 import Foundation
 
-struct AgentInvokeRequest: Codable {
-    let userId: String
-    let conversationId: String
-    let message: String
-    let correlationId: String
-}
-
 enum AgentsApi {
-    static func invokeAgent(_ req: AgentInvokeRequest) async throws {
-        struct Empty: Decodable {}
-        AppLogger.shared.info(.agent, "invokeAgent user=\(req.userId.prefix(8)) conv=\(req.conversationId.prefix(8))")
-        let _: Empty = try await ApiClient.shared.postJSON("invokeCanvasOrchestrator", body: req)
-    }
-
     /// Handle an artifact action (accept, dismiss, save_routine, start_workout, etc.)
     static func artifactAction(
         userId: String,

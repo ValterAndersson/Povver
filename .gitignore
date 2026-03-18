@@ -329,4 +329,4 @@ exercises_dump_*.json
 .temp/
 .tmp/
 screenshots/
-.worktrees/
+.worktrees/.mcp.json

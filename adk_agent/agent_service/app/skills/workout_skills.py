@@ -105,8 +105,6 @@ async def add_exercise(
     and optional warmup sets. Generates instance_id and structured sets
     array required by the addExercise Firebase Function.
     """
-    import uuid
-
     instance_id = str(uuid.uuid4())
 
     # Build structured sets array matching the Firebase Function contract
