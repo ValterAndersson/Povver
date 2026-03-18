@@ -98,20 +98,43 @@ async def add_exercise(
     """Add an exercise to the active workout with planned sets.
 
     Creates a new exercise entry with the specified number of working sets
-    and optional warmup sets.
+    and optional warmup sets. Generates instance_id and structured sets
+    array required by the addExercise Firebase Function.
     """
+    import uuid
+
+    instance_id = str(uuid.uuid4())
+
+    # Build structured sets array matching the Firebase Function contract
+    structured_sets = []
+    for i in range(warmup_sets):
+        structured_sets.append({
+            "id": str(uuid.uuid4()),
+            "set_type": "warmup",
+            "status": "planned",
+            "target_reps": reps,
+            "target_weight": round(weight_kg * 0.5, 1) if weight_kg else 0,
+            "target_rir": None,
+        })
+    for i in range(sets):
+        structured_sets.append({
+            "id": str(uuid.uuid4()),
+            "set_type": "working",
+            "status": "planned",
+            "target_reps": reps,
+            "target_weight": weight_kg,
+            "target_rir": rir,
+        })
+
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.post(
             f"{FUNCTIONS_URL}/addExercise",
             json={
                 "workout_id": ctx.workout_id,
+                "instance_id": instance_id,
                 "exercise_id": exercise_id,
                 "name": name,
-                "sets": sets,
-                "reps": reps,
-                "weight_kg": weight_kg,
-                "rir": rir,
-                "warmup_sets": warmup_sets,
+                "sets": structured_sets,
             },
             headers=_headers(ctx),
         )
