@@ -31,6 +31,7 @@ deploy: build
 	gcloud run deploy $(SERVICE_NAME) \
 		--source . \
 		--region $(REGION) \
+		--project $(PROJECT_ID) \
 		--platform managed \
 		--allow-unauthenticated \
 		--service-account ai-agents@$(PROJECT_ID).iam.gserviceaccount.com \
@@ -39,5 +40,5 @@ deploy: build
 		--cpu 1 \
 		--min-instances 0 \
 		--max-instances 5 \
-		--timeout 60
+		--timeout 60; \
 	rm -rf shared/ utils/
