@@ -43,6 +43,9 @@ class GeminiClient:
             max_output_tokens=config.max_output_tokens,
             system_instruction=system_instruction,
             tools=gemini_tools,
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                disable=True,
+            ),
         )
 
         async for response in await self.client.aio.models.generate_content_stream(

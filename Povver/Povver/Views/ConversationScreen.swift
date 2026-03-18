@@ -43,7 +43,8 @@ struct ConversationScreen: View {
                 onClarificationSubmit: handleClarificationSubmit,
                 onClarificationSkip: handleClarificationSkip,
                 hideThinkingEvents: true,  // Hide old thought process - using new ThinkingBubble
-                thinkingState: vm.thinkingState  // Gemini-style thinking process
+                thinkingState: vm.thinkingState,  // Gemini-style thinking process
+                streamingResponseText: vm.streamingResponseText  // Progressive text streaming
             )
             .contentShape(Rectangle())
             .onTapGesture { composerFocused = false }
@@ -75,13 +76,24 @@ struct ConversationScreen: View {
         }
         .overlay(alignment: .bottom) {
             if let t = toastText {
-                UndoToast(t) {
-                    if let cid = vm.canvasId ?? canvasId {
-                        Task { await vm.applyAction(canvasId: cid, type: "UNDO", cardId: nil) }
+                let isError = t.lowercased().contains("failed")
+                TransientToast(
+                    t,
+                    icon: isError ? "exclamationmark.triangle" : "checkmark.circle",
+                    isError: isError
+                )
+                .padding(.bottom, 60) // Clear the compose bar
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .onAppear {
+                    // Auto-dismiss after 3 seconds
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                        withAnimation(.easeOut(duration: 0.3)) {
+                            toastText = nil
+                        }
                     }
-                    toastText = nil
                 }
-                .padding(.bottom, Space.xl)
+                .onTapGesture { withAnimation { toastText = nil } }
+                .animation(.easeInOut(duration: 0.25), value: toastText)
             }
         }
         .overlay {
@@ -319,41 +331,13 @@ extension ConversationScreen {
                     }
                 }
             case "save_as_template":
-                // Save session plan exercises as a new template
-                if let exercisesJson = action.payload?["exercises_json"],
-                   let data = exercisesJson.data(using: .utf8),
-                   let planExercises = try? JSONDecoder().decode([PlanExercise].self, from: data) {
+                // Save session plan as template via artifact action (server-side conversion)
+                if let artifactId = card.meta?.artifactId,
+                   let conversationId = card.meta?.conversationId ?? vm.canvasId ?? canvasId,
+                   let uid = AuthService.shared.currentUser?.uid {
                     Task {
                         do {
-                            let uid = AuthService.shared.currentUser?.uid ?? ""
-                            let templateExercises = planExercises.enumerated().map { (idx, ex) -> WorkoutTemplateExercise in
-                                let templateSets = ex.sets.map { s -> WorkoutTemplateSet in
-                                    WorkoutTemplateSet(
-                                        id: s.id,
-                                        reps: s.reps,
-                                        rir: s.rir,
-                                        type: s.type?.rawValue ?? "working",
-                                        weight: s.weight ?? 0
-                                    )
-                                }
-                                return WorkoutTemplateExercise(
-                                    id: ex.id,
-                                    exerciseId: ex.exerciseId ?? ex.id,
-                                    name: ex.name,
-                                    position: idx,
-                                    sets: templateSets,
-                                    restBetweenSets: ex.restBetweenSets
-                                )
-                            }
-                            let template = WorkoutTemplate(
-                                id: "",
-                                userId: uid,
-                                name: card.title ?? "Workout Template",
-                                exercises: templateExercises,
-                                createdAt: Date(),
-                                updatedAt: Date()
-                            )
-                            _ = try await CloudFunctionService().createTemplate(template: template)
+                            _ = try await AgentsApi.artifactAction(userId: uid, conversationId: conversationId, artifactId: artifactId, action: "save_template")
                             await MainActor.run { toastText = "Template saved" }
                         } catch {
                             print("[ConversationScreen] Failed to save template: \(error)")

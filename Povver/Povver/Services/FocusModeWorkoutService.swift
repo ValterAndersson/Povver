@@ -325,12 +325,69 @@ class FocusModeWorkoutService: ObservableObject {
 
             // Build lookup of local exercises by instanceId
             let localIds = Set(merged.exercises.map { $0.instanceId })
+            let serverExercises = serverData.exercises ?? []
+            let serverIds = Set(serverExercises.map { $0.instanceId })
+
+            // Build server exercise lookup
+            let serverExerciseLookup = Dictionary(uniqueKeysWithValues: serverExercises.map { ($0.instanceId, $0) })
+
+            // Remove exercises that no longer exist on server
+            merged.exercises.removeAll { !serverIds.contains($0.instanceId) }
+
+            // Update existing exercises: sync planned set values from server
+            // (agent may have modified weight/reps via prescribe_set)
+            for i in merged.exercises.indices {
+                let instanceId = merged.exercises[i].instanceId
+                guard let serverEx = serverExerciseLookup[instanceId] else { continue }
+
+                // Update position from server
+                merged.exercises[i].position = serverEx.position
+
+                // Build server set lookup
+                let serverSets = Dictionary(uniqueKeysWithValues: (serverEx.sets ?? []).map { ($0.id, $0) })
+
+                for j in merged.exercises[i].sets.indices {
+                    let setId = merged.exercises[i].sets[j].id
+                    guard let serverSet = serverSets[setId] else { continue }
+
+                    // Only update planned sets — don't overwrite user-completed sets
+                    if merged.exercises[i].sets[j].status == .planned {
+                        let serverWeight = serverSet.targetWeight ?? serverSet.weight
+                        let serverReps = serverSet.targetReps ?? serverSet.reps
+                        let serverRir = serverSet.targetRir ?? serverSet.rir
+                        merged.exercises[i].sets[j].targetWeight = serverWeight
+                        merged.exercises[i].sets[j].targetReps = serverReps
+                        merged.exercises[i].sets[j].targetRir = serverRir
+                        merged.exercises[i].sets[j].weight = serverSet.weight
+                        merged.exercises[i].sets[j].reps = serverSet.reps
+                        merged.exercises[i].sets[j].rir = serverSet.rir
+                    }
+                }
+
+                // Add sets from server that don't exist locally
+                let localSetIds = Set(merged.exercises[i].sets.map { $0.id })
+                for serverSetDto in serverEx.sets ?? [] where !localSetIds.contains(serverSetDto.id) {
+                    merged.exercises[i].sets.append(FocusModeSet(
+                        id: serverSetDto.id,
+                        setType: FocusModeSetType(rawValue: serverSetDto.setType ?? "working") ?? .working,
+                        status: FocusModeSetStatus(rawValue: serverSetDto.status ?? "planned") ?? .planned,
+                        targetWeight: serverSetDto.targetWeight ?? serverSetDto.weight,
+                        targetReps: serverSetDto.targetReps ?? serverSetDto.reps,
+                        targetRir: serverSetDto.targetRir ?? serverSetDto.rir,
+                        weight: serverSetDto.weight,
+                        reps: serverSetDto.reps,
+                        rir: serverSetDto.rir
+                    ))
+                }
+
+                // Remove sets that no longer exist on server
+                let serverSetIds = Set((serverEx.sets ?? []).map { $0.id })
+                merged.exercises[i].sets.removeAll { !serverSetIds.contains($0.id) }
+            }
 
             // Add exercises from server that don't exist locally (agent-added)
-            for exDto in serverData.exercises ?? [] where !localIds.contains(exDto.instanceId) {
+            for exDto in serverExercises where !localIds.contains(exDto.instanceId) {
                 let sets = (exDto.sets ?? []).map { setDto -> FocusModeSet in
-                    // Firestore stores planned values as flat weight/reps/rir (no target_ prefix),
-                    // but FocusModeSet.displayWeight reads targetWeight for planned sets
                     FocusModeSet(
                         id: setDto.id,
                         setType: FocusModeSetType(rawValue: setDto.setType ?? "working") ?? .working,

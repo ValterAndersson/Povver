@@ -267,6 +267,18 @@ def register_workout_skills():
         },
     )
     register_tool(
+        "remove_exercise",
+        workout_skills.remove_exercise,
+        "Remove an exercise entirely from the active workout.",
+        {
+            "type": "object",
+            "properties": {
+                "exercise_instance_id": {"type": "string", "description": "Instance ID of the exercise to remove"},
+            },
+            "required": ["exercise_instance_id"],
+        },
+    )
+    register_tool(
         "prescribe_set",
         workout_skills.prescribe_set,
         "Modify planned values (weight and/or reps) on a specific set.",
@@ -277,6 +289,35 @@ def register_workout_skills():
                 "set_id": {"type": "string", "description": "ID of the set to modify"},
                 "weight_kg": {"type": "number", "description": "New weight in kg (optional)"},
                 "reps": {"type": "integer", "description": "New rep target (optional)"},
+            },
+            "required": ["exercise_instance_id", "set_id"],
+        },
+    )
+    register_tool(
+        "add_set",
+        workout_skills.add_set,
+        "Add a new planned set to an existing exercise. Use set_type 'warmup', 'working', or 'dropset'.",
+        {
+            "type": "object",
+            "properties": {
+                "exercise_instance_id": {"type": "string", "description": "Instance ID of the exercise"},
+                "set_type": {"type": "string", "enum": ["warmup", "working", "dropset"], "description": "Type of set", "default": "working"},
+                "reps": {"type": "integer", "description": "Target reps", "default": 10},
+                "rir": {"type": "integer", "description": "Target RIR (0-5)", "default": 2},
+                "weight_kg": {"type": "number", "description": "Target weight in kg (optional)"},
+            },
+            "required": ["exercise_instance_id"],
+        },
+    )
+    register_tool(
+        "remove_set",
+        workout_skills.remove_set,
+        "Remove a specific set from an exercise. Only planned sets can be removed.",
+        {
+            "type": "object",
+            "properties": {
+                "exercise_instance_id": {"type": "string", "description": "Instance ID of the exercise"},
+                "set_id": {"type": "string", "description": "ID of the set to remove"},
             },
             "required": ["exercise_instance_id", "set_id"],
         },

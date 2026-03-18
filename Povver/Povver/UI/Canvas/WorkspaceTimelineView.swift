@@ -73,6 +73,9 @@ struct WorkspaceTimelineView: View {
     
     // Gemini-style thinking process state (new system)
     @ObservedObject var thinkingState: ThinkingProcessState
+
+    /// Progressive streaming text from agent — shown as a live-updating agent bubble
+    var streamingResponseText: String? = nil
     
     // Simplified sticky bottom scroll state
     @State private var shouldAutoScroll = true  // Single switch - disabled when user scrolls up
@@ -159,6 +162,11 @@ struct WorkspaceTimelineView: View {
             .onChange(of: events.last?.createdAt) { _, _ in
                 guard shouldAutoScroll else { return }
                 scrollToBottom(proxy: proxy, animated: true)
+            }
+            // PROGRESSIVE STREAMING: Scroll as streaming text grows
+            .onChange(of: streamingResponseText) { _, _ in
+                guard shouldAutoScroll else { return }
+                scrollToBottom(proxy: proxy, animated: false)
             }
             // Detect user scrolling up to disable auto-scroll
             .simultaneousGesture(
@@ -658,6 +666,17 @@ struct WorkspaceTimelineView: View {
                 )
                 sortedItems.insert(thinkingItem, at: lastUserIndex + 1)
             }
+        }
+
+        // Insert live streaming response bubble when progressive text is arriving
+        if let text = streamingResponseText, !text.isEmpty {
+            let streamTimestamp = lastUserMessageTimestamp?.addingTimeInterval(0.002) ?? Date()
+            let streamItem = TimelineItem(
+                id: "streaming-response-\(thinkingState.sessionId)",
+                timestamp: streamTimestamp,
+                kind: .agentResponse(text: text)
+            )
+            sortedItems.append(streamItem)
         }
         
         return sortedItems

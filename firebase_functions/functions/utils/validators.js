@@ -138,6 +138,13 @@ const PatchOpSchema = z.discriminatedUnion('op', [
       set_id: IdSchema,
     }),
   }),
+  // Remove exercise
+  z.object({
+    op: z.literal('remove_exercise'),
+    target: z.object({
+      exercise_instance_id: IdSchema,
+    }),
+  }),
   // Reorder exercises
   z.object({
     op: z.literal('reorder_exercises'),

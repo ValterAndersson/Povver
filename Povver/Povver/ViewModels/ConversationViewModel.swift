@@ -78,6 +78,9 @@ final class ConversationViewModel: ObservableObject {
     // SSE Streaming properties
     @Published var streamEvents: [StreamEvent] = []
     @Published var currentAgentStatus: String? = nil
+    /// Progressive text from SSE message deltas — drives live typing in the timeline.
+    /// Nil when not streaming; set to "" on stream start, grows with each delta, nil'd on done.
+    @Published var streamingResponseText: String? = nil
     @Published var isAgentThinking: Bool = false
     @Published var showStreamOverlay: Bool = false
     @Published var workspaceEvents: [WorkspaceEvent] = []
@@ -342,6 +345,7 @@ final class ConversationViewModel: ObservableObject {
                 self.currentAgentStatus = "Connecting..."
                 self.isAgentThinking = true
                 self.messageBuffer = ""
+                self.streamingResponseText = nil
                 self.thoughtStartAt = Date().timeIntervalSince1970
                 self.toolStartByName.removeAll()
                 // Reset and start Gemini-style thinking process
@@ -398,6 +402,7 @@ final class ConversationViewModel: ObservableObject {
                             self.currentAgentStatus = "Request timed out"
                             self.showStreamOverlay = false
                             self.isAgentThinking = false
+                            self.streamingResponseText = nil
                         }
                         break
                     }
@@ -419,11 +424,13 @@ final class ConversationViewModel: ObservableObject {
                         self.thinkingState.complete()
                         self.showStreamOverlay = false
                         self.isAgentThinking = false
+                        self.streamingResponseText = nil
                     }
                 }
             } catch {
                 await MainActor.run {
                     self.thinkingState.complete()
+                    self.streamingResponseText = nil
                     // Check if this is a premium required error
                     if let streamingError = error as? StreamingError,
                        case .premiumRequired = streamingError {
@@ -482,6 +489,12 @@ final class ConversationViewModel: ObservableObject {
             let delta = event.displayText
             if !delta.isEmpty {
                 messageBuffer += delta
+                // Progressive streaming: start or append to live response text
+                if streamingResponseText == nil {
+                    streamingResponseText = delta
+                } else {
+                    streamingResponseText! += delta
+                }
             }
 
         case .status:
@@ -536,6 +549,9 @@ final class ConversationViewModel: ObservableObject {
                     metadata: event.metadata
                 )
                 streamEvents.append(responseEvt)
+                // Keep streamingResponseText visible — the Firestore listener
+                // will nil it once the server-persisted response arrives.
+                // This bridges the gap between SSE done and Firestore delivery.
             }
             messageBuffer = ""
             showStreamOverlay = false
@@ -792,7 +808,36 @@ final class ConversationViewModel: ObservableObject {
             }
             Task { @MainActor in
                 // Reverse to chronological order (query returns newest-first)
-                self.workspaceEvents = events.reversed()
+                var sorted = Array(events.reversed())
+
+                // During streaming, the client injects a local user-prompt
+                // entry for immediate display ("local-*" ID). Preserve it
+                // until the Firestore snapshot includes a server-persisted
+                // user_prompt that supersedes it.
+                if self.isAgentThinking || self.streamingResponseText != nil {
+                    let localPrompts = self.workspaceEvents.filter {
+                        $0.id.hasPrefix("local-") && $0.event.type == "user_prompt"
+                    }
+                    for local in localPrompts {
+                        let alreadyInSnapshot = sorted.contains { $0.event.type == "user_prompt" && ($0.createdAt ?? .distantPast) >= (local.createdAt ?? .distantPast) }
+                        if !alreadyInSnapshot {
+                            sorted.append(local)
+                        }
+                    }
+                    sorted.sort { ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast) }
+                }
+
+                self.workspaceEvents = sorted
+
+                // Clear streaming response once Firestore delivers the
+                // server-persisted agent response. Check if the last event
+                // in the snapshot is an agent message — that means the proxy
+                // has finished writing and the authoritative copy is here.
+                if self.streamingResponseText != nil,
+                   let last = sorted.last,
+                   last.event.type == "message" || last.event.type == "agentResponse" {
+                    self.streamingResponseText = nil
+                }
             }
         }
     }

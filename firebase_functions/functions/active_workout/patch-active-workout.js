@@ -52,8 +52,8 @@ function validateHomogeneous(ops) {
     }
   }
 
-  // For add_set, remove_set, reorder_exercises, set_workout_field, and set_exercise_field, only one op allowed
-  if ((opType === 'add_set' || opType === 'remove_set' || opType === 'reorder_exercises' || opType === 'set_workout_field' || opType === 'set_exercise_field') && ops.length > 1) {
+  // For add_set, remove_set, remove_exercise, reorder_exercises, set_workout_field, and set_exercise_field, only one op allowed
+  if ((opType === 'add_set' || opType === 'remove_set' || opType === 'remove_exercise' || opType === 'reorder_exercises' || opType === 'set_workout_field' || opType === 'set_exercise_field') && ops.length > 1) {
     return { valid: false, error: 'MULTIPLE_STRUCTURAL_OPS', message: `Only one ${opType} op allowed per request` };
   }
 
@@ -93,7 +93,7 @@ function validateAIScope(ops, aiScope, exercises) {
       }
     }
 
-    // AI cannot remove sets
+    // AI cannot remove sets (but can remove exercises within scope)
     if (op.op === 'remove_set') {
       return { valid: false, error: 'PERMISSION_DENIED', message: 'AI cannot remove sets' };
     }
@@ -153,6 +153,14 @@ function applyRemoveSet(exercises, op) {
       sets: ex.sets.filter(s => s.id !== setId),
     };
   });
+}
+
+/**
+ * Apply remove_exercise operation (pure function)
+ */
+function applyRemoveExercise(exercises, op) {
+  const { exercise_instance_id: exId } = op.target;
+  return exercises.filter(ex => ex.instance_id !== exId);
 }
 
 async function patchActiveWorkoutHandler(req, res) {
@@ -316,6 +324,24 @@ async function patchActiveWorkoutHandler(req, res) {
         });
       }
 
+      if (opType === 'remove_exercise') {
+        const op = ops[0];
+        const exFound = findExercise(exercises, op.target.exercise_instance_id);
+        if (!exFound) {
+          throw { httpCode: 404, code: 'TARGET_NOT_FOUND', message: 'Exercise not found' };
+        }
+
+        exercises = applyRemoveExercise(exercises, op);
+
+        // Update positions after removal
+        exercises = exercises.map((ex, idx) => ({ ...ex, position: idx }));
+
+        diffOps.push({
+          op: 'remove',
+          path: `/exercises/${exFound.index}`,
+        });
+      }
+
       if (opType === 'reorder_exercises') {
         const op = ops[0];
         const newOrder = op.value?.order;
@@ -414,6 +440,8 @@ async function patchActiveWorkoutHandler(req, res) {
         eventType = 'set_added';
       } else if (opType === 'remove_set') {
         eventType = 'set_removed';
+      } else if (opType === 'remove_exercise') {
+        eventType = 'exercise_removed';
       } else if (opType === 'reorder_exercises') {
         eventType = 'exercises_reordered';
       } else {

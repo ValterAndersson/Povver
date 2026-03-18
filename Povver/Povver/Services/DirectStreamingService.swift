@@ -106,10 +106,15 @@ class DirectStreamingService: ObservableObject {
 
                     // Premium gate: client-side check using cached subscription state.
                     // Server-side gate in stream-agent-normalized.js provides the authoritative check.
+                    // If cached state says not-premium, refresh once — the override may
+                    // not have loaded yet on cold launch (race with .task entitlement check).
                     if await !SubscriptionService.shared.isPremium {
-                        AgentPipelineLogger.failRequest(error: "Premium required", afterMs: 0)
-                        continuation.finish(throwing: StreamingError.premiumRequired)
-                        return
+                        await SubscriptionService.shared.checkEntitlements()
+                        if await !SubscriptionService.shared.isPremium {
+                            AgentPipelineLogger.failRequest(error: "Premium required", afterMs: 0)
+                            continuation.finish(throwing: StreamingError.premiumRequired)
+                            return
+                        }
                     }
 
                     let idToken = try await currentUser.getIDToken()
@@ -465,7 +470,10 @@ class DirectStreamingService: ObservableObject {
         case "log_set": return "Logging set"
         case "score_set": return "Scoring set"
         case "add_exercise": return "Adding exercise"
+        case "remove_exercise": return "Removing exercise"
         case "swap_exercise": return "Swapping exercise"
+        case "add_set": return "Adding set"
+        case "remove_set": return "Removing set"
         case "complete_active_workout": return "Completing workout"
         case "cancel_active_workout": return "Cancelling workout"
         case "note_active_workout": return "Adding note"
@@ -524,7 +532,10 @@ class DirectStreamingService: ObservableObject {
         case "log_set": return "Set logged"
         case "score_set": return "Set scored"
         case "add_exercise": return "Exercise added"
+        case "remove_exercise": return "Exercise removed"
         case "swap_exercise": return "Exercise swapped"
+        case "add_set": return "Set added"
+        case "remove_set": return "Set removed"
         case "complete_active_workout": return "Workout completed"
         case "cancel_active_workout": return "Workout cancelled"
         case "note_active_workout": return "Note added"

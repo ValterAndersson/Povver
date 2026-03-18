@@ -490,7 +490,7 @@ describe('premium gate', () => {
 });
 
 describe('CONVERSATION_COLLECTION constant', () => {
-  test('defaults to canvases', () => {
-    assert.equal(CONVERSATION_COLLECTION, 'canvases');
+  test('defaults to conversations', () => {
+    assert.equal(CONVERSATION_COLLECTION, 'conversations');
   });
 });

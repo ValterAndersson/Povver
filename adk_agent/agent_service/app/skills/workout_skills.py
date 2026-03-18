@@ -8,7 +8,10 @@ Skills:
 - get_workout_state: Fetch full active workout state
 - swap_exercise: Replace an exercise in the active workout
 - add_exercise: Add an exercise with planned sets
+- remove_exercise: Remove an exercise from the workout
 - prescribe_set: Modify planned values on a set (weight, reps, rir)
+- add_set: Add a set to an existing exercise
+- remove_set: Remove a set from an exercise
 - complete_workout: Complete and archive the active workout
 
 All functions use MYON_API_KEY for authentication (API key lane).
@@ -18,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 from typing import Any
 
 import httpx
@@ -155,15 +159,144 @@ async def prescribe_set(
     Updates weight and/or reps on a planned (not yet logged) set.
     Uses patchActiveWorkout which accepts granular field updates.
     """
+    ops: list[dict[str, Any]] = []
+    if weight_kg is not None:
+        ops.append({
+            "op": "set_field",
+            "target": {"exercise_instance_id": exercise_instance_id, "set_id": set_id},
+            "field": "weight",
+            "value": weight_kg,
+        })
+    if reps is not None:
+        ops.append({
+            "op": "set_field",
+            "target": {"exercise_instance_id": exercise_instance_id, "set_id": set_id},
+            "field": "reps",
+            "value": reps,
+        })
+
+    if not ops:
+        return {"status": "no_changes"}
+
     payload: dict[str, Any] = {
         "workout_id": ctx.workout_id,
-        "exercise_instance_id": exercise_instance_id,
-        "set_id": set_id,
+        "ops": ops,
+        "cause": "user_ai_action",
+        "ui_source": "agent",
+        "idempotency_key": str(uuid.uuid4()),
+        "ai_scope": {"exercise_instance_id": exercise_instance_id},
     }
-    if weight_kg is not None:
-        payload["weight_kg"] = weight_kg
-    if reps is not None:
-        payload["reps"] = reps
+
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        resp = await client.post(
+            f"{FUNCTIONS_URL}/patchActiveWorkout",
+            json=payload,
+            headers=_headers(ctx),
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def remove_exercise(
+    *,
+    ctx: RequestContext,
+    exercise_instance_id: str,
+) -> dict:
+    """Remove an exercise entirely from the active workout.
+
+    Deletes the exercise and all its sets. Remaining exercises
+    have their positions updated automatically.
+    """
+    payload: dict[str, Any] = {
+        "workout_id": ctx.workout_id,
+        "ops": [{
+            "op": "remove_exercise",
+            "target": {"exercise_instance_id": exercise_instance_id},
+        }],
+        "cause": "user_ai_action",
+        "ui_source": "agent",
+        "idempotency_key": str(uuid.uuid4()),
+        "ai_scope": {"exercise_instance_id": exercise_instance_id},
+    }
+
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        resp = await client.post(
+            f"{FUNCTIONS_URL}/patchActiveWorkout",
+            json=payload,
+            headers=_headers(ctx),
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def add_set(
+    *,
+    ctx: RequestContext,
+    exercise_instance_id: str,
+    set_type: str = "working",
+    reps: int = 10,
+    rir: int = 2,
+    weight_kg: float | None = None,
+) -> dict:
+    """Add a new set to an existing exercise in the active workout.
+
+    Creates a planned set with the given parameters. set_type can be
+    'warmup', 'working', or 'dropset'.
+    """
+    set_id = str(uuid.uuid4())
+
+    payload: dict[str, Any] = {
+        "workout_id": ctx.workout_id,
+        "ops": [{
+            "op": "add_set",
+            "target": {"exercise_instance_id": exercise_instance_id},
+            "value": {
+                "id": set_id,
+                "set_type": set_type,
+                "reps": reps,
+                "rir": rir,
+                "weight": weight_kg,
+                "status": "planned",
+            },
+        }],
+        "cause": "user_ai_action",
+        "ui_source": "agent",
+        "idempotency_key": str(uuid.uuid4()),
+        "ai_scope": {"exercise_instance_id": exercise_instance_id},
+    }
+
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        resp = await client.post(
+            f"{FUNCTIONS_URL}/patchActiveWorkout",
+            json=payload,
+            headers=_headers(ctx),
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def remove_set(
+    *,
+    ctx: RequestContext,
+    exercise_instance_id: str,
+    set_id: str,
+) -> dict:
+    """Remove a specific set from an exercise in the active workout.
+
+    Only planned sets can be removed by the agent. Done/skipped sets
+    are protected.
+    """
+    payload: dict[str, Any] = {
+        "workout_id": ctx.workout_id,
+        "ops": [{
+            "op": "remove_set",
+            "target": {"exercise_instance_id": exercise_instance_id, "set_id": set_id},
+        }],
+        "cause": "user_ai_action",
+        "ui_source": "agent",
+        "idempotency_key": str(uuid.uuid4()),
+        "ai_scope": {"exercise_instance_id": exercise_instance_id},
+    }
 
     async with httpx.AsyncClient(timeout=5.0) as client:
         resp = await client.post(
@@ -194,6 +327,9 @@ __all__ = [
     "get_workout_state",
     "swap_exercise",
     "add_exercise",
+    "remove_exercise",
     "prescribe_set",
+    "add_set",
+    "remove_set",
     "complete_workout",
 ]

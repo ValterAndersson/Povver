@@ -13,7 +13,7 @@ const { convertPlanToTemplate } = require('../utils/plan-to-template-converter')
 const { isPremiumUser } = require('../utils/subscription-gate');
 const admin = require('firebase-admin');
 
-const CONVERSATION_COLLECTION = process.env.CONVERSATION_COLLECTION || 'canvases';
+const CONVERSATION_COLLECTION = process.env.CONVERSATION_COLLECTION || 'conversations';
 const MAX_WORKOUTS_PER_ROUTINE = 14; // 2-week program max
 
 // Actions that require premium subscription

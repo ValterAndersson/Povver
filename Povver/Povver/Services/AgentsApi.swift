@@ -45,8 +45,14 @@ enum AgentsApi {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
-        let (responseData, _) = try await URLSession.shared.data(for: request)
+        let (responseData, response) = try await URLSession.shared.data(for: request)
+        let httpResponse = response as? HTTPURLResponse
+        let statusCode = httpResponse?.statusCode ?? 0
         let json = try JSONSerialization.jsonObject(with: responseData) as? [String: Any] ?? [:]
+        if statusCode < 200 || statusCode >= 300 {
+            let errorMessage = json["error"] as? String ?? "Artifact action failed (HTTP \(statusCode))"
+            throw NSError(domain: "AgentsApi", code: statusCode, userInfo: [NSLocalizedDescriptionKey: errorMessage])
+        }
         return json
     }
 }

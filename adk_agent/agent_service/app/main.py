@@ -143,23 +143,32 @@ async def stream_handler(request: Request) -> StreamingResponse:
                     return
 
         # --- Slow Lane (default) ---
-        # Build full 360° context (instruction + history) in one call
-        context_start = _time.monotonic()
-        instruction, history = await build_system_context(
-            ctx, llm_client=llm_client, model=model
-        )
-        context_ms = int((_time.monotonic() - context_start) * 1000)
-        logger.info("Context build completed in %dms", context_ms)
+        try:
+            # Build full 360° context (instruction + history) in one call
+            context_start = _time.monotonic()
+            instruction, history = await build_system_context(
+                ctx, llm_client=llm_client, model=model
+            )
+            context_ms = int((_time.monotonic() - context_start) * 1000)
+            logger.info("Context build completed in %dms", context_ms)
 
-        # Get available tools for this context (respects workout mode banning)
-        tools = get_tools(ctx)
-        tool_names = [t.name for t in tools]
-        log_tools_available(tool_names, ctx.workout_mode)
+            # Get available tools for this context (respects workout mode banning)
+            tools = get_tools(ctx)
+            tool_names = [t.name for t in tools]
+            log_tools_available(tool_names, ctx.workout_mode)
 
-        # Run planner to prioritize tools
-        prioritized = plan_tools(message, ctx, tool_names)
-        if prioritized:
-            logger.info("Planner prioritized: %s", prioritized)
+            # Run planner to prioritize tools
+            prioritized = plan_tools(message, ctx, tool_names)
+            if prioritized:
+                logger.info("Planner prioritized: %s", prioritized)
+
+        except Exception as e:
+            logger.exception("Slow lane setup failed")
+            yield sse_event("error", {"code": "SETUP_ERROR", "message": str(e)}).encode()
+            yield sse_event("done", {}).encode()
+            elapsed = int((_time.monotonic() - request_start) * 1000)
+            log_request_complete("slow", elapsed, success=False, error=str(e))
+            return
 
         tool_count = 0
         request_success = True

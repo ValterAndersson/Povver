@@ -20,4 +20,33 @@ public struct UndoToast: View {
     }
 }
 
+/// Lightweight transient toast for status/error messages — auto-dismisses after a delay.
+public struct TransientToast: View {
+    private let text: String
+    private let icon: String?
+    private let isError: Bool
 
+    public init(_ text: String, icon: String? = nil, isError: Bool = false) {
+        self.text = text
+        self.icon = icon
+        self.isError = isError
+    }
+
+    public var body: some View {
+        HStack(spacing: Space.sm) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(isError ? .white : Color.textInverse)
+            }
+            Text(text)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(isError ? .white : Color.textInverse)
+        }
+        .padding(.horizontal, Space.md)
+        .padding(.vertical, Space.sm)
+        .background(isError ? Color.red.opacity(0.9) : Color.accent)
+        .clipShape(Capsule())
+        .shadowStyle(ShadowsToken.level2)
+    }
+}

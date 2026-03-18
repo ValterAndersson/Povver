@@ -44,6 +44,7 @@ deploy:
 	gcloud builds submit --tag gcr.io/$(PROJECT_ID)/$(SERVICE_NAME):$(IMAGE_TAG) --project=$(PROJECT_ID); \
 	rm -rf shared/
 	gcloud run deploy $(SERVICE_NAME) \
+		--project $(PROJECT_ID) \
 		--image gcr.io/$(PROJECT_ID)/$(SERVICE_NAME):$(IMAGE_TAG) \
 		--region $(REGION) \
 		--platform managed \

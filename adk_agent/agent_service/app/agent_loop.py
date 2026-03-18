@@ -78,6 +78,8 @@ def _inspect_tool_result(result: Any) -> tuple[list[SSEEvent], bool]:
         return side_effects, should_pause
 
     # Artifact detection (mirrors stream-agent-normalized.js artifact handling)
+    # Artifact IS the response — pause the loop after emitting it so the LLM
+    # can write one short confirmation sentence without further tool calls.
     if result.get("artifact_type"):
         artifact_id = result.get("artifact_id") or str(uuid.uuid4())
         side_effects.append(sse_event("artifact", {
@@ -87,6 +89,7 @@ def _inspect_tool_result(result: Any) -> tuple[list[SSEEvent], bool]:
             "actions": result.get("actions", []),
             "status": result.get("status", "proposed"),
         }))
+        should_pause = True
 
     # Safety gate / clarification detection
     if result.get("requires_confirmation"):
@@ -202,8 +205,25 @@ async def run_agent_loop(
                 for evt in side_effects:
                     yield evt
 
-                # Note: artifact persistence is handled by the skill functions
-                # (planner_skills.py) — no need to duplicate here.
+                # After artifact or clarification, allow one final text-only
+                # LLM turn (no tools) for a brief confirmation message, then stop.
+                if should_pause:
+                    logger.info("Pausing after %s (artifact/clarification emitted)", tc.tool_name)
+                    # Give the LLM the tool result so it can write a confirmation
+                    messages.append({
+                        "role": "tool",
+                        "tool_name": tc.tool_name,
+                        "tool_call_id": tc.call_id,
+                        "tool_result": {"status": "ok", "delivered": True},
+                    })
+                    # One final text-only turn (no tools = can't loop further)
+                    async for chunk in llm_client.stream(model, messages, None, config):
+                        if chunk.usage:
+                            log_tokens(model, chunk.usage["input_tokens"], chunk.usage["output_tokens"])
+                        if chunk.is_text:
+                            yield sse_event("message", chunk.text)
+                    yield sse_event("done", {})
+                    return
 
                 # Append tool result to messages for next LLM turn
                 messages.append({
