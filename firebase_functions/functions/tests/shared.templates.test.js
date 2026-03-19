@@ -663,7 +663,7 @@ describe('patchTemplate - template name propagation', () => {
     assert.equal(store['users/u1/routines/r1'].template_names.t1, 'Original');
   });
 
-  test('skips routines without template_names', async () => {
+  test('self-heals routines without template_names (legacy)', async () => {
     const store = {
       'users/u1/templates/t1': {
         name: 'Old Name',
@@ -676,9 +676,10 @@ describe('patchTemplate - template name propagation', () => {
     };
     const db = createMockDb(store);
 
-    // Should not throw
+    // Should not throw and should create template_names on legacy routine
     await patchTemplate(db, 'u1', 't1', { name: 'New Name' });
     assert.equal(store['users/u1/templates/t1'].name, 'New Name');
+    assert.deepStrictEqual(store['users/u1/routines/r1'].template_names, { t1: 'New Name' });
   });
 });
 

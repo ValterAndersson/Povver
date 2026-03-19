@@ -11,10 +11,30 @@
 const { ValidationError, NotFoundError, PremiumRequiredError } = require('./errors');
 const { convertPlanToTemplate } = require('../utils/plan-to-template-converter');
 const { isPremiumUser } = require('../utils/subscription-gate');
+const { resolveExerciseNames } = require('./templates');
 const admin = require('firebase-admin');
 
 const CONVERSATION_COLLECTION = process.env.CONVERSATION_COLLECTION || 'conversations';
 const MAX_WORKOUTS_PER_ROUTINE = 14; // 2-week program max
+
+/**
+ * Resolve missing exercise names on a template's exercises array.
+ * Mutates templateData.exercises in place for convenience.
+ */
+async function resolveTemplateExerciseNames(db, templateData) {
+  if (!Array.isArray(templateData.exercises)) return;
+  const idsToResolve = templateData.exercises
+    .filter(ex => !ex.name && ex.exercise_id)
+    .map(ex => ex.exercise_id);
+  if (idsToResolve.length === 0) return;
+  const exerciseNames = await resolveExerciseNames(db, idsToResolve);
+  templateData.exercises = templateData.exercises.map(ex => {
+    if (!ex.name && ex.exercise_id && exerciseNames[ex.exercise_id]) {
+      return { ...ex, name: exerciseNames[ex.exercise_id] };
+    }
+    return ex;
+  });
+}
 
 // Actions that require premium subscription
 const PREMIUM_ACTIONS = ['save_routine', 'save_template', 'start_workout', 'save_as_new'];
@@ -94,6 +114,9 @@ async function saveRoutine(db, userId, conversationId, artifactId) {
       blocks: workout.blocks || [],
       estimated_duration: workout.estimated_duration,
     });
+
+    // Resolve missing exercise names from catalog
+    await resolveTemplateExerciseNames(db, templateData);
 
     if (sourceTemplateId) {
       const templateRef = db.doc(`${templatesPath}/${sourceTemplateId}`);
@@ -241,6 +264,9 @@ async function saveTemplate(db, userId, conversationId, artifactId) {
     estimated_duration: content.estimated_duration_minutes,
   });
 
+  // Resolve missing exercise names from catalog
+  await resolveTemplateExerciseNames(db, templateData);
+
   const now = admin.firestore.FieldValue.serverTimestamp();
   const templatesPath = `users/${userId}/templates`;
   let templateId;
@@ -310,6 +336,10 @@ async function saveAsNew(db, userId, conversationId, artifactId) {
         blocks: workout.blocks || [],
         estimated_duration: workout.estimated_duration,
       });
+
+      // Resolve missing exercise names from catalog
+      await resolveTemplateExerciseNames(db, templateData);
+
       const newRef = db.collection(templatesPath).doc();
       await newRef.set({
         id: newRef.id,
@@ -355,6 +385,10 @@ async function saveAsNew(db, userId, conversationId, artifactId) {
       blocks: content.blocks || [],
       estimated_duration: content.estimated_duration_minutes,
     });
+
+    // Resolve missing exercise names from catalog
+    await resolveTemplateExerciseNames(db, templateData);
+
     const templatesPath = `users/${userId}/templates`;
     const newRef = db.collection(templatesPath).doc();
     const templateId = newRef.id;

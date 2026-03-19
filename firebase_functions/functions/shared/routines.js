@@ -54,11 +54,9 @@ async function getRoutine(db, userId, routineId, opts = {}) {
   if (opts.include_templates) {
     const templateIds = routine.template_ids || [];
     if (templateIds.length > 0) {
-      const templateDocs = await Promise.all(
-        templateIds.map(tid =>
-          db.collection('users').doc(userId).collection('templates').doc(tid).get()
-        )
-      );
+      const templatesCol = db.collection('users').doc(userId).collection('templates');
+      const templateRefs = templateIds.map(tid => templatesCol.doc(tid));
+      const templateDocs = await db.getAll(...templateRefs);
 
       routine.templates = templateDocs
         .filter(d => d.exists)
@@ -279,22 +277,26 @@ async function patchRoutine(db, userId, routineId, patch) {
       throw new ValidationError('template_ids must be an array');
     }
 
-    // Validate all templates exist (parallel reads) and collect names
-    const templateChecks = await Promise.all(
-      sanitizedPatch.template_ids.map(async (tid) => {
-        const templateDoc = await db.collection('users').doc(userId).collection('templates').doc(tid).get();
-        return { tid, exists: templateDoc.exists, name: templateDoc.exists ? (templateDoc.data().name || 'Untitled') : null };
-      })
-    );
+    // Validate all templates exist and collect names
+    const templatesCol = db.collection('users').doc(userId).collection('templates');
+    const templateRefs = sanitizedPatch.template_ids.map(tid => templatesCol.doc(tid));
+    const templateDocs = await db.getAll(...templateRefs);
 
-    const missing = templateChecks.filter(c => !c.exists);
+    const missing = [];
+    const templateNames = {};
+    templateDocs.forEach((doc, idx) => {
+      const tid = sanitizedPatch.template_ids[idx];
+      if (!doc.exists) {
+        missing.push(tid);
+      } else {
+        templateNames[tid] = doc.data().name || 'Untitled';
+      }
+    });
+
     if (missing.length > 0) {
-      throw new ValidationError(`Templates not found: ${missing.map(m => m.tid).join(', ')}`);
+      throw new ValidationError(`Templates not found: ${missing.join(', ')}`);
     }
 
-    // Build template_names from already-fetched docs
-    const templateNames = {};
-    templateChecks.forEach(c => { templateNames[c.tid] = c.name; });
     sanitizedPatch.template_names = templateNames;
 
     // Cursor consistency: clear if last_completed_template_id is no longer in template_ids

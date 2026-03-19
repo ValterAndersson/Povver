@@ -271,7 +271,8 @@ async function fetchTemplates(db, userId, templateIds, includeExercises = false)
 async function getPlanningContext(db, userId, options = {}) {
   const {
     includeTemplates = true,
-    includeTemplateExercises = false,
+    // Compact view needs exercise arrays to extract exercise names
+    includeTemplateExercises = options.view === 'compact' ? true : false,
     includeRecentWorkouts = true,
     workoutLimit = 20,
   } = options;
@@ -396,6 +397,7 @@ function compactPlanningContext(ctx) {
       id: t.id,
       name: t.name,
       exerciseCount: t.exerciseCount || t.exercises?.length || 0,
+      exerciseNames: (t.exercises || []).map(ex => ex.name || ex.exercise_id || 'Unknown'),
     })),
     recentWorkouts,
     strengthSummary: ctx.strengthSummary || [],

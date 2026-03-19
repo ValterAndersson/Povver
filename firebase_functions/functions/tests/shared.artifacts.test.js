@@ -45,6 +45,18 @@ function createCollectionRef(collPath) {
 const mockDb = {
   collection: (p) => createCollectionRef(p),
   doc: (p) => createDocRef(p, p.split('/').pop()),
+  getAll: async (...refs) => {
+    const results = [];
+    for (const ref of refs) {
+      const data = firestoreDocs[ref.path];
+      results.push({
+        exists: !!data,
+        id: ref.id,
+        data: () => data ? { ...data } : undefined,
+      });
+    }
+    return results;
+  },
   batch: () => {
     const ops = [];
     return {
