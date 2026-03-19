@@ -1,15 +1,19 @@
 import SwiftUI
 import FirebaseFirestore
 
-/// Coach Tab - Primary agent interface with quick action buttons
-/// Direct access to different coaching use-cases without mode switching
+/// Coach Tab - State-driven agent interface.
+/// Hero section adapts to workout day, rest day, post-workout, inactivity, or new user.
+/// Quick actions as vertical list, recent conversations as flat rows.
 struct CoachTabView: View {
     /// Callback to switch to another tab (e.g., Train)
     let switchToTab: (MainTab) -> Void
-    /// One-shot context to auto-navigate to canvas (e.g., after onboarding "Adjust with coach")
+    /// One-shot context to auto-navigate to conversation (e.g., after onboarding "Adjust with coach")
     var initialConversationContext: String? = nil
 
-    /// Navigation state for canvas screen
+    @StateObject private var viewModel = CoachTabViewModel()
+    @State private var hasAppeared = false
+
+    /// Navigation state for conversation screen
     @State private var navigateToConversation = false
     @State private var entryContext: String = ""
     @State private var query: String = ""
@@ -20,28 +24,27 @@ struct CoachTabView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .center, spacing: Space.xl) {
-                Spacer(minLength: Space.xl)
+            VStack(alignment: .leading, spacing: Space.xl) {
+                // State-driven hero
+                heroSection
+                    .staggeredEntrance(index: 0, active: hasAppeared)
 
-                // Header
-                header
-
-                // Input bar for free-form questions
+                // Prompt bar
                 inputBar
+                    .staggeredEntrance(index: 1, active: hasAppeared)
 
-                if hasLoadedConversations {
-                    // Returning user: show conversations, hide quick actions
-                    if !recentConversations.isEmpty {
-                        recentChatsSection
-                    } else {
-                        // New user: show quick actions
-                        quickActionsGrid
-                    }
+                // Quick actions (hidden during loading)
+                if case .loading = viewModel.state {} else {
+                    quickActionsSection
+                        .staggeredEntrance(index: 2, active: hasAppeared)
                 }
 
-                Spacer(minLength: Space.xxl)
+                // Recent conversations
+                if hasLoadedConversations && !recentConversations.isEmpty {
+                    recentSection
+                        .staggeredEntrance(index: 3, active: hasAppeared)
+                }
             }
-            .frame(maxWidth: .infinity)
             .padding(InsetsToken.screen)
         }
         .background(Color.bg)
@@ -62,9 +65,17 @@ struct CoachTabView: View {
                 showAllConversations = false
             }
         }
+        .task {
+            await viewModel.load()
+        }
         .onAppear {
             loadRecentConversations()
-            // Auto-navigate to canvas if coming from onboarding "Adjust with coach"
+            if !hasAppeared {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    hasAppeared = true
+                }
+            }
+            // Auto-navigate to conversation if coming from onboarding "Adjust with coach"
             if let context = initialConversationContext, !context.isEmpty {
                 selectedConversationId = nil
                 entryContext = context
@@ -84,17 +95,186 @@ struct CoachTabView: View {
             }
         }
     }
-    
-    // MARK: - Header
-    
-    private var header: some View {
-        VStack(alignment: .center, spacing: Space.sm) {
-            PovverText("What's on the agenda today?", style: .display, align: .center)
+
+    // MARK: - Hero Section
+
+    @ViewBuilder
+    private var heroSection: some View {
+        switch viewModel.state {
+        case .loading:
+            HStack { Spacer(); ProgressView(); Spacer() }
+                .frame(minHeight: 120)
+        case .newUser:
+            newUserHero
+        case .workoutDay(let ctx):
+            workoutDayHero(ctx)
+        case .restDay(let ctx):
+            restDayHero(ctx)
+        case .postWorkout(let ctx):
+            postWorkoutHero(ctx)
+        case .returningAfterInactivity(let ctx):
+            inactivityHero(ctx)
         }
     }
-    
+
+    // MARK: - New User Hero
+
+    private var newUserHero: some View {
+        VStack(spacing: Space.md) {
+            CoachPresenceIndicator(size: 40)
+
+            Text("Let's build your program")
+                .textStyle(.screenTitle)
+                .foregroundStyle(Color.textPrimary)
+
+            Text("Start with a routine, or ask me anything")
+                .textStyle(.secondary)
+                .foregroundStyle(Color.textSecondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Space.lg)
+    }
+
+    // MARK: - Workout Day Hero
+
+    private func workoutDayHero(_ ctx: WorkoutDayContext) -> some View {
+        VStack(spacing: Space.md) {
+            CoachPresenceIndicator(size: 40)
+
+            Text(ctx.greeting)
+                .textStyle(.secondary)
+                .foregroundStyle(Color.textSecondary)
+
+            Text(ctx.scheduledWorkoutName)
+                .textStyle(.screenTitle)
+                .foregroundStyle(Color.textPrimary)
+
+            if !ctx.dayLabel.isEmpty {
+                Text(ctx.dayLabel)
+                    .textStyle(.caption)
+                    .foregroundStyle(Color.textSecondary)
+            }
+
+            if let loadStatus = ctx.trainingLoadStatus {
+                Text(loadStatus)
+                    .textStyle(.caption)
+                    .foregroundStyle(Color.accent)
+                    .padding(.horizontal, Space.sm)
+                    .padding(.vertical, Space.xxs)
+                    .background(Color.accent.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Space.lg)
+    }
+
+    // MARK: - Rest Day Hero
+
+    private func restDayHero(_ ctx: RestDayContext) -> some View {
+        VStack(spacing: Space.md) {
+            CoachPresenceIndicator(size: 40)
+
+            Text(ctx.greeting)
+                .textStyle(.secondary)
+                .foregroundStyle(Color.textSecondary)
+
+            Text("Rest Day")
+                .textStyle(.screenTitle)
+                .foregroundStyle(Color.textPrimary)
+
+            if let insight = ctx.insight {
+                Text(insight)
+                    .textStyle(.secondary)
+                    .foregroundStyle(Color.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, Space.md)
+            }
+
+            // Consistency map — shows 12-week training pattern
+            if !viewModel.weeklyWorkoutCounts.isEmpty {
+                TrainingConsistencyMap(
+                    weeks: viewModel.weeklyWorkoutCounts,
+                    routineFrequency: viewModel.routineFrequency
+                )
+                .padding(.top, Space.xs)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Space.lg)
+    }
+
+    // MARK: - Post-Workout Hero
+
+    private func postWorkoutHero(_ ctx: PostWorkoutContext) -> some View {
+        VStack(spacing: Space.md) {
+            CoachPresenceIndicator(size: 40)
+
+            Text("Session Complete")
+                .textStyle(.screenTitle)
+                .foregroundStyle(Color.textPrimary)
+
+            Text(ctx.workoutName)
+                .textStyle(.secondary)
+                .foregroundStyle(Color.textSecondary)
+
+            // Workout stats row
+            HStack(spacing: Space.lg) {
+                statItem(value: "\(ctx.exerciseCount)", label: "exercises")
+                statItem(value: "\(ctx.setCount)", label: "sets")
+                statItem(value: formatVolume(ctx.totalVolume), label: "kg")
+            }
+            .padding(.top, Space.xs)
+
+            if let summary = ctx.summary, !summary.summary.isEmpty {
+                Text(summary.summary)
+                    .textStyle(.secondary)
+                    .foregroundStyle(Color.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, Space.md)
+            }
+
+            // Dismiss button to return to normal state
+            Button {
+                viewModel.dismissPostWorkout()
+            } label: {
+                Text("Continue")
+                    .textStyle(.bodyStrong)
+                    .foregroundStyle(Color.textSecondary)
+                    .padding(.vertical, Space.xs)
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Space.lg)
+    }
+
+    // MARK: - Inactivity Hero
+
+    private func inactivityHero(_ ctx: InactivityContext) -> some View {
+        VStack(spacing: Space.md) {
+            CoachPresenceIndicator(size: 40)
+
+            Text("Welcome back")
+                .textStyle(.screenTitle)
+                .foregroundStyle(Color.textPrimary)
+
+            Text("\(ctx.daysSinceLastWorkout) days since your last session")
+                .textStyle(.secondary)
+                .foregroundStyle(Color.textSecondary)
+
+            if let nextName = ctx.nextWorkoutName {
+                Text("Up next: \(nextName)")
+                    .textStyle(.bodyStrong)
+                    .foregroundStyle(Color.accent)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Space.lg)
+    }
+
     // MARK: - Input Bar
-    
+
     private var inputBar: some View {
         AgentPromptBar(text: $query, placeholder: "Ask anything") {
             selectedConversationId = nil
@@ -103,54 +283,150 @@ struct CoachTabView: View {
         }
         .frame(maxWidth: 680)
     }
-    
-    // MARK: - Quick Actions Grid
-    
-    private var quickActionsGrid: some View {
-        VStack(alignment: .leading, spacing: Space.md) {
-            PovverText("Quick actions", style: .subheadline, color: Color.textSecondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            
-            let columns = [
-                GridItem(.flexible(), spacing: Space.md),
-                GridItem(.flexible(), spacing: Space.md)
-            ]
-            
-            LazyVGrid(columns: columns, alignment: .center, spacing: Space.md) {
-                QuickActionCard(title: "Plan program", icon: "calendar.badge.plus") {
-                    AnalyticsService.shared.quickActionTapped(action: .planProgram)
-                    selectedConversationId = nil
-                    entryContext = "quick:Plan program"
-                    navigateToConversation = true
+
+    // MARK: - Quick Actions
+
+    private var quickActionsSection: some View {
+        VStack(alignment: .leading, spacing: Space.sm) {
+            Text("Quick Actions")
+                .textStyle(.sectionLabel)
+
+            VStack(spacing: 1) {
+                // Contextual top action for workout day
+                if case .workoutDay = viewModel.state {
+                    quickActionRow(
+                        title: "Start today's session",
+                        icon: "play.fill",
+                        accent: true
+                    ) {
+                        switchToTab(.train)
+                    }
                 }
 
-                QuickActionCard(title: "Analyze progress", icon: "chart.bar") {
+                quickActionRow(
+                    title: "Analyze my progress",
+                    icon: "chart.bar",
+                    accent: false
+                ) {
                     AnalyticsService.shared.quickActionTapped(action: .analyzeProgress)
                     selectedConversationId = nil
                     entryContext = "quick:Analyze progress"
                     navigateToConversation = true
                 }
 
-                QuickActionCard(title: "Create routine", icon: "figure.strengthtraining.traditional") {
-                    AnalyticsService.shared.quickActionTapped(action: .createRoutine)
-                    selectedConversationId = nil
-                    entryContext = "quick:Create routine"
-                    navigateToConversation = true
-                }
-
-                QuickActionCard(title: "Review plan", icon: "doc.text.magnifyingglass") {
+                quickActionRow(
+                    title: "Review my program",
+                    icon: "arrow.triangle.2.circlepath",
+                    accent: false
+                ) {
                     AnalyticsService.shared.quickActionTapped(action: .reviewPlan)
                     selectedConversationId = nil
                     entryContext = "quick:Review plan"
                     navigateToConversation = true
                 }
+
+                quickActionRow(
+                    title: "Create a routine",
+                    icon: "figure.strengthtraining.traditional",
+                    accent: false
+                ) {
+                    AnalyticsService.shared.quickActionTapped(action: .createRoutine)
+                    selectedConversationId = nil
+                    entryContext = "quick:Create routine"
+                    navigateToConversation = true
+                }
             }
+            .background(Color.surface)
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusCard, style: .continuous))
         }
-        .frame(maxWidth: 820)
     }
-    
+
+    private func quickActionRow(title: String, icon: String, accent: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: Space.md) {
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(accent ? Color.accent : Color.textSecondary)
+                    .frame(width: 24)
+
+                Text(title)
+                    .textStyle(.body)
+                    .foregroundStyle(accent ? Color.accent : Color.textPrimary)
+
+                Spacer()
+
+                if accent {
+                    Text("START")
+                        .textStyle(.sectionLabel)
+                        .foregroundStyle(Color.accent)
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.textTertiary)
+                }
+            }
+            .padding(.horizontal, Space.md)
+            .padding(.vertical, Space.sm + 2)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Recent Conversations
+
+    private var recentSection: some View {
+        VStack(alignment: .leading, spacing: Space.sm) {
+            Text("Recent")
+                .textStyle(.sectionLabel)
+
+            ForEach(recentConversations.prefix(5)) { conv in
+                Button {
+                    selectedConversationId = conv.id
+                    entryContext = ""
+                    navigateToConversation = true
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(conv.title ?? conv.lastMessage ?? "General chat")
+                                .textStyle(.secondary)
+                                .foregroundStyle(Color.textPrimary)
+                                .lineLimit(1)
+
+                            if let date = conv.updatedAt ?? conv.createdAt {
+                                Text(date.relativeDescription)
+                                    .textStyle(.micro)
+                                    .foregroundStyle(Color.textSecondary)
+                            }
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.textTertiary)
+                    }
+                    .padding(.vertical, Space.sm)
+                }
+                .buttonStyle(.plain)
+
+                if conv.id != recentConversations.prefix(5).last?.id {
+                    Divider().foregroundStyle(Color.separatorLine)
+                }
+            }
+
+            // See all button
+            Button {
+                showAllConversations = true
+            } label: {
+                Text("See all conversations")
+                    .textStyle(.secondary)
+                    .foregroundStyle(Color.textSecondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Space.sm)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     // MARK: - Conversation Destination
-    
+
     @ViewBuilder
     private var conversationDestination: some View {
         if let uid = AuthService.shared.currentUser?.uid {
@@ -175,62 +451,26 @@ struct CoachTabView: View {
             EmptyState(title: "Not signed in", message: "Login to view canvas.")
         }
     }
-    
-    // MARK: - Recent Chats
-
-    private var recentChatsSection: some View {
-        VStack(alignment: .leading, spacing: Space.md) {
-            PovverText("Recent", style: .subheadline, color: Color.textSecondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            VStack(spacing: Space.sm) {
-                ForEach(recentConversations.prefix(5)) { canvas in
-                    Button {
-                        selectedConversationId = canvas.id
-                        entryContext = ""
-                        navigateToConversation = true
-                    } label: {
-                        SurfaceCard(padding: InsetsToken.all(Space.md)) {
-                            HStack(spacing: Space.md) {
-                                VStack(alignment: .leading, spacing: Space.xs) {
-                                    PovverText(
-                                        canvas.title ?? canvas.lastMessage ?? "General chat",
-                                        style: .subheadline,
-                                        lineLimit: 1
-                                    )
-                                    if let date = canvas.updatedAt ?? canvas.createdAt {
-                                        PovverText(
-                                            date.relativeDescription,
-                                            style: .caption,
-                                            color: Color.textSecondary
-                                        )
-                                    }
-                                }
-                                Spacer()
-                                Icon("chevron.right", size: .md, color: Color.textSecondary)
-                            }
-                        }
-                    }
-                    .buttonStyle(PlainButtonStyle())
-                }
-            }
-
-            Button {
-                showAllConversations = true
-            } label: {
-                HStack {
-                    Spacer()
-                    PovverText("See all", style: .subheadline, color: Color.accent)
-                    Spacer()
-                }
-                .padding(.vertical, Space.sm)
-            }
-            .buttonStyle(PlainButtonStyle())
-        }
-        .frame(maxWidth: 680)
-    }
 
     // MARK: - Helpers
+
+    private func statItem(value: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .textStyle(.metricM)
+                .foregroundStyle(Color.textPrimary)
+            Text(label)
+                .textStyle(.micro)
+                .foregroundStyle(Color.textSecondary)
+        }
+    }
+
+    private func formatVolume(_ volume: Double) -> String {
+        if volume >= 1000 {
+            return String(format: "%.0f", volume / 1000) + "k"
+        }
+        return String(format: "%.0f", volume)
+    }
 
     private func loadRecentConversations() {
         guard let uid = AuthService.shared.currentUser?.uid else { return }
@@ -253,7 +493,7 @@ struct CoachTabView: View {
                     let lastMessage = data["lastMessage"] as? String
                     let updatedAt = (data["updatedAt"] as? Timestamp)?.dateValue()
                     let createdAt = (data["createdAt"] as? Timestamp)?.dateValue()
-                    // Skip canvases that have never been messaged
+                    // Skip conversations that have never been messaged
                     guard lastMessage != nil || updatedAt != nil else { return nil }
                     return RecentConversation(
                         id: doc.documentID,

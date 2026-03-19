@@ -72,6 +72,8 @@ struct PostWorkoutFlag: Codable {
 class CoachTabViewModel: ObservableObject {
     @Published var state: CoachState = .loading
     @Published var pendingMilestones: [Milestone] = []
+    @Published var weeklyWorkoutCounts: [WeekWorkoutCount] = []
+    @Published var routineFrequency: Int = 4
 
     private let trainingService = TrainingDataService.shared
     private let workoutService = FocusModeWorkoutService.shared
@@ -117,8 +119,17 @@ class CoachTabViewModel: ObservableObject {
             return
         }
 
-        // 5. Load training snapshot
-        let snapshot = (try? await trainingService.fetchTrainingSnapshot()) ?? emptySnapshot
+        // 5. Load training snapshot and weekly workout counts
+        async let snapshotTask = trainingService.fetchTrainingSnapshot()
+        async let weeklyCountsTask = trainingService.fetchWeeklyWorkoutCounts(weeks: 12)
+
+        let snapshot = (try? await snapshotTask) ?? emptySnapshot
+        weeklyWorkoutCounts = (try? await weeklyCountsTask) ?? []
+
+        // Derive routine frequency from template count (sessions per week)
+        if let next = nextWorkout, next.templateCount > 0 {
+            routineFrequency = next.templateCount
+        }
 
         // 6. Check milestones (consistency thresholds)
         pendingMilestones = trainingService.checkMilestones(workoutCount: workoutCount)
