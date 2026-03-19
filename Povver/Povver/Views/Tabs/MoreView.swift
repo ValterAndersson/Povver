@@ -83,19 +83,17 @@ struct MoreView: View {
                         .frame(width: 56, height: 56)
 
                     Text(initials)
-                        .font(.system(size: 20, weight: .semibold))
+                        .textStyle(.screenTitle)
                         .foregroundColor(Color.textSecondary)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(displayName)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(Color.textPrimary)
+                        .textStyle(.bodyStrong)
 
                     if let email = visibleEmail {
                         Text(email)
-                            .font(.system(size: 13))
-                            .foregroundColor(Color.textSecondary)
+                            .textStyle(.caption)
                     }
                 }
 
@@ -200,22 +198,10 @@ struct MoreView: View {
         Button {
             showingLogoutConfirmation = true
         } label: {
-            HStack {
-                Image(systemName: "rectangle.portrait.and.arrow.right")
-                    .font(.system(size: 18))
-                    .foregroundColor(Color.destructive)
-
-                Text("Sign Out")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(Color.destructive)
-
-                Spacer()
-            }
-            .padding(Space.md)
-            .background(Color.surface)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
+            Text("Sign Out")
+                .textStyle(.secondary)
+                .foregroundColor(Color.destructive)
         }
-        .buttonStyle(PlainButtonStyle())
         .padding(.horizontal, Space.lg)
         .padding(.top, Space.md)
     }
@@ -224,8 +210,7 @@ struct MoreView: View {
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title.uppercased())
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundColor(Color.textSecondary)
+            .textStyle(.sectionLabel)
             .padding(.horizontal, Space.lg)
             .padding(.top, Space.md)
     }
@@ -283,11 +268,10 @@ struct DevicesPlaceholderView: View {
                 .foregroundColor(Color.textTertiary)
 
             Text("Connected Devices")
-                .font(.system(size: 20, weight: .semibold))
+                .textStyle(.screenTitle)
 
             Text("Link your Apple Watch or other devices")
-                .font(.system(size: 14))
-                .foregroundColor(Color.textSecondary)
+                .textStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.bg)
@@ -303,11 +287,10 @@ struct MemoriesPlaceholderView: View {
                 .foregroundColor(Color.textTertiary)
 
             Text("Memories")
-                .font(.system(size: 20, weight: .semibold))
+                .textStyle(.screenTitle)
 
             Text("What Coach has learned about your training")
-                .font(.system(size: 14))
-                .foregroundColor(Color.textSecondary)
+                .textStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.bg)
