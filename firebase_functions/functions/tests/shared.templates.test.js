@@ -575,6 +575,69 @@ describe('createTemplate - exercise name resolution', () => {
 });
 
 // ---------------------------------------------------------------------------
+// patchTemplate - template name propagation
+// ---------------------------------------------------------------------------
+
+describe('patchTemplate - template name propagation', () => {
+  test('updates template_names on routines when template name changes', async () => {
+    const store = {
+      'users/u1/templates/t1': {
+        name: 'Old Name',
+        exercises: [{ exercise_id: 'ex1', name: 'Test', position: 0, sets: [{ reps: 8, rir: 2 }] }],
+      },
+      'users/u1/routines/r1': {
+        template_ids: ['t1', 't2'],
+        template_names: { t1: 'Old Name', t2: 'Other' },
+      },
+    };
+    const db = createMockDb(store);
+
+    await patchTemplate(db, 'u1', 't1', { name: 'New Name' });
+
+    assert.equal(store['users/u1/templates/t1'].name, 'New Name');
+    assert.equal(store['users/u1/routines/r1'].template_names.t1, 'New Name');
+    assert.equal(store['users/u1/routines/r1'].template_names.t2, 'Other');
+  });
+
+  test('does not propagate when name is not being changed', async () => {
+    const store = {
+      'users/u1/templates/t1': {
+        name: 'Original',
+        exercises: [{ exercise_id: 'ex1', name: 'Test', position: 0, sets: [{ reps: 8, rir: 2 }] }],
+      },
+      'users/u1/routines/r1': {
+        template_ids: ['t1'],
+        template_names: { t1: 'Original' },
+      },
+    };
+    const db = createMockDb(store);
+
+    await patchTemplate(db, 'u1', 't1', { description: 'Updated description' });
+
+    // template_names should NOT have changed
+    assert.equal(store['users/u1/routines/r1'].template_names.t1, 'Original');
+  });
+
+  test('skips routines without template_names', async () => {
+    const store = {
+      'users/u1/templates/t1': {
+        name: 'Old Name',
+        exercises: [{ exercise_id: 'ex1', name: 'Test', position: 0, sets: [{ reps: 8, rir: 2 }] }],
+      },
+      'users/u1/routines/r1': {
+        template_ids: ['t1'],
+        // no template_names — legacy routine
+      },
+    };
+    const db = createMockDb(store);
+
+    // Should not throw
+    await patchTemplate(db, 'u1', 't1', { name: 'New Name' });
+    assert.equal(store['users/u1/templates/t1'].name, 'New Name');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // patchTemplate - exercise name resolution
 // ---------------------------------------------------------------------------
 
