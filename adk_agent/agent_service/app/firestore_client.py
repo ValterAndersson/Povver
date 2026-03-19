@@ -107,35 +107,47 @@ class FirestoreClient:
     # --- Training Analytics (HTTP) ---
 
     async def get_analysis_summary(self, user_id: str) -> dict | None:
-        """Get analysis summary via getAnalysisSummary Firebase Function."""
-        return await self._http.get(
+        """Get analysis summary via getAnalysisSummary Firebase Function.
+
+        Uses POST because the endpoint reads from req.body.
+        """
+        return await self._http.post(
             "/getAnalysisSummary",
             user_id=user_id,
-            params={"include_expired": "false"},
+            body={"include_expired": False},
         )
 
     async def get_weekly_review(self, user_id: str) -> dict | None:
-        """Get weekly review via getAnalysisSummary with sections filter."""
-        return await self._http.get(
+        """Get weekly review via getAnalysisSummary with sections filter.
+
+        Uses POST because the endpoint reads from req.body.
+        """
+        return await self._http.post(
             "/getAnalysisSummary",
             user_id=user_id,
-            params={"sections": "weekly_review"},
+            body={"sections": ["weekly_review"]},
         )
 
     async def get_muscle_group_summary(self, user_id: str, muscle_group: str, weeks: int = 8) -> dict:
-        """Weekly series for a muscle group via getMuscleGroupSummary Firebase Function."""
-        return await self._http.get(
+        """Weekly series for a muscle group via getMuscleGroupSummary Firebase Function.
+
+        Uses POST because the endpoint reads from req.body, not query params.
+        """
+        return await self._http.post(
             "/getMuscleGroupSummary",
             user_id=user_id,
-            params={"muscle_group": muscle_group, "weeks": str(weeks)},
+            body={"muscle_group": muscle_group, "window_weeks": weeks},
         )
 
     async def get_exercise_summary(self, user_id: str, exercise_id: str) -> dict:
-        """Per-exercise series via getExerciseSummary Firebase Function."""
-        return await self._http.get(
+        """Per-exercise series via getExerciseSummary Firebase Function.
+
+        Uses POST because the endpoint reads from req.body, not query params.
+        """
+        return await self._http.post(
             "/getExerciseSummary",
             user_id=user_id,
-            params={"exercise_name": exercise_id, "weeks": "8"},
+            body={"exercise_name": exercise_id, "weeks": 8},
         )
 
     async def query_sets(self, user_id: str, exercise_id: str, filters: dict | None = None) -> list[dict]:

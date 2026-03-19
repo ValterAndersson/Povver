@@ -168,11 +168,13 @@ def test_list_recent_workouts_summary():
 
 
 def test_get_analysis_summary_filters_expired():
-    """Verify get_analysis_summary passes include_expired=false."""
+    """Verify get_analysis_summary POSTs include_expired=false in body."""
     captured = {}
 
     async def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
+        captured["method"] = request.method
+        captured["body"] = json.loads(request.content) if request.content else None
         return httpx.Response(200, json={"data": {
             "sections": [{"type": "strength", "summary": "Bench up 5%"}],
             "created_at": "2026-03-18",
@@ -184,8 +186,9 @@ def test_get_analysis_summary_filters_expired():
 
     result = _run(_test())
 
+    assert captured["method"] == "POST"
     assert "/getAnalysisSummary" in captured["url"]
-    assert "include_expired=false" in captured["url"]
+    assert captured["body"]["include_expired"] is False
     assert result["sections"][0]["summary"] == "Bench up 5%"
 
 
@@ -193,11 +196,13 @@ def test_get_analysis_summary_filters_expired():
 
 
 def test_get_weekly_review_uses_sections_param():
-    """Verify get_weekly_review requests only weekly_review section."""
+    """Verify get_weekly_review POSTs sections filter in body."""
     captured = {}
 
     async def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
+        captured["method"] = request.method
+        captured["body"] = json.loads(request.content) if request.content else None
         return httpx.Response(200, json={"data": {
             "weekly_review": {"total_workouts": 4, "volume_change": "+12%"},
         }})
@@ -208,8 +213,9 @@ def test_get_weekly_review_uses_sections_param():
 
     result = _run(_test())
 
+    assert captured["method"] == "POST"
     assert "/getAnalysisSummary" in captured["url"]
-    assert "sections=weekly_review" in captured["url"]
+    assert "weekly_review" in captured["body"]["sections"]
     assert result["weekly_review"]["total_workouts"] == 4
 
 
@@ -217,15 +223,18 @@ def test_get_weekly_review_uses_sections_param():
 
 
 def test_get_muscle_group_summary_passes_weeks():
-    """Verify weeks parameter is forwarded (not ignored like before)."""
+    """Verify weeks parameter is forwarded in POST body (not ignored like before)."""
     captured = {}
 
     async def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
-        return httpx.Response(200, json={"data": {
+        captured["method"] = request.method
+        captured["body"] = json.loads(request.content) if request.content else None
+        # This endpoint uses res.json() directly (no ok() wrapper), so no {"data": ...} envelope
+        return httpx.Response(200, json={
             "muscle_group": "chest",
             "weeks": [{"week": "2026-W10", "sets": 12}],
-        }})
+        })
 
     async def _test():
         fs = _make_firestore_client(handler)
@@ -233,9 +242,10 @@ def test_get_muscle_group_summary_passes_weeks():
 
     result = _run(_test())
 
+    assert captured["method"] == "POST"
     assert "/getMuscleGroupSummary" in captured["url"]
-    assert "muscle_group=chest" in captured["url"]
-    assert "weeks=12" in captured["url"]
+    assert captured["body"]["muscle_group"] == "chest"
+    assert captured["body"]["window_weeks"] == 12
     assert result["muscle_group"] == "chest"
 
 
@@ -243,15 +253,18 @@ def test_get_muscle_group_summary_passes_weeks():
 
 
 def test_get_exercise_summary_passes_exercise_name():
-    """Verify get_exercise_summary sends exercise_name param."""
+    """Verify get_exercise_summary POSTs exercise_name in body."""
     captured = {}
 
     async def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
-        return httpx.Response(200, json={"data": {
+        captured["method"] = request.method
+        captured["body"] = json.loads(request.content) if request.content else None
+        # This endpoint uses res.json() directly (no ok() wrapper), so no {"data": ...} envelope
+        return httpx.Response(200, json={
             "exercise_id": "bench_press",
             "points_by_day": {"2026-03-01": 100},
-        }})
+        })
 
     async def _test():
         fs = _make_firestore_client(handler)
@@ -259,8 +272,9 @@ def test_get_exercise_summary_passes_exercise_name():
 
     result = _run(_test())
 
+    assert captured["method"] == "POST"
     assert "/getExerciseSummary" in captured["url"]
-    assert "exercise_name=bench_press" in captured["url"]
+    assert captured["body"]["exercise_name"] == "bench_press"
     assert result["exercise_id"] == "bench_press"
 
 
