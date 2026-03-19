@@ -289,24 +289,39 @@ def _format_active_alerts(alerts: dict) -> str:
 
 
 def _format_snapshot(planning: dict) -> str:
-    """Format planning context as instruction section."""
+    """Format planning context as instruction section.
+
+    Handles two response shapes:
+    - Legacy (Python-assembled): user.attributes.fitness_level, active_routine, analysis
+    - HTTP compact view: user.fitness_level (flat), activeRoutine (camelCase), no analysis key
+    """
     sections = ["## Current Training Snapshot"]
     user = planning.get("user", {})
     if user.get("name"):
         sections.append(f"User: {user['name']}")
+
+    # fitness_level / fitness_goal: check both flat (HTTP compact) and nested (legacy)
     attrs = user.get("attributes", {})
-    if attrs.get("fitness_level"):
-        sections.append(f"Fitness level: {attrs['fitness_level']}")
-    if attrs.get("fitness_goal"):
-        sections.append(f"Goal: {attrs['fitness_goal']}")
+    fitness_level = attrs.get("fitness_level") or user.get("fitness_level")
+    fitness_goal = attrs.get("fitness_goal") or user.get("fitness_goal")
+    if fitness_level:
+        sections.append(f"Fitness level: {fitness_level}")
+    if fitness_goal:
+        sections.append(f"Goal: {fitness_goal}")
+
     weight_unit = user.get("weight_unit", "kg")
     sections.append(f"Weight unit: {weight_unit}")
-    routine = planning.get("active_routine")
+
+    # active_routine (legacy snake_case) or activeRoutine (HTTP camelCase)
+    routine = planning.get("active_routine") or planning.get("activeRoutine")
     if routine:
         sections.append(f"Active routine: {routine.get('name', 'Unknown')}")
+
+    # analysis key only exists in legacy shape; HTTP compact has strengthSummary instead
     analysis = planning.get("analysis")
     if analysis:
         sections.append(f"Latest insight: {analysis.get('summary', 'N/A')}")
+
     return "\n".join(sections)
 
 
