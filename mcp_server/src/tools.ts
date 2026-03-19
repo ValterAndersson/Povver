@@ -22,7 +22,6 @@ export function registerTools(server: McpServer, userId: string) {
   server.tool('get_training_snapshot', 'Get compact overview: user profile, active routine, next workout, recent workouts (summary), strength records', {},
     async () => {
       const ctx = await planningContext.getPlanningContext(db, userId, {
-        includeTemplateExercises: false,
         workoutLimit: 10,
         view: 'compact',
       });

@@ -119,10 +119,10 @@ HTTP handlers in `templates/*.js`, `routines/*.js`, etc. catch these and map to 
 ## Testing
 
 Each module has a corresponding test file in `tests/`:
-- `tests/shared-templates.test.js`
-- `tests/shared-routines.test.js`
-- `tests/shared-workouts.test.js`
-- `tests/shared-planning-context.test.js`
+- `tests/shared.templates.test.js`
+- `tests/shared.routines.test.js`
+- `tests/shared.workouts-views.test.js`
+- `tests/shared.planning-context-views.test.js`
 
 Tests use in-memory Firestore emulator (no mocks). Run via `npm test`.
 

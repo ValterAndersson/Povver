@@ -366,16 +366,18 @@ async function patchTemplate(db, userId, templateId, patch, meta = {}) {
 
   // Propagate name change to routines that reference this template
   if (sanitizedPatch.name) {
-    const routinesSnap = await db.collection('users').doc(userId).collection('routines').get();
-    for (const rDoc of routinesSnap.docs) {
-      const rData = rDoc.data();
-      const tids = rData.template_ids || rData.templateIds || [];
-      if (tids.includes(templateId)) {
-        const updatedNames = { ...(rData.template_names || {}), [templateId]: sanitizedPatch.name };
-        // Use db.collection().doc().update() — NOT rDoc.ref.update()
-        // because the test mock's collection .get() returns docs without .ref
-        await db.collection('users').doc(userId).collection('routines').doc(rDoc.id).update({ template_names: updatedNames });
+    try {
+      const routinesSnap = await db.collection('users').doc(userId).collection('routines').limit(100).get();
+      for (const rDoc of routinesSnap.docs) {
+        const rData = rDoc.data();
+        const tids = rData.template_ids || rData.templateIds || [];
+        if (tids.includes(templateId)) {
+          const updatedNames = { ...(rData.template_names || {}), [templateId]: sanitizedPatch.name };
+          await db.collection('users').doc(userId).collection('routines').doc(rDoc.id).update({ template_names: updatedNames });
+        }
       }
+    } catch (propErr) {
+      console.warn(`template_names propagation failed for template ${templateId}:`, propErr.message);
     }
   }
 

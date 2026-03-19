@@ -60,12 +60,12 @@ async function getRoutine(db, userId, routineId, opts = {}) {
 
       routine.templates = templateDocs
         .filter(d => d.exists)
-        .map((d, i) => {
+        .map((d) => {
           const t = d.data();
           return {
             id: d.id,
             name: t.name || 'Untitled',
-            position: i,
+            position: templateIds.indexOf(d.id),
             exercise_names: (t.exercises || []).map(ex => ex.name || ex.exercise_id || 'Unknown'),
             exercise_count: (t.exercises || []).length,
           };
@@ -278,33 +278,37 @@ async function patchRoutine(db, userId, routineId, patch) {
     }
 
     // Validate all templates exist and collect names
-    const templatesCol = db.collection('users').doc(userId).collection('templates');
-    const templateRefs = sanitizedPatch.template_ids.map(tid => templatesCol.doc(tid));
-    const templateDocs = await db.getAll(...templateRefs);
+    if (sanitizedPatch.template_ids.length === 0) {
+      sanitizedPatch.template_names = {};
+    } else {
+      const templatesCol = db.collection('users').doc(userId).collection('templates');
+      const templateRefs = sanitizedPatch.template_ids.map(tid => templatesCol.doc(tid));
+      const templateDocs = await db.getAll(...templateRefs);
 
-    const missing = [];
-    const templateNames = {};
-    templateDocs.forEach((doc, idx) => {
-      const tid = sanitizedPatch.template_ids[idx];
-      if (!doc.exists) {
-        missing.push(tid);
-      } else {
-        templateNames[tid] = doc.data().name || 'Untitled';
+      const missing = [];
+      const templateNames = {};
+      templateDocs.forEach((doc, idx) => {
+        const tid = sanitizedPatch.template_ids[idx];
+        if (!doc.exists) {
+          missing.push(tid);
+        } else {
+          templateNames[tid] = doc.data().name || 'Untitled';
+        }
+      });
+
+      if (missing.length > 0) {
+        throw new ValidationError(`Templates not found: ${missing.join(', ')}`);
       }
-    });
 
-    if (missing.length > 0) {
-      throw new ValidationError(`Templates not found: ${missing.join(', ')}`);
-    }
+      sanitizedPatch.template_names = templateNames;
 
-    sanitizedPatch.template_names = templateNames;
-
-    // Cursor consistency: clear if last_completed_template_id is no longer in template_ids
-    const currentCursorId = current.last_completed_template_id;
-    if (currentCursorId && !sanitizedPatch.template_ids.includes(currentCursorId)) {
-      sanitizedPatch.last_completed_template_id = null;
-      sanitizedPatch.last_completed_at = null;
-      patchedFields.push('last_completed_template_id', 'last_completed_at');
+      // Cursor consistency: clear if last_completed_template_id is no longer in template_ids
+      const currentCursorId = current.last_completed_template_id;
+      if (currentCursorId && !sanitizedPatch.template_ids.includes(currentCursorId)) {
+        sanitizedPatch.last_completed_template_id = null;
+        sanitizedPatch.last_completed_at = null;
+        patchedFields.push('last_completed_template_id', 'last_completed_at');
+      }
     }
   }
 
