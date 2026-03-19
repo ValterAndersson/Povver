@@ -105,6 +105,9 @@ async function createRoutine(db, userId, routineInput) {
   // Collect template IDs from either format
   const templateIds = routineInput.template_ids || routineInput.templateIds || [];
 
+  // Declare outside the if-block so it's always available for enhancedRoutine
+  let templateNames = {};
+
   // Validate all template_ids exist
   if (templateIds.length > 0) {
     const templatesCol = db.collection('users').doc(userId).collection('templates');
@@ -130,6 +133,14 @@ async function createRoutine(db, userId, routineInput) {
         ],
       });
     }
+
+    // Extract template names from already-fetched docs (no additional reads)
+    templateDocs.forEach((doc, idx) => {
+      if (doc.exists) {
+        const data = doc.data();
+        templateNames[templateIds[idx]] = data.name || 'Untitled';
+      }
+    });
   }
 
   const now = admin.firestore.FieldValue.serverTimestamp();
@@ -137,6 +148,7 @@ async function createRoutine(db, userId, routineInput) {
     ...routineInput,
     frequency: routineInput.frequency || 3,
     template_ids: templateIds,
+    template_names: templateNames,
     created_at: now,
     updated_at: now,
   };
@@ -238,11 +250,11 @@ async function patchRoutine(db, userId, routineId, patch) {
       throw new ValidationError('template_ids must be an array');
     }
 
-    // Validate all templates exist (parallel reads)
+    // Validate all templates exist (parallel reads) and collect names
     const templateChecks = await Promise.all(
       sanitizedPatch.template_ids.map(async (tid) => {
         const templateDoc = await db.collection('users').doc(userId).collection('templates').doc(tid).get();
-        return { tid, exists: templateDoc.exists };
+        return { tid, exists: templateDoc.exists, name: templateDoc.exists ? (templateDoc.data().name || 'Untitled') : null };
       })
     );
 
@@ -250,6 +262,11 @@ async function patchRoutine(db, userId, routineId, patch) {
     if (missing.length > 0) {
       throw new ValidationError(`Templates not found: ${missing.map(m => m.tid).join(', ')}`);
     }
+
+    // Build template_names from already-fetched docs
+    const templateNames = {};
+    templateChecks.forEach(c => { templateNames[c.tid] = c.name; });
+    sanitizedPatch.template_names = templateNames;
 
     // Cursor consistency: clear if last_completed_template_id is no longer in template_ids
     const currentCursorId = current.last_completed_template_id;

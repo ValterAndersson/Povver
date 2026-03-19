@@ -317,6 +317,64 @@ describe('shared/routines', () => {
   });
 
   // -----------------------------------------------------------------------
+  // createRoutine - template_names
+  // -----------------------------------------------------------------------
+  describe('createRoutine - template_names', () => {
+    test('persists template_names map from already-fetched template docs', async () => {
+      const db = createMockDb({
+        'users/u1': {},
+        'users/u1/templates/t1': { name: 'Push Day' },
+        'users/u1/templates/t2': { name: 'Pull Day' },
+      });
+
+      const result = await createRoutine(db, 'u1', {
+        name: 'PPL Routine',
+        template_ids: ['t1', 't2'],
+        frequency: 2,
+      });
+
+      const routineKey = Object.keys(db._docs).find(k => k.startsWith('users/u1/routines/'));
+      assert.ok(routineKey, 'Routine should be created');
+      const routine = db._docs[routineKey];
+      assert.deepEqual(routine.template_names, { t1: 'Push Day', t2: 'Pull Day' });
+    });
+
+    test('handles templates without names gracefully', async () => {
+      const db = createMockDb({
+        'users/u1': {},
+        'users/u1/templates/t1': { name: 'Named' },
+        'users/u1/templates/t2': { exercises: [] },  // no name
+      });
+
+      const result = await createRoutine(db, 'u1', {
+        name: 'Test',
+        template_ids: ['t1', 't2'],
+        frequency: 2,
+      });
+
+      const routineKey = Object.keys(db._docs).find(k => k.startsWith('users/u1/routines/'));
+      const routine = db._docs[routineKey];
+      assert.equal(routine.template_names.t1, 'Named');
+      assert.equal(routine.template_names.t2, 'Untitled');
+    });
+
+    test('sets empty template_names when no template_ids provided', async () => {
+      const db = createMockDb({
+        'users/u1': {},
+      });
+
+      const result = await createRoutine(db, 'u1', {
+        name: 'Empty Routine',
+        frequency: 3,
+      });
+
+      const routineKey = Object.keys(db._docs).find(k => k.startsWith('users/u1/routines/'));
+      const routine = db._docs[routineKey];
+      assert.deepEqual(routine.template_names, {});
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // patchRoutine
   // -----------------------------------------------------------------------
   describe('patchRoutine', () => {
@@ -397,6 +455,39 @@ describe('shared/routines', () => {
       // Removing t2 from template_ids should clear the cursor
       const result = await patchRoutine(db, 'u1', 'r1', { template_ids: ['t1', 't3'] });
       assert.equal(result.cursorCleared, true);
+    });
+
+    test('updates template_names when template_ids change', async () => {
+      const db = createMockDb({
+        'users/u1/routines/r1': {
+          name: 'My Routine',
+          template_ids: ['t1'],
+          template_names: { t1: 'Push Day' },
+        },
+        'users/u1/templates/t1': { name: 'Push Day' },
+        'users/u1/templates/t2': { name: 'Pull Day' },
+      });
+
+      await patchRoutine(db, 'u1', 'r1', { template_ids: ['t1', 't2'] });
+
+      const routine = db._docs['users/u1/routines/r1'];
+      assert.deepEqual(routine.template_names, { t1: 'Push Day', t2: 'Pull Day' });
+    });
+
+    test('uses Untitled for templates without names in patch', async () => {
+      const db = createMockDb({
+        'users/u1/routines/r1': {
+          name: 'My Routine',
+          template_ids: ['t1'],
+          template_names: { t1: 'Push Day' },
+        },
+        'users/u1/templates/t1': { exercises: [] },  // no name
+      });
+
+      await patchRoutine(db, 'u1', 'r1', { template_ids: ['t1'] });
+
+      const routine = db._docs['users/u1/routines/r1'];
+      assert.deepEqual(routine.template_names, { t1: 'Untitled' });
     });
   });
 
