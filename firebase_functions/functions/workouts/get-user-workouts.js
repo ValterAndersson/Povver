@@ -21,7 +21,8 @@ async function getUserWorkoutsHandler(req, res) {
   const cursor = req.query?.cursor || null;
 
   try {
-    const result = await listWorkouts(db, userId, { limit, startDate, endDate, cursor });
+    const view = req.query?.view; // 'summary' for compact agent responses
+    const result = await listWorkouts(db, userId, { limit, startDate, endDate, cursor, view });
     return ok(res, {
       items: result.items,
       analytics: result.analytics,

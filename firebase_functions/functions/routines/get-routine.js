@@ -19,7 +19,8 @@ async function getRoutineHandler(req, res) {
   const routineId = req.query.routineId || req.body?.routineId;
 
   try {
-    const routine = await getRoutine(admin.firestore(), userId, routineId);
+    const includeTemplates = req.query?.include_templates !== 'false'; // default true for agent use
+    const routine = await getRoutine(admin.firestore(), userId, routineId, { include_templates: includeTemplates });
     return ok(res, routine);
   } catch (e) {
     logger.error('[getRoutine] Failed to get routine', { userId, routineId, error: e.message });
