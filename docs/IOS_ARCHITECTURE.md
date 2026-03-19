@@ -477,30 +477,59 @@ Artifact events carry card data in SSE payload:
 
 ## Design System
 
+### Design Principles
+
+1. **Earned Color** — Emerald accent is reserved for meaningful moments: progress, achievements, CTAs, coach presence. Neutral tones dominate the baseline UI. Tab bar, chips, and avatars use neutral colors.
+2. **Card Hierarchy** — Three tiers: Tier 0 (flat, no card), Tier 1 (surface + hairline stroke), Tier 2 (elevated + shadow + accent stroke for active items).
+3. **Context-Aware Motion** — Snappy (0.3s) during workouts, gentle (0.5s) for browsing, bouncy (0.4s) for celebrations. Spring presets: `MotionToken.snappy`, `.gentle`, `.bouncy`.
+4. **Agent Presence** — `CoachPresenceIndicator` provides a breathing emerald glow (8s cycle, 2s when thinking) to represent the AI coach as a living entity.
+
 ### Tokens (`UI/DesignSystem/Tokens.swift`)
 
-Centralized design tokens for consistency:
+Centralized design tokens — all visual values should reference tokens, not hard-coded values.
 
-| Category | Examples |
-|----------|----------|
-| Spacing | `spacing4`, `spacing8`, `spacing16` |
-| Radius | `radiusS`, `radiusM`, `radiusL` |
-| Typography | `headlineLarge`, `bodyMedium`, `labelSmall` |
-| Colors | `surfacePrimary`, `textPrimary`, `accent` |
+| Category | Token Enum | Key Values |
+|----------|-----------|------------|
+| Spacing | `Space` | `.xs(4)`, `.sm(8)`, `.md(12)`, `.lg(16)`, `.xl(24)`, `.xxl(32)` |
+| Corner Radius | `CornerRadiusToken` | `.radiusIcon(10)`, `.radiusControl(12)`, `.radiusCard(16)`, `.pill(999)` |
+| Typography | `TextStyle` enum + `.textStyle()` modifier | `.appTitle`, `.screenTitle`, `.sectionHeader`, `.body`, `.bodyStrong`, `.secondary`, `.caption`, `.micro`, `.sectionLabel`, `.metricL/M/S` |
+| Colors | `Color` extensions | `.bg`, `.surface`, `.surfaceElevated`, `.accent`, `.textPrimary/Secondary/Tertiary`, `.bgWorkout` |
+| Shadows | `ShadowsToken` | `.level1` (subtle), `.level2` (raised), `.level3` (prominent) |
+| Motion | `MotionToken` | `.snappy`, `.gentle`, `.bouncy` (spring presets) |
+
+**Typography:** Use `Text("...").textStyle(.body)` — the `TextStyle` enum is the single source of truth. `PovverTextStyle` and `PovverText` are deprecated.
+
+**Corner Radius:** Use `radiusCard/radiusControl/radiusIcon/pill`. Legacy `small/medium/large/card` are deprecated.
+
+### Environment Values
+
+| Key | Type | Purpose |
+|-----|------|---------|
+| `workoutActive` | `Bool` | Whether the view hierarchy is inside an active workout session. Injected by `MainTabsView`. |
+
+### Services (Training Intelligence)
+
+| Service | Purpose |
+|---------|---------|
+| `TrainingDataService` | Reads pre-computed training analytics from Firestore (`weekly_reviews`, `analysis_insights`, `analytics_rollups`). 5-minute in-memory cache. Singleton. |
+| `CoachTabViewModel` | State machine for Coach tab: `newUser`, `workoutDay`, `restDay`, `postWorkout`, `returningAfterInactivity`. Derives state from routine cursor, training snapshot, and post-workout flag. |
+| `HapticManager` | Centralized haptic feedback: `setCompleted()`, `prDetected()`, `workoutCompleted()`, `milestoneUnlocked()`. |
 
 ### Components (`UI/Components/`)
 
 | Component | Purpose |
 |-----------|---------|
 | `PovverButton` | Standard button styles (primary, secondary, destructive) |
-| `MyonText` | Typography component |
-| `SurfaceCard` | Card container with elevation |
-| `ProfileComponents` | ProfileRow, ProfileRowToggle, ProfileRowLinkContent, BadgeView (shared across settings views) |
+| `SurfaceCard` | Card container with elevation tiers |
+| `CoachPresenceIndicator` | Breathing emerald glow — agent presence indicator |
+| `TrainingConsistencyMap` | 12-week training consistency grid (signature visual) |
+| `TrendDelta` / `PRBadge` | Earned-color trend indicators |
+| `StaggeredEntrance` | View modifier for fade+slide entrance animations |
+| `ProfileComponents` | ProfileRow, ProfileRowToggle, ProfileRowLinkContent, BadgeView |
 | `AgentPromptBar` | Chat input with send button |
-| `CardActionBar` | Action buttons for cards |
 | `Banner` / `Toast` | Feedback components |
+| `Chip` / `ChipGroup` | Filter chips (neutral selected state) |
 | `Spinner` / `StatusTag` | Auxiliary indicators |
-| `DropdownMenu` | Dropdown selection |
 
 ---
 
