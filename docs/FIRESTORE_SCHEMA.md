@@ -203,6 +203,7 @@ Audit trail for template mutations from all sources. Written by Cloud Functions 
      - `description?: string`
      - `template_ids: string[]` (template IDs under this user; canonical field)
      - `templateIds?: string[]` (legacy camelCase mirror; read for backward compat, writes go to template_ids)
+     - `template_names: map<string, string>` ({templateId: templateName} — denormalized, updated on template rename)
      - `frequency: number` (workouts per week)
      - `last_completed_template_id?: string` (cursor: ID of last completed template from this routine)
      - `last_completed_at?: Timestamp` (cursor: when last workout from this routine was completed)
