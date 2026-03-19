@@ -43,8 +43,7 @@ struct HistoryView: View {
             ProgressView()
                 .progressViewStyle(.circular)
             Text("Loading history...")
-                .font(.system(size: 14))
-                .foregroundColor(Color.textSecondary)
+                .textStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -58,12 +57,10 @@ struct HistoryView: View {
                 .foregroundColor(Color.textTertiary)
             
             Text("No workouts yet")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(Color.textPrimary)
-            
+                .textStyle(.bodyStrong)
+
             Text("Complete your first workout to see it here")
-                .font(.system(size: 14))
-                .foregroundColor(Color.textSecondary)
+                .textStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, Space.xl)
         }
@@ -78,12 +75,10 @@ struct HistoryView: View {
                 // Header
                 VStack(alignment: .leading, spacing: Space.xs) {
                     Text("History")
-                        .font(.system(size: 28, weight: .bold))
-                        .foregroundColor(Color.textPrimary)
-                    
+                        .textStyle(.screenTitle)
+
                     Text("\(totalWorkoutCount) completed sessions")
-                        .font(.system(size: 15))
-                        .foregroundColor(Color.textSecondary)
+                        .textStyle(.secondary)
                 }
                 .padding(.horizontal, Space.lg)
                 .padding(.top, Space.md)
@@ -130,8 +125,8 @@ struct HistoryView: View {
                             HStack {
                                 Spacer()
                                 Text("Load More")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(Color.accent)
+                                    .textStyle(.secondary)
+                                    .foregroundStyle(Color.textSecondary)
                                 Spacer()
                             }
                             .padding(.vertical, Space.md)
@@ -285,8 +280,7 @@ private struct DateHeaderView: View {
     var body: some View {
         HStack {
             Text(formattedDate)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(Color.textSecondary)
+                .textStyle(.sectionLabel)
             Spacer()
         }
         .padding(.vertical, Space.sm)
@@ -340,8 +334,7 @@ struct WorkoutDetailView: View {
                                 .progressViewStyle(.circular)
                                 .scaleEffect(0.7)
                             Text("Syncing")
-                                .font(.system(size: 15))
-                                .foregroundColor(.textSecondary)
+                                .textStyle(.secondary)
                         }
                     } else if state.isFailed {
                         Button("Retry") {
@@ -472,8 +465,7 @@ struct WorkoutDetailView: View {
                 .foregroundColor(Color.warning)
 
             Text("Workout not found")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(Color.textPrimary)
+                .textStyle(.bodyStrong)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -593,7 +585,7 @@ private struct WeeklyWorkoutChart: View {
                     x: .value("Week", item.label),
                     y: .value("Workouts", item.bucket.count)
                 )
-                .foregroundStyle(item.bucket.isCurrent ? Color.accent : Color.accent.opacity(0.35))
+                .foregroundStyle(item.bucket.isCurrent ? Color.accent : Color(light: Color(hex: "CBD5E1"), dark: Color(hex: "475569")))
                 .cornerRadius(CornerRadiusToken.radiusIcon / 2)
                 .annotation(position: .top, spacing: Space.xs) {
                     if item.bucket.isCurrent && item.bucket.count > 0 {
