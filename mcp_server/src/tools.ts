@@ -154,10 +154,10 @@ export function registerTools(server: McpServer, userId: string) {
       name: z.string().optional().describe('Exercise name'),
       position: z.number().describe('Order in template (0-based)'),
       sets: z.array(z.object({
-        type: z.enum(['warmup', 'working']).default('working'),
+        type: z.string().default('Working Set').describe('Set type (e.g., "Working Set", "warmup")'),
         reps: z.number().describe('Target reps'),
         weight: z.number().nullable().describe('Target weight (kg) or null for bodyweight'),
-        rir: z.number().optional().describe('Reps in reserve (0-5)'),
+        rir: z.number().describe('Reps in reserve (0-5)'),
       })),
     })).describe('Exercises with set prescriptions'),
   }, async (args) => {
@@ -175,10 +175,10 @@ export function registerTools(server: McpServer, userId: string) {
         name: z.string().optional().describe('Exercise name'),
         position: z.number().describe('Order (0-based)'),
         sets: z.array(z.object({
-          type: z.enum(['warmup', 'working']).default('working'),
+          type: z.string().default('Working Set').describe('Set type (e.g., "Working Set", "warmup")'),
           reps: z.number().describe('Target reps'),
           weight: z.number().nullable().describe('Target weight (kg)'),
-          rir: z.number().optional().describe('Reps in reserve (0-5)'),
+          rir: z.number().describe('Reps in reserve (0-5)'),
         })),
       })).optional(),
     }).describe('Fields to update'),

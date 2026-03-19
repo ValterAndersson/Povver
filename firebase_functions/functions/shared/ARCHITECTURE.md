@@ -59,13 +59,13 @@ Agent tools (MCP server) and client list views need entity names without additio
 - **Written:** `createTemplate`, `patchTemplate` (batch-resolve from exercises catalog)
 - **Storage:** `exercises[].name` field on template documents
 - **Staleness:** Exercise names are effectively immutable in production (edits are rare, handled manually)
-- **Backfill:** `scripts/backfill_template_exercise_names.js` (not yet implemented — all current data has names)
+- **Backfill:** `scripts/backfill_template_exercise_names.js` (idempotent, supports `--dry-run`)
 
 #### Template names on routine documents
 - **Written:** `createRoutine`, `patchRoutine` (fetched during template_ids validation)
 - **Storage:** `template_names` map on routine documents (`{ template_id: name }`)
 - **Staleness:** Propagated on rename via `patchTemplate` (scans routines, updates map)
-- **Backfill:** `scripts/backfill_routine_template_names.js` (not yet implemented — field added March 2026)
+- **Backfill:** `scripts/backfill_routine_template_names.js` (idempotent, supports `--dry-run`)
 
 ### Staleness Tradeoffs
 - **Exercise names:** No propagation on edit (manual catalog updates are rare, agents regenerate plans)
