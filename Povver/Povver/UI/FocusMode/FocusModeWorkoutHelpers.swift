@@ -19,7 +19,8 @@ struct CompletedWorkoutRef: Identifiable {
     let id: String
 }
 
-/// Wrapper that fetches the archived workout from Firestore and presents WorkoutSummaryContent.
+/// Wrapper that fetches the archived workout from Firestore and presents a sequenced
+/// completion summary with coach presence, core metrics, and the full WorkoutSummaryContent.
 /// The doc is locally cached (just written by completeActiveWorkout), so fetch is near-instant.
 struct WorkoutCompletionSummary: View {
     let workoutId: String
@@ -27,6 +28,14 @@ struct WorkoutCompletionSummary: View {
 
     @State private var workout: Workout?
     @State private var isLoading = true
+    @State private var revealPhase = 0
+
+    private var weightUnit: WeightUnit { UserService.shared.weightUnit }
+
+    private var durationMinutes: Int {
+        guard let w = workout else { return 0 }
+        return Int(w.endTime.timeIntervalSince(w.startTime) / 60)
+    }
 
     var body: some View {
         NavigationStack {
@@ -36,26 +45,79 @@ struct WorkoutCompletionSummary: View {
                         ProgressView()
                             .scaleEffect(1.2)
                         Text("Loading summary...")
-                            .font(.system(size: 15))
+                            .textStyle(.secondary)
                             .foregroundColor(Color.textSecondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if let workout = workout {
-                    WorkoutSummaryContent(workout: workout)
+                    ScrollView {
+                        VStack(spacing: Space.xl) {
+                            // Phase 0: Coach presence indicator
+                            CoachPresenceIndicator(size: 48)
+                                .opacity(revealPhase >= 0 ? 1 : 0)
+                                .offset(y: revealPhase >= 0 ? 0 : 8)
+                                .animation(MotionToken.gentle, value: revealPhase)
+                                .padding(.top, Space.xl)
+
+                            // Phase 1: Headline + workout name
+                            VStack(spacing: Space.xs) {
+                                Text("Session Complete")
+                                    .textStyle(.screenTitle)
+                                    .foregroundColor(Color.textPrimary)
+                                Text(workout.displayName)
+                                    .textStyle(.secondary)
+                                    .foregroundColor(Color.textSecondary)
+                            }
+                            .opacity(revealPhase >= 1 ? 1 : 0)
+                            .offset(y: revealPhase >= 1 ? 0 : 8)
+                            .animation(MotionToken.gentle, value: revealPhase)
+
+                            // Phase 2: Core metrics row
+                            HStack(spacing: 0) {
+                                metricBlock(
+                                    value: "\(durationMinutes)",
+                                    label: "MIN"
+                                )
+                                metricBlock(
+                                    value: formatVolume(workout.analytics.totalWeight),
+                                    label: "VOLUME (\(weightUnit.label))"
+                                )
+                                metricBlock(
+                                    value: "\(workout.analytics.totalSets)",
+                                    label: "SETS"
+                                )
+                            }
+                            .padding(.horizontal, Space.lg)
+                            .opacity(revealPhase >= 2 ? 1 : 0)
+                            .offset(y: revealPhase >= 2 ? 0 : 8)
+                            .animation(MotionToken.gentle, value: revealPhase)
+
+                            // Phase 3: Exercise count summary
+                            Text("\(workout.exercises.count) exercise\(workout.exercises.count == 1 ? "" : "s") completed")
+                                .textStyle(.secondary)
+                                .foregroundColor(Color.textSecondary)
+                                .opacity(revealPhase >= 3 ? 1 : 0)
+                                .offset(y: revealPhase >= 3 ? 0 : 8)
+                                .animation(MotionToken.gentle, value: revealPhase)
+
+                            // Phase 5: Full workout detail (reuse existing component)
+                            WorkoutSummaryContent(workout: workout)
+                                .opacity(revealPhase >= 5 ? 1 : 0)
+                                .offset(y: revealPhase >= 5 ? 0 : 8)
+                                .animation(MotionToken.gentle, value: revealPhase)
+                        }
+                    }
                 } else {
                     VStack(spacing: Space.md) {
-                        Image(systemName: "checkmark.circle")
-                            .font(.system(size: 48))
-                            .foregroundColor(Color.accent)
+                        CoachPresenceIndicator(size: 48)
                         Text("Workout Complete")
-                            .font(.system(size: 17, weight: .semibold))
+                            .textStyle(.screenTitle)
                             .foregroundColor(Color.textPrimary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .background(Color.bg)
-            .navigationTitle("Summary")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -63,6 +125,8 @@ struct WorkoutCompletionSummary: View {
                         onDismiss()
                     }
                     .fontWeight(.semibold)
+                    .opacity(revealPhase >= 4 ? 1 : 0)
+                    .animation(MotionToken.gentle, value: revealPhase)
                 }
             }
         }
@@ -70,6 +134,33 @@ struct WorkoutCompletionSummary: View {
             await loadWorkout()
         }
     }
+
+    // MARK: - Metric Block
+
+    private func metricBlock(value: String, label: String) -> some View {
+        VStack(spacing: Space.xxs) {
+            Text(value)
+                .textStyle(.metricL)
+                .foregroundColor(Color.textPrimary)
+            Text(label)
+                .textStyle(.micro)
+                .foregroundColor(Color.textSecondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Helpers
+
+    private func formatVolume(_ weight: Double) -> String {
+        let displayed = WeightFormatter.display(weight, unit: weightUnit)
+        let rounded = WeightFormatter.roundForDisplay(displayed)
+        if rounded == rounded.rounded() {
+            return "\(Int(rounded))"
+        }
+        return String(format: "%.1f", rounded)
+    }
+
+    // MARK: - Data Loading
 
     private func loadWorkout() async {
         guard let userId = AuthService.shared.currentUser?.uid else {
@@ -82,6 +173,27 @@ struct WorkoutCompletionSummary: View {
             print("[WorkoutCompletionSummary] Failed to load workout: \(error)")
         }
         isLoading = false
+
+        guard let w = workout else { return }
+
+        // Haptic feedback for workout completion
+        HapticManager.workoutCompleted()
+
+        // Set post-workout flag so Coach tab shows post-workout state
+        CoachTabViewModel.setPostWorkoutFlag(
+            workoutId: w.id,
+            name: w.displayName,
+            exerciseCount: w.exercises.count,
+            setCount: w.analytics.totalSets,
+            totalVolume: w.analytics.totalWeight
+        )
+
+        // Sequenced reveal: stagger each phase for a polished entrance
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { revealPhase = 1 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { revealPhase = 2 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { revealPhase = 3 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { revealPhase = 4 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { revealPhase = 5 }
     }
 }
 
