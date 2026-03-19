@@ -280,6 +280,12 @@ async function patchRoutine(db, userId, routineId, patch) {
     // Validate all templates exist and collect names
     if (sanitizedPatch.template_ids.length === 0) {
       sanitizedPatch.template_names = {};
+      // Clear dangling cursor when all templates removed
+      if (current.last_completed_template_id) {
+        sanitizedPatch.last_completed_template_id = null;
+        sanitizedPatch.last_completed_at = null;
+        patchedFields.push('last_completed_template_id', 'last_completed_at');
+      }
     } else {
       const templatesCol = db.collection('users').doc(userId).collection('templates');
       const templateRefs = sanitizedPatch.template_ids.map(tid => templatesCol.doc(tid));

@@ -414,7 +414,7 @@ async function deleteTemplate(db, userId, templateId) {
 
   // Clean up routine references
   // READ BOTH fields for backward compat: template_ids (canonical) and templateIds (legacy)
-  const routinesSnapshot = await db.collection('users').doc(userId).collection('routines').get();
+  const routinesSnapshot = await db.collection('users').doc(userId).collection('routines').limit(100).get();
   const routines = routinesSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 
   const routinesToUpdate = routines.filter(routine => {
@@ -533,6 +533,19 @@ async function createTemplateFromPlan(db, userId, params) {
   }
 
   let templateId;
+
+  // Resolve missing exercise names from catalog
+  const idsToResolve = exercises
+    .filter(ex => !ex.name && ex.exercise_id)
+    .map(ex => ex.exercise_id);
+  if (idsToResolve.length > 0) {
+    const nameMap = await resolveExerciseNames(db, idsToResolve);
+    exercises.forEach(ex => {
+      if (!ex.name && nameMap[ex.exercise_id]) {
+        ex.name = nameMap[ex.exercise_id];
+      }
+    });
+  }
 
   if (mode === 'create') {
     const templateData = {

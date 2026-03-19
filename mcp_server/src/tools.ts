@@ -120,7 +120,7 @@ export function registerTools(server: McpServer, userId: string) {
     limit: z.number().default(50).describe('Max results')
   }, async ({ exercise_name, muscle_group, muscle, exercise_ids, limit }) => {
     const target: Record<string, any> = {};
-    if (exercise_name) target.exercise = exercise_name;
+    if (exercise_name) target.exercise_name = exercise_name;
     if (muscle_group) target.muscle_group = muscle_group;
     if (muscle) target.muscle = muscle;
     if (exercise_ids) target.exercise_ids = exercise_ids;
