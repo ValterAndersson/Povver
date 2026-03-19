@@ -199,7 +199,7 @@ struct FinishWorkoutSheet: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: 52)
                         .background(canComplete ? Color.accent : Color.accent.opacity(0.4))
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                     }
                     .buttonStyle(PlainButtonStyle())
                     .disabled(isLoading || !canComplete)
@@ -218,7 +218,7 @@ struct FinishWorkoutSheet: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: 48)
                         .background(Color.destructive.opacity(0.08))
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                     }
                     .buttonStyle(PlainButtonStyle())
                     .disabled(isLoading)
@@ -671,9 +671,9 @@ struct WorkoutHero: View {
         }
         .padding(Space.lg)
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.card))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusCard))
         .overlay(
-            RoundedRectangle(cornerRadius: CornerRadiusToken.card)
+            RoundedRectangle(cornerRadius: CornerRadiusToken.radiusCard)
                 .stroke(Color.separatorLine, lineWidth: StrokeWidthToken.hairline)
         )
     }
@@ -747,7 +747,7 @@ struct EmptyStateCard: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
                 .background(Color.accent)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
             }
             .buttonStyle(PlainButtonStyle())
             .padding(.horizontal, Space.md)
@@ -755,9 +755,9 @@ struct EmptyStateCard: View {
         }
         .padding(.vertical, Space.xl)
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.card))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusCard))
         .overlay(
-            RoundedRectangle(cornerRadius: CornerRadiusToken.card)
+            RoundedRectangle(cornerRadius: CornerRadiusToken.radiusCard)
                 .stroke(Color.separatorLine, lineWidth: StrokeWidthToken.hairline)
         )
     }
@@ -926,7 +926,7 @@ struct WorkoutBottomCTA: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: 56)
                     .background(Color.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
             }
             .buttonStyle(PlainButtonStyle())
             
@@ -1030,9 +1030,9 @@ struct ScopeSegmentedControl: View {
             scopeButton(.allWorking, label: "All", count: allCount)
         }
         .background(Color.surfaceElevated)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.small))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon))
         .overlay(
-            RoundedRectangle(cornerRadius: CornerRadiusToken.small)
+            RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon)
                 .stroke(Color.separatorLine, lineWidth: StrokeWidthToken.hairline)
         )
     }
@@ -1058,7 +1058,7 @@ struct ScopeSegmentedControl: View {
             .padding(.horizontal, Space.sm)
             .padding(.vertical, 6)
             .background(isSelected ? Color.accent : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.small - 2))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon - 2))
         }
         .buttonStyle(PlainButtonStyle())
     }
@@ -1106,9 +1106,9 @@ struct ExerciseReorderRow: View {
         .padding(.horizontal, Space.md)
         .padding(.vertical, Space.md)
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.card))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusCard))
         .overlay(
-            RoundedRectangle(cornerRadius: CornerRadiusToken.card)
+            RoundedRectangle(cornerRadius: CornerRadiusToken.radiusCard)
                 .stroke(Color.separatorLine, lineWidth: StrokeWidthToken.hairline)
         )
         // Elevated appearance to signal "draggable"

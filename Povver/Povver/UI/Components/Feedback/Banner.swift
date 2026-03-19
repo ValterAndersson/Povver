@@ -22,7 +22,7 @@ public struct Banner: View {
         }
         .padding(InsetsToken.symmetric(vertical: Space.md, horizontal: Space.lg))
         .background(background)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.large, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusCard, style: .continuous))
         .shadowStyle(ShadowsToken.level1)
     }
 

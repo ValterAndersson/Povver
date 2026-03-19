@@ -14,9 +14,9 @@ public struct InlineError: View {
         .padding(.vertical, Space.xs)
         .padding(.horizontal, Space.sm)
         .background(Color.destructive.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.small, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: CornerRadiusToken.small, style: .continuous)
+            RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon, style: .continuous)
                 .stroke(Color.destructive.opacity(0.25), lineWidth: StrokeWidthToken.hairline)
         )
     }

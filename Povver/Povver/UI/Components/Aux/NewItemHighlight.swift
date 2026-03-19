@@ -6,7 +6,7 @@ public struct NewItemHighlight: ViewModifier {
     public func body(content: Content) -> some View {
         content
             .overlay(
-                RoundedRectangle(cornerRadius: CornerRadiusToken.medium, style: .continuous)
+                RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous)
                     .fill(Color.accentMuted)
                     .opacity(show ? 0.35 : 0)
             )

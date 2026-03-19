@@ -30,7 +30,7 @@ struct MoreView: View {
                     }
                     .buttonStyle(PlainButtonStyle())
                     .background(Color.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                     .padding(.horizontal, Space.lg)
                 }
 
@@ -107,7 +107,7 @@ struct MoreView: View {
             }
             .padding(Space.lg)
             .background(Color.surface)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         }
         .buttonStyle(PlainButtonStyle())
         .padding(.horizontal, Space.lg)
@@ -139,7 +139,7 @@ struct MoreView: View {
             .buttonStyle(PlainButtonStyle())
         }
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         .padding(.horizontal, Space.lg)
     }
 
@@ -190,7 +190,7 @@ struct MoreView: View {
             .buttonStyle(PlainButtonStyle())
         }
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         .padding(.horizontal, Space.lg)
     }
 
@@ -213,7 +213,7 @@ struct MoreView: View {
             }
             .padding(Space.md)
             .background(Color.surface)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         }
         .buttonStyle(PlainButtonStyle())
         .padding(.horizontal, Space.lg)

@@ -81,7 +81,7 @@ struct AgentMessageCard: View {
         }
         .padding(Space.md)
         .background(Color.surfaceElevated)
-        .cornerRadius(CornerRadiusToken.medium)
+        .cornerRadius(CornerRadiusToken.radiusControl)
     }
     
     private var iconName: String {

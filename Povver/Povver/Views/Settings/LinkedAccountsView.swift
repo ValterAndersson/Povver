@@ -57,7 +57,7 @@ struct LinkedAccountsView: View {
                     }
                 }
                 .background(Color.surface)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                 .padding(.horizontal, Space.lg)
 
                 if linkedProviders.count <= 1 {

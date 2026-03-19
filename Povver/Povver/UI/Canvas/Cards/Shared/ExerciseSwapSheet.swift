@@ -79,7 +79,7 @@ public struct ExerciseSwapSheet: View {
             }
             .padding(Space.md)
             .background(Color.surface)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         }
         .padding(.horizontal, Space.lg)
         .padding(.vertical, Space.md)
@@ -139,7 +139,7 @@ public struct ExerciseSwapSheet: View {
             }
             .padding(Space.md)
             .background(Color.surface)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         }
         .buttonStyle(PlainButtonStyle())
     }
@@ -185,7 +185,7 @@ public struct ExerciseSwapSheet: View {
             }
             .padding(Space.sm)
             .background(Color.surface)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
             .padding(.horizontal, Space.lg)
             .padding(.bottom, Space.md)
             

@@ -35,7 +35,7 @@ struct FloatingWorkoutBanner: View {
             .padding(.horizontal, Space.md)
             .padding(.vertical, 12)
             .background(Color.accent)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
             .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
         }
         .buttonStyle(PlainButtonStyle())

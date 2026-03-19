@@ -73,7 +73,7 @@ struct SubscriptionView: View {
         .padding(Space.xl)
         .frame(maxWidth: .infinity)
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.large))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusCard))
     }
 
     private var statusDescription: some View {
@@ -115,7 +115,7 @@ struct SubscriptionView: View {
             .padding(.horizontal, Space.xl)
             .padding(.vertical, Space.md)
             .background(Color.accent)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         }
         .padding(.top, Space.sm)
     }
@@ -153,7 +153,7 @@ struct SubscriptionView: View {
             }
             .padding(Space.lg)
             .background(Color.surface)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         }
     }
 
@@ -192,7 +192,7 @@ struct SubscriptionView: View {
                 restoreButton
             }
             .background(Color.surface)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         }
     }
 

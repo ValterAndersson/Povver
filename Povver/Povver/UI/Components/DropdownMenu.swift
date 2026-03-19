@@ -67,10 +67,10 @@ public struct DropdownMenu: View {
             }
         }
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
         .overlay(
-            RoundedRectangle(cornerRadius: CornerRadiusToken.medium)
+            RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl)
                 .stroke(Color.separatorLine.opacity(0.3), lineWidth: 0.5)
         )
     }

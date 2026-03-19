@@ -194,7 +194,7 @@ struct FocusModeExerciseSearch: View {
                 .padding(.horizontal, Space.md)
                 .padding(.vertical, 12)
                 .background(Color.surface)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                 
                 // Filter button
                 Button {
@@ -214,9 +214,9 @@ struct FocusModeExerciseSearch: View {
                     .padding(.horizontal, Space.md)
                     .padding(.vertical, 12)
                     .background(filters.isEmpty ? Color.surface : Color.accent.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                     .overlay(
-                        RoundedRectangle(cornerRadius: CornerRadiusToken.medium)
+                        RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl)
                             .stroke(filters.isEmpty ? Color.clear : Color.accent.opacity(0.3), lineWidth: 1)
                     )
                 }
@@ -519,7 +519,7 @@ struct ExerciseFilterSheet: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: 50)
                     .background(Color.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                 }
                 .padding(.horizontal, Space.lg)
                 .padding(.bottom, Space.md)

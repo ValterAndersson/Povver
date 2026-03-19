@@ -182,9 +182,9 @@ public struct ExerciseRowView: View {
             )
         }
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         .overlay(
-            RoundedRectangle(cornerRadius: CornerRadiusToken.medium)
+            RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl)
                 .stroke(Color.separatorLine, lineWidth: 0.5)
         )
         .padding(.horizontal, Space.xs)

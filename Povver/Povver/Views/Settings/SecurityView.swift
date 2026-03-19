@@ -49,7 +49,7 @@ struct SecurityView: View {
                     .buttonStyle(PlainButtonStyle())
                 }
                 .background(Color.surface)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                 .padding(.horizontal, Space.lg)
 
                 Spacer(minLength: Space.xxl)

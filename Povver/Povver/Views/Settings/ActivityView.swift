@@ -199,9 +199,9 @@ struct ActivityView: View {
         }
         .padding(Space.md)
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.small, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: CornerRadiusToken.small, style: .continuous)
+            RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon, style: .continuous)
                 .strokeBorder(Color.separatorLine, lineWidth: StrokeWidthToken.hairline)
         )
         .padding(.horizontal, Space.lg)

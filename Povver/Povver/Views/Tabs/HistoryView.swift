@@ -594,7 +594,7 @@ private struct WeeklyWorkoutChart: View {
                     y: .value("Workouts", item.bucket.count)
                 )
                 .foregroundStyle(item.bucket.isCurrent ? Color.accent : Color.accent.opacity(0.35))
-                .cornerRadius(CornerRadiusToken.small / 2)
+                .cornerRadius(CornerRadiusToken.radiusIcon / 2)
                 .annotation(position: .top, spacing: Space.xs) {
                     if item.bucket.isCurrent && item.bucket.count > 0 {
                         Text("\(item.bucket.count)")
@@ -629,9 +629,9 @@ private struct WeeklyWorkoutChart: View {
         .padding(.horizontal, Space.lg)
         .padding(.vertical, Space.md)
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: CornerRadiusToken.medium, style: .continuous)
+            RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous)
                 .stroke(Color.separatorLine, lineWidth: StrokeWidthToken.hairline)
         )
     }

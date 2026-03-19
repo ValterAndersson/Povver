@@ -156,7 +156,7 @@ struct ProfileEditView: View {
             }
         }
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         .padding(.horizontal, Space.lg)
     }
 
@@ -208,7 +208,7 @@ struct ProfileEditView: View {
             }
         }
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         .padding(.horizontal, Space.lg)
     }
 

@@ -40,10 +40,10 @@ public struct PovverTextField: View {
             .padding(.horizontal, Space.md)
             .background(Color.surfaceElevated)
             .overlay(
-                RoundedRectangle(cornerRadius: CornerRadiusToken.medium, style: .continuous)
+                RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous)
                     .stroke(validationBorderColor(), lineWidth: StrokeWidthToken.thick)
             )
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous))
 
             if let message = validation.message {
                 PovverText(message, style: .footnote, color: validation.color)

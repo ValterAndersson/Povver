@@ -27,7 +27,7 @@ public struct ClarifyQuestionsCard: View {
                                     .textInputAutocapitalization(.sentences)
                                     .padding(InsetsToken.symmetric(vertical: Space.sm, horizontal: Space.md))
                                     .background(Color.surfaceElevated)
-                                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium, style: .continuous))
+                                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous))
                                     
                                 } else if let opts = q.options {
                                     // List selection - clicking submits immediately for single_choice
@@ -59,7 +59,7 @@ public struct ClarifyQuestionsCard: View {
                                                 }
                                                 .padding(InsetsToken.symmetric(vertical: Space.sm, horizontal: Space.md))
                                                 .background(isOptionSelected(opt, questionId: q.id) ? Color.accent : Color.surfaceElevated)
-                                                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                                                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                                             }
                                             .buttonStyle(PlainButtonStyle())
                                         }
@@ -79,7 +79,7 @@ public struct ClarifyQuestionsCard: View {
                                             .padding(InsetsToken.symmetric(vertical: Space.sm, horizontal: Space.md))
                                             .background(Color.green)
                                             .foregroundColor(.textInverse)
-                                            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                                            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                                         }
                                         .buttonStyle(PlainButtonStyle())
                                         
@@ -95,7 +95,7 @@ public struct ClarifyQuestionsCard: View {
                                             .padding(InsetsToken.symmetric(vertical: Space.sm, horizontal: Space.md))
                                             .background(Color.red)
                                             .foregroundColor(.textInverse)
-                                            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                                            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                                         }
                                         .buttonStyle(PlainButtonStyle())
                                     }
@@ -117,7 +117,7 @@ public struct ClarifyQuestionsCard: View {
                                 .padding(InsetsToken.symmetric(vertical: Space.sm, horizontal: Space.lg))
                                 .background(Color.surfaceElevated)
                                 .foregroundColor(Color.textSecondary)
-                                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                             }
                             .buttonStyle(PlainButtonStyle())
                         }
@@ -130,7 +130,7 @@ public struct ClarifyQuestionsCard: View {
                             .padding(InsetsToken.symmetric(vertical: Space.sm, horizontal: Space.lg))
                             .background(Color.accent)
                             .foregroundColor(.textInverse)
-                            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                         }
                         .buttonStyle(PlainButtonStyle())
                     }

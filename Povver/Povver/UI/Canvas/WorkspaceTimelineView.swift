@@ -534,9 +534,9 @@ struct WorkspaceTimelineView: View {
         }
         .padding(Space.md)
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: CornerRadiusToken.medium, style: .continuous)
+            RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous)
                 .stroke(Color.accent.opacity(0.3), lineWidth: 1)
         )
         .padding(.vertical, Space.sm)

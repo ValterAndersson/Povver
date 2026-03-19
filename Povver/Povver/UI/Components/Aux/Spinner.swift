@@ -25,7 +25,7 @@ public extension View {
 public struct SkeletonBlock: View {
     private let height: CGFloat
     private let corner: CGFloat
-    public init(height: CGFloat = 16, corner: CGFloat = CornerRadiusToken.small) {
+    public init(height: CGFloat = 16, corner: CGFloat = CornerRadiusToken.radiusIcon) {
         self.height = height
         self.corner = corner
     }

@@ -36,7 +36,7 @@ public struct RefineSheet: View {
                     .textInputAutocapitalization(.sentences)
                     .padding(InsetsToken.symmetric(vertical: Space.sm, horizontal: Space.md))
                     .background(Color.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous))
                 
                 Spacer()
             }

@@ -89,7 +89,7 @@ private struct LibraryRow: View {
                 .foregroundColor(Color.textSecondary)
                 .frame(width: 44, height: 44)
                 .background(Color.surfaceElevated)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.small))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon))
             
             // Text
             VStack(alignment: .leading, spacing: 2) {
@@ -111,9 +111,9 @@ private struct LibraryRow: View {
         }
         .padding(Space.md)
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         .overlay(
-            RoundedRectangle(cornerRadius: CornerRadiusToken.medium)
+            RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl)
                 .stroke(Color.separatorLine, lineWidth: StrokeWidthToken.hairline)
         )
     }
@@ -472,7 +472,7 @@ struct ExercisesListView: View {
                 .padding(.horizontal, Space.md)
                 .padding(.vertical, 12)
                 .background(Color.surface)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                 
                 // Filter button
                 Button {
@@ -492,9 +492,9 @@ struct ExercisesListView: View {
                     .padding(.horizontal, Space.md)
                     .padding(.vertical, 12)
                     .background(filters.isEmpty ? Color.surface : Color.accent.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                     .overlay(
-                        RoundedRectangle(cornerRadius: CornerRadiusToken.medium)
+                        RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl)
                             .stroke(filters.isEmpty ? Color.clear : Color.accent.opacity(0.3), lineWidth: 1)
                     )
                 }
@@ -897,7 +897,7 @@ struct TemplateDetailView: View {
                     .padding(.horizontal, Space.sm)
                     .padding(.vertical, Space.xs)
                     .background(Color.surfaceElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.small))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon))
 
                 // Editable description
                 TextField("Description (optional)", text: $editingDescription)
@@ -907,7 +907,7 @@ struct TemplateDetailView: View {
                     .padding(.horizontal, Space.sm)
                     .padding(.vertical, Space.xs)
                     .background(Color.surfaceElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.small))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon))
             } else {
                 HStack(spacing: Space.lg) {
                     templateStat(value: "\(planExercises.count)", label: "Exercises")
@@ -1425,7 +1425,7 @@ struct RoutineDetailView: View {
                     .padding(.horizontal, Space.sm)
                     .padding(.vertical, Space.xs)
                     .background(Color.surfaceElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.small))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon))
 
                 TextField("Description (optional)", text: $editingDescription)
                     .font(.system(size: 14))
@@ -1434,7 +1434,7 @@ struct RoutineDetailView: View {
                     .padding(.horizontal, Space.sm)
                     .padding(.vertical, Space.xs)
                     .background(Color.surfaceElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.small))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon))
 
                 HStack {
                     Text("Frequency")

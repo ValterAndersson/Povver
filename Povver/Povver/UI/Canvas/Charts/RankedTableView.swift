@@ -31,9 +31,9 @@ public struct RankedTableView: View {
             }
         }
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: CornerRadiusToken.medium, style: .continuous)
+            RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous)
                 .stroke(Color.separatorLine, lineWidth: StrokeWidthToken.hairline)
         )
     }
@@ -146,9 +146,9 @@ public struct RankedTableView: View {
     
     private var emptyState: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: CornerRadiusToken.medium, style: .continuous)
+            RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous)
                 .fill(Color.surface)
-            RoundedRectangle(cornerRadius: CornerRadiusToken.medium, style: .continuous)
+            RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous)
                 .stroke(Color.separatorLine, lineWidth: StrokeWidthToken.hairline)
             Text(spec.emptyState ?? "No data available")
                 .font(TypographyToken.callout)

@@ -634,7 +634,7 @@ struct FocusModeWorkoutScreen: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(Color.accent)
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.small))
+                        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon))
                 } else {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 14, weight: .medium))
@@ -644,9 +644,9 @@ struct FocusModeWorkoutScreen: View {
             .padding(.horizontal, Space.lg)
             .padding(.vertical, 16)
             .background(Color.surface)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
             .overlay(
-                RoundedRectangle(cornerRadius: CornerRadiusToken.medium)
+                RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl)
                     .stroke(Color.separatorLine, lineWidth: 0.5)
             )
         }
@@ -1130,7 +1130,7 @@ struct FocusModeWorkoutScreen: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
             .background(Color.accentMuted)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         }
         .buttonStyle(PlainButtonStyle())
     }
@@ -1151,7 +1151,7 @@ struct FocusModeWorkoutScreen: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
                     .background(Color.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
             }
             .buttonStyle(PlainButtonStyle())
             
@@ -1185,7 +1185,7 @@ struct FocusModeWorkoutScreen: View {
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
                     .background(Color.accent.opacity(0.4))
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
             }
             .buttonStyle(PlainButtonStyle())
             .disabled(true)

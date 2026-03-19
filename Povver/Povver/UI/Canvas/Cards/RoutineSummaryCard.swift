@@ -75,7 +75,7 @@ public struct RoutineSummaryCard: View {
             }
         }
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.large))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusCard))
         .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 2)
         .confirmationDialog("Routine Actions", isPresented: $showingActionsSheet, titleVisibility: .hidden) {
             routineActionsSheet
@@ -482,7 +482,7 @@ public struct RoutineSummaryCard: View {
                 .padding(.vertical, 12)
                 .foregroundColor(Color.textSecondary)
                 .background(Color.surfaceElevated)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
             }
             .buttonStyle(PlainButtonStyle())
             
@@ -505,7 +505,7 @@ public struct RoutineSummaryCard: View {
                         .padding(.vertical, 12)
                         .foregroundColor(Color.textSecondary)
                         .background(Color.surfaceElevated)
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                 }
                 .buttonStyle(PlainButtonStyle())
             }
@@ -530,7 +530,7 @@ public struct RoutineSummaryCard: View {
                 .padding(.vertical, 12)
                 .background(routineData.isUpdate ? Color.warning : Color.accent)
                 .foregroundColor(.textInverse)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
             }
             .buttonStyle(PlainButtonStyle())
         }

@@ -78,7 +78,7 @@ struct SetTable: View {
             }
         }
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.small))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon))
     }
     
     // MARK: - Header Row

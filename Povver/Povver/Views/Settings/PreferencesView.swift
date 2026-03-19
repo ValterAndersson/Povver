@@ -40,7 +40,7 @@ struct PreferencesView: View {
                     )
                 }
                 .background(Color.surface)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                 .padding(.horizontal, Space.lg)
 
                 if let errorMessage = errorMessage {
@@ -110,7 +110,7 @@ struct PreferencesView: View {
                     .padding(Space.md)
                 }
                 .background(Color.surface)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                 .padding(.horizontal, Space.lg)
 
                 Spacer(minLength: Space.xxl)

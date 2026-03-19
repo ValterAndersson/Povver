@@ -84,7 +84,7 @@ struct ConnectedAppsView: View {
             }
             .padding(Space.md)
             .background(Color.surface)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
             .padding(.horizontal, Space.lg)
         }
     }
@@ -151,7 +151,7 @@ struct ConnectedAppsView: View {
                 .disabled(apiKeys.count >= 5)
             }
             .background(Color.surface)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
             .padding(.horizontal, Space.lg)
         }
     }
@@ -230,7 +230,7 @@ struct ConnectedAppsView: View {
                         }
                         .padding(Space.md)
                         .background(Color.bg)
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.small))
+                        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon))
                     }
                     .padding(.horizontal, Space.lg)
                 } else {
@@ -262,7 +262,7 @@ struct ConnectedAppsView: View {
                         .padding(Space.md)
                         .background(Color.accent)
                         .foregroundColor(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                     }
                     .disabled(isGenerating)
                     .padding(.horizontal, Space.lg)

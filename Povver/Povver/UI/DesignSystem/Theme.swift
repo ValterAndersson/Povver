@@ -2,9 +2,9 @@ import SwiftUI
 
 /// Povver theme container to allow future theming overrides via Environment.
 public struct PovverTheme: Equatable {
-    public var cornerRadiusSmall: CGFloat = CornerRadiusToken.small
-    public var cornerRadiusMedium: CGFloat = CornerRadiusToken.medium
-    public var cornerRadiusLarge: CGFloat = CornerRadiusToken.large
+    public var cornerRadiusSmall: CGFloat = CornerRadiusToken.radiusIcon
+    public var cornerRadiusMedium: CGFloat = CornerRadiusToken.radiusControl
+    public var cornerRadiusLarge: CGFloat = CornerRadiusToken.radiusCard
     public var buttonHeight: CGFloat = 48
     public var hitTargetMin: CGFloat = 44
     public var stackSpacing: CGFloat = LayoutToken.stackSpacing

@@ -107,7 +107,7 @@ struct RecommendationCardView: View {
         .padding(Space.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.bg)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.small, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon, style: .continuous))
     }
 
     private func changeRow(_ change: RecommendationChange) -> some View {

@@ -29,12 +29,12 @@ public struct VisualCard: View {
 
     private var skeleton: some View {
         VStack(alignment: .leading, spacing: Space.sm) {
-            SkeletonBlock(height: 160, corner: CornerRadiusToken.medium)
+            SkeletonBlock(height: 160, corner: CornerRadiusToken.radiusControl)
         }
     }
 
     private var emptyState: some View {
-        RoundedRectangle(cornerRadius: CornerRadiusToken.medium, style: .continuous)
+        RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous)
             .stroke(Color.separatorLine, lineWidth: StrokeWidthToken.hairline)
             .background(Color.surface)
             .frame(minHeight: 160)
@@ -63,7 +63,7 @@ public struct VisualCard: View {
                 PovverText("[Visualization]", style: .callout, color: Color.textSecondary, align: .center)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             )
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous))
     }
 }
 

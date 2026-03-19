@@ -220,9 +220,9 @@ struct ExercisePerformanceSheet: View {
         }
         .padding(Space.md)
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         .overlay(
-            RoundedRectangle(cornerRadius: CornerRadiusToken.medium)
+            RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl)
                 .stroke(Color.separatorLine, lineWidth: StrokeWidthToken.hairline)
         )
     }
@@ -281,9 +281,9 @@ struct ExercisePerformanceSheet: View {
                 }
             }
             .background(Color.surface)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.small))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon))
             .overlay(
-                RoundedRectangle(cornerRadius: CornerRadiusToken.small)
+                RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon)
                     .stroke(Color.separatorLine, lineWidth: StrokeWidthToken.hairline)
             )
         }

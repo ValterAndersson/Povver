@@ -44,9 +44,9 @@ struct ExerciseSection<Content: View>: View {
                     .padding(.bottom, contentBottomPadding)
             }
             .background(Color.surface)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
             .overlay(
-                RoundedRectangle(cornerRadius: CornerRadiusToken.medium)
+                RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl)
                     .stroke(Color.separatorLine, lineWidth: 0.5)
             )
             

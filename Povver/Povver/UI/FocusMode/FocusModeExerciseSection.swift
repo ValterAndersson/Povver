@@ -40,7 +40,7 @@ struct FocusModeExerciseSection: View {
             )
         }
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         .padding(.top, Space.md)
     }
 

@@ -91,7 +91,7 @@ struct PaywallView: View {
         }
         .padding(Space.lg)
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
     }
 
     private func featureRow(icon: String, title: String, description: String) -> some View {
@@ -155,7 +155,7 @@ struct PaywallView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Space.md)
                         .background(Color.accent)
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
 
                     Text("Then \(product.displayPrice)/month")
                         .font(.system(size: 13))
@@ -167,7 +167,7 @@ struct PaywallView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Space.md)
                         .background(Color.accent)
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
 
                     Text("\(product.displayPrice)/month")
                         .font(.system(size: 13))
@@ -176,9 +176,9 @@ struct PaywallView: View {
             }
             .padding(Space.lg)
             .background(Color.surface)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
             .overlay(
-                RoundedRectangle(cornerRadius: CornerRadiusToken.medium)
+                RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl)
                     .strokeBorder(Color.accentStroke, lineWidth: 2)
             )
         }

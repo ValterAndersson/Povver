@@ -27,9 +27,9 @@ public struct VisualizationCard: View {
         }
         .padding(Space.md)
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.large, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusCard, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: CornerRadiusToken.large, style: .continuous)
+            RoundedRectangle(cornerRadius: CornerRadiusToken.radiusCard, style: .continuous)
                 .stroke(Color.separatorLine, lineWidth: StrokeWidthToken.hairline)
         )
     }
@@ -162,7 +162,7 @@ public struct VisualizationCard: View {
             .padding(.vertical, Space.xs)
             .background(actionBackground(style: action.style))
             .foregroundStyle(actionForeground(style: action.style))
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.small))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon))
         }
     }
     

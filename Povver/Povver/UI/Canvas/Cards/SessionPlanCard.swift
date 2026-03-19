@@ -92,7 +92,7 @@ public struct SessionPlanCard: View {
         }
         .padding(Space.md)
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.large))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusCard))
         .shadow(color: Color.black.opacity(0.08), radius: 8, x: 0, y: 2)
         .onAppear {
             if case .sessionPlan(let exercises) = model.data {
@@ -289,7 +289,7 @@ public struct SessionPlanCard: View {
                 .padding(.vertical, 12)
                 .foregroundColor(Color.accent)
                 .background(Color.accent.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
             }
             .buttonStyle(PlainButtonStyle())
             
@@ -308,7 +308,7 @@ public struct SessionPlanCard: View {
                 .padding(.vertical, 12)
                 .background(Color.accent)
                 .foregroundColor(.textInverse)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
             }
             .buttonStyle(PlainButtonStyle())
         }

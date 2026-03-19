@@ -90,12 +90,6 @@ public enum Space {
 }
 
 public enum CornerRadiusToken {
-    public static let small: CGFloat = 8
-    public static let medium: CGFloat = 12
-    public static let large: CGFloat = 16
-    public static let card: CGFloat = 18
-    public static let pill: CGFloat = 999
-    
     // MARK: v1.1 Premium Visual System Radii
     /// Card container radius (16pt)
     public static let radiusCard: CGFloat = 16
@@ -103,6 +97,18 @@ public enum CornerRadiusToken {
     public static let radiusControl: CGFloat = 12
     /// Icon container radius (10pt)
     public static let radiusIcon: CGFloat = 10
+    /// Full pill / capsule shape
+    public static let pill: CGFloat = 999
+
+    // MARK: - Deprecated (use radiusIcon / radiusControl / radiusCard)
+    @available(*, deprecated, renamed: "radiusIcon")
+    public static let small: CGFloat = 8
+    @available(*, deprecated, renamed: "radiusControl")
+    public static let medium: CGFloat = 12
+    @available(*, deprecated, renamed: "radiusCard")
+    public static let large: CGFloat = 16
+    @available(*, deprecated, renamed: "radiusCard")
+    public static let card: CGFloat = 18
 }
 
 public enum StrokeWidthToken {

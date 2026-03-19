@@ -125,7 +125,7 @@ public struct WorkoutRow: View {
                 .padding(.horizontal, variant == .compact ? 0 : 8)
                 .padding(.vertical, variant == .compact ? 0 : 4)
                 .background(variant == .compact ? Color.clear : Color.accent.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.small))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon))
         }
     }
     
@@ -201,10 +201,10 @@ public struct WorkoutRow: View {
             }
         case .list:
             Color.surface
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         case .editable:
             Color.surface
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         }
     }
 }

@@ -266,7 +266,7 @@ public struct ExerciseDetailSheet: View {
                             .padding(.vertical, 4)
                             .background(Color.accent.opacity(0.1))
                             .foregroundColor(Color.accent)
-                            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.small))
+                            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon))
                     }
                 }
             }
@@ -274,7 +274,7 @@ public struct ExerciseDetailSheet: View {
         .padding(Space.md)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.medium))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
     }
     
     private func musclesSection(_ ex: Exercise) -> some View {
@@ -321,7 +321,7 @@ public struct ExerciseDetailSheet: View {
         .padding(.vertical, 4)
         .background(isPrimary ? Color.accent.opacity(0.15) : Color.surfaceElevated)
         .foregroundColor(isPrimary ? Color.accent : Color.textPrimary)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.small))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon))
     }
     
     private func section<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
