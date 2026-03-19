@@ -400,6 +400,13 @@ async function deleteTemplate(db, userId, templateId) {
 
     const updateData = { template_ids: updatedTemplateIds };
 
+    // Remove from template_names map if it exists
+    if (routine.template_names && routine.template_names[templateId]) {
+      const updatedNames = { ...routine.template_names };
+      delete updatedNames[templateId];
+      updateData.template_names = updatedNames;
+    }
+
     if (routine.last_completed_template_id === templateId) {
       updateData.last_completed_template_id = null;
       updateData.last_completed_at = null;

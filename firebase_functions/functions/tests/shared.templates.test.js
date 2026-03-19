@@ -355,6 +355,46 @@ describe('deleteTemplate', () => {
 });
 
 // ---------------------------------------------------------------------------
+// deleteTemplate - template_names cleanup
+// ---------------------------------------------------------------------------
+
+describe('deleteTemplate - template_names cleanup', () => {
+  test('removes entry from template_names on affected routines', async () => {
+    const store = {
+      'users/u1/templates/t1': { name: 'Push Day', exercises: [] },
+      'users/u1/routines/r1': {
+        template_ids: ['t1', 't2'],
+        template_names: { t1: 'Push Day', t2: 'Pull Day' },
+      },
+    };
+    const db = createMockDb(store);
+
+    await deleteTemplate(db, 'u1', 't1');
+
+    const routine = store['users/u1/routines/r1'];
+    assert.deepEqual(routine.template_ids, ['t2']);
+    assert.deepEqual(routine.template_names, { t2: 'Pull Day' });
+  });
+
+  test('handles routines without template_names gracefully', async () => {
+    const store = {
+      'users/u1/templates/t1': { name: 'Push Day', exercises: [] },
+      'users/u1/routines/r1': {
+        template_ids: ['t1', 't2'],
+        // no template_names field (legacy routine)
+      },
+    };
+    const db = createMockDb(store);
+
+    await deleteTemplate(db, 'u1', 't1');
+
+    const routine = store['users/u1/routines/r1'];
+    assert.deepEqual(routine.template_ids, ['t2']);
+    assert.equal(routine.template_names, undefined);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // createTemplateFromPlan
 // ---------------------------------------------------------------------------
 
