@@ -576,6 +576,32 @@ return fail(res, 'NOT_FOUND', 'Resource not found', { details }, 404);
 
 ---
 
+## Data Access Patterns
+
+The shared business logic modules (`firebase_functions/functions/shared/`) provide a projection layer for different consumption tiers:
+
+**Orientation tier** — Agent/MCP context assembly (summary views):
+- `listWorkouts(db, userId, { view: "summary" })` → exercise names + set counts (~200-500 bytes/workout)
+- `listTemplates(db, userId, { view: "summary" })` → name + exercise_names array (~300 bytes/template)
+- `getPlanningContext(db, userId, { view: "compact" })` → user basics + routine summary + 10 workouts (~2KB total)
+
+**Inspection tier** — iOS app, detailed views (full documents):
+- Default behavior when `view` parameter is omitted
+- Includes all fields: per-set data, analytics, full metadata
+
+**Pipeline tier** — Background jobs (unbounded queries):
+- Training analyst, backfill scripts, Firestore triggers
+- Query collections directly, bypass projections
+
+**Denormalization** — Write-time resolution to avoid read fan-out:
+- Exercise names on template exercises (resolved from catalog at write time)
+- Template names on routine documents (`template_names` map, propagated on rename)
+- Staleness acceptable (exercise names immutable, template renames propagate actively)
+
+See `firebase_functions/functions/shared/ARCHITECTURE.md` for implementation details and consumer mapping.
+
+---
+
 ## Adding a New Field (Cross-Stack Checklist)
 
 When adding a new field (e.g., `routine.goal`):
