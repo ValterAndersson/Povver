@@ -28,9 +28,11 @@ const { formatValidationResponse } = require('../utils/validation-response');
  * @param {FirebaseFirestore.Firestore} db
  * @param {string} userId
  * @param {string} routineId
+ * @param {Object} [opts={}] - Options
+ * @param {boolean} [opts.include_templates] - When true, inline template summaries
  * @returns {Object} routine document with is_active flag
  */
-async function getRoutine(db, userId, routineId) {
+async function getRoutine(db, userId, routineId, opts = {}) {
   if (!routineId) {
     throw new ValidationError('Missing required parameters', ['routineId']);
   }
@@ -47,6 +49,33 @@ async function getRoutine(db, userId, routineId) {
   const routine = { id: routineSnap.id, ...routineSnap.data() };
   const activeRoutineId = userSnap.exists ? userSnap.data().activeRoutineId : null;
   routine.is_active = routine.id === activeRoutineId;
+
+  // Optional: include inline template summaries
+  if (opts.include_templates) {
+    const templateIds = routine.template_ids || [];
+    if (templateIds.length > 0) {
+      const templateDocs = await Promise.all(
+        templateIds.map(tid =>
+          db.collection('users').doc(userId).collection('templates').doc(tid).get()
+        )
+      );
+
+      routine.templates = templateDocs
+        .filter(d => d.exists)
+        .map((d, i) => {
+          const t = d.data();
+          return {
+            id: d.id,
+            name: t.name || 'Untitled',
+            position: i,
+            exercise_names: (t.exercises || []).map(ex => ex.name || ex.exercise_id || 'Unknown'),
+            exercise_count: (t.exercises || []).length,
+          };
+        });
+    } else {
+      routine.templates = [];
+    }
+  }
 
   return routine;
 }

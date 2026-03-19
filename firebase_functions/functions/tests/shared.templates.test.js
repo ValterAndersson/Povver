@@ -183,6 +183,51 @@ describe('listTemplates', () => {
 });
 
 // ---------------------------------------------------------------------------
+// listTemplates - view support
+// ---------------------------------------------------------------------------
+
+describe('listTemplates - view support', () => {
+  test('view=summary returns compact shape with exercise names', async () => {
+    const store = {
+      'users/u1/templates/t1': {
+        name: 'Push Day',
+        description: 'Chest and shoulders',
+        exercises: [
+          { exercise_id: 'bench', name: 'Bench Press', position: 0, sets: [{ reps: 8 }, { reps: 8 }] },
+          { exercise_id: 'ohp', name: 'Overhead Press', position: 1, sets: [{ reps: 10 }] },
+        ],
+        analytics: { total_volume: 5000 },
+        created_at: 'ts',
+      },
+    };
+    const db = createMockDb(store);
+
+    const result = await listTemplates(db, 'u1', { view: 'summary' });
+    assert.equal(result.items.length, 1);
+    const t = result.items[0];
+    assert.equal(t.name, 'Push Day');
+    assert.equal(t.exercise_count, 2);
+    assert.deepEqual(t.exercise_names, ['Bench Press', 'Overhead Press']);
+    // Should NOT have full exercise objects
+    assert.equal(t.exercises, undefined);
+    assert.equal(t.analytics, undefined);
+  });
+
+  test('default view returns full documents (backwards compatible)', async () => {
+    const store = {
+      'users/u1/templates/t1': {
+        name: 'Push Day',
+        exercises: [{ exercise_id: 'bench', sets: [{ reps: 8 }] }],
+      },
+    };
+    const db = createMockDb(store);
+
+    const result = await listTemplates(db, 'u1');
+    assert.ok(result.items[0].exercises, 'Default view should include exercises');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // createTemplate
 // ---------------------------------------------------------------------------
 

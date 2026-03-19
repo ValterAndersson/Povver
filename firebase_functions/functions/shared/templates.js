@@ -109,9 +109,21 @@ async function getTemplate(db, userId, templateId) {
  * @param {string} userId
  * @returns {Promise<{items: Object[], count: number}>}
  */
-async function listTemplates(db, userId) {
+async function listTemplates(db, userId, opts = {}) {
   const snapshot = await templatesCol(db, userId).limit(500).get();
   const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+  if (opts.view === 'summary') {
+    const summaries = items.map(t => ({
+      id: t.id,
+      name: t.name,
+      description: t.description || null,
+      exercise_count: (t.exercises || []).length,
+      exercise_names: (t.exercises || []).map(ex => ex.name || ex.exercise_id || 'Unknown'),
+    }));
+    return { items: summaries, count: summaries.length };
+  }
+
   return { items, count: items.length };
 }
 

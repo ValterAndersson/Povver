@@ -179,6 +179,35 @@ function computeListAnalytics(workouts) {
   return analytics;
 }
 
+/**
+ * Compact a workout to summary shape for agent consumption.
+ * Drops per-set data, keeps exercise names and counts.
+ */
+function summarizeWorkout(w) {
+  const exercises = (w.exercises || []).map(ex => ({
+    name: ex.name || null,
+    exercise_id: ex.exercise_id || null,
+    sets: (ex.sets || []).length,
+  }));
+
+  const startTime = w.start_time ? new Date(w.start_time) : null;
+  const endTime = w.end_time ? new Date(w.end_time) : null;
+  const durationMin = (startTime && endTime && !isNaN(startTime) && !isNaN(endTime))
+    ? Math.round((endTime - startTime) / (1000 * 60))
+    : null;
+
+  return {
+    id: w.id,
+    end_time: w.end_time,
+    name: w.name || null,
+    source_template_id: w.source_template_id || null,
+    exercises,
+    total_sets: w.analytics?.total_sets || null,
+    total_volume: w.analytics?.total_weight || null,
+    duration_min: durationMin,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Core CRUD
 // ---------------------------------------------------------------------------
@@ -263,7 +292,12 @@ async function listWorkouts(db, userId, opts = {}) {
 
   const analytics = computeListAnalytics(items);
 
-  return { items, analytics, hasMore, nextCursor };
+  // Apply view projection
+  const outputItems = opts.view === 'summary'
+    ? items.map(summarizeWorkout)
+    : items;
+
+  return { items: outputItems, analytics, hasMore, nextCursor };
 }
 
 /**
@@ -475,6 +509,7 @@ module.exports = {
   upsertWorkout,
   deleteWorkout,
   // Helpers (exported for testing and reuse)
+  summarizeWorkout,
   toTimestamp,
   normalizeExercises,
   computeWorkoutMetrics,

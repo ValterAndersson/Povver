@@ -239,6 +239,79 @@ describe('shared/routines', () => {
   });
 
   // -----------------------------------------------------------------------
+  // getRoutine - include_templates
+  // -----------------------------------------------------------------------
+  describe('getRoutine - include_templates', () => {
+    test('returns inline template summaries when include_templates=true', async () => {
+      const store = {
+        'users/u1': { activeRoutineId: 'r1' },
+        'users/u1/routines/r1': {
+          name: 'PPL',
+          template_ids: ['t1', 't2'],
+          template_names: { t1: 'Push Day', t2: 'Pull Day' },
+          frequency: 2,
+        },
+        'users/u1/templates/t1': {
+          name: 'Push Day',
+          exercises: [
+            { exercise_id: 'bench', name: 'Bench Press', sets: [{}, {}] },
+            { exercise_id: 'ohp', name: 'Overhead Press', sets: [{}] },
+          ],
+        },
+        'users/u1/templates/t2': {
+          name: 'Pull Day',
+          exercises: [
+            { exercise_id: 'row', name: 'Barbell Row', sets: [{}, {}, {}] },
+          ],
+        },
+      };
+      const db = createMockDb(store);
+
+      const result = await getRoutine(db, 'u1', 'r1', { include_templates: true });
+      assert.equal(result.name, 'PPL');
+      assert.equal(result.is_active, true);
+      assert.equal(result.templates.length, 2);
+      assert.equal(result.templates[0].name, 'Push Day');
+      assert.deepEqual(result.templates[0].exercise_names, ['Bench Press', 'Overhead Press']);
+      assert.equal(result.templates[0].exercise_count, 2);
+      assert.equal(result.templates[1].name, 'Pull Day');
+      // Should NOT include full exercise objects
+      assert.equal(result.templates[0].exercises, undefined);
+    });
+
+    test('returns routine without templates by default, with is_active', async () => {
+      const store = {
+        'users/u1': { activeRoutineId: 'r1' },
+        'users/u1/routines/r1': {
+          name: 'PPL',
+          template_ids: ['t1'],
+          frequency: 1,
+        },
+      };
+      const db = createMockDb(store);
+
+      const result = await getRoutine(db, 'u1', 'r1');
+      assert.equal(result.templates, undefined);
+      assert.equal(result.is_active, true);
+    });
+
+    test('handles empty template_ids with include_templates', async () => {
+      const store = {
+        'users/u1': { activeRoutineId: 'r1' },
+        'users/u1/routines/r1': {
+          name: 'Empty',
+          template_ids: [],
+          frequency: 1,
+        },
+      };
+      const db = createMockDb(store);
+
+      const result = await getRoutine(db, 'u1', 'r1', { include_templates: true });
+      assert.deepEqual(result.templates, []);
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // listRoutines
   // -----------------------------------------------------------------------
   describe('listRoutines', () => {
