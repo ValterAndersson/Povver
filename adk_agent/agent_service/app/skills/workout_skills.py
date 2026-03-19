@@ -20,29 +20,13 @@ All functions use MYON_API_KEY for authentication (API key lane).
 from __future__ import annotations
 
 import logging
-import os
 import uuid
 from typing import Any
 
-import httpx
-
 from app.context import RequestContext
+from app.http_client import get_functions_client
 
 logger = logging.getLogger(__name__)
-
-FUNCTIONS_URL = os.getenv(
-    "MYON_FUNCTIONS_BASE_URL",
-    "https://us-central1-myon-53d85.cloudfunctions.net",
-)
-API_KEY = os.getenv("MYON_API_KEY", "")
-
-
-def _headers(ctx: RequestContext) -> dict[str, str]:
-    return {
-        "Content-Type": "application/json",
-        "x-api-key": API_KEY,
-        "x-user-id": ctx.user_id,
-    }
 
 
 async def get_workout_state(*, ctx: RequestContext) -> dict:
@@ -51,14 +35,12 @@ async def get_workout_state(*, ctx: RequestContext) -> dict:
     Returns the workout document including exercises, sets, and totals.
     The LLM uses this to understand current progress and plan next actions.
     """
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(
-            f"{FUNCTIONS_URL}/getActiveWorkout",
-            params={"workout_id": ctx.workout_id},
-            headers=_headers(ctx),
-        )
-        resp.raise_for_status()
-        return resp.json()
+    http = get_functions_client()
+    return await http.get(
+        "/getActiveWorkout",
+        user_id=ctx.user_id,
+        params={"workout_id": ctx.workout_id},
+    )
 
 
 async def swap_exercise(
@@ -73,19 +55,17 @@ async def swap_exercise(
     Replaces the exercise at exercise_instance_id with a new one.
     Preserves set structure (planned sets carry over).
     """
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.post(
-            f"{FUNCTIONS_URL}/swapExercise",
-            json={
-                "workout_id": ctx.workout_id,
-                "exercise_instance_id": exercise_instance_id,
-                "new_exercise_id": new_exercise_id,
-                "new_exercise_name": new_exercise_name,
-            },
-            headers=_headers(ctx),
-        )
-        resp.raise_for_status()
-        return resp.json()
+    http = get_functions_client()
+    return await http.post(
+        "/swapExercise",
+        user_id=ctx.user_id,
+        body={
+            "workout_id": ctx.workout_id,
+            "exercise_instance_id": exercise_instance_id,
+            "new_exercise_id": new_exercise_id,
+            "new_exercise_name": new_exercise_name,
+        },
+    )
 
 
 async def add_exercise(
@@ -128,20 +108,18 @@ async def add_exercise(
             "target_rir": rir,
         })
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.post(
-            f"{FUNCTIONS_URL}/addExercise",
-            json={
-                "workout_id": ctx.workout_id,
-                "instance_id": instance_id,
-                "exercise_id": exercise_id,
-                "name": name,
-                "sets": structured_sets,
-            },
-            headers=_headers(ctx),
-        )
-        resp.raise_for_status()
-        return resp.json()
+    http = get_functions_client()
+    return await http.post(
+        "/addExercise",
+        user_id=ctx.user_id,
+        body={
+            "workout_id": ctx.workout_id,
+            "instance_id": instance_id,
+            "exercise_id": exercise_id,
+            "name": name,
+            "sets": structured_sets,
+        },
+    )
 
 
 async def prescribe_set(
@@ -185,14 +163,8 @@ async def prescribe_set(
         "ai_scope": {"exercise_instance_id": exercise_instance_id},
     }
 
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        resp = await client.post(
-            f"{FUNCTIONS_URL}/patchActiveWorkout",
-            json=payload,
-            headers=_headers(ctx),
-        )
-        resp.raise_for_status()
-        return resp.json()
+    http = get_functions_client()
+    return await http.post("/patchActiveWorkout", user_id=ctx.user_id, body=payload)
 
 
 async def remove_exercise(
@@ -217,14 +189,8 @@ async def remove_exercise(
         "ai_scope": {"exercise_instance_id": exercise_instance_id},
     }
 
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        resp = await client.post(
-            f"{FUNCTIONS_URL}/patchActiveWorkout",
-            json=payload,
-            headers=_headers(ctx),
-        )
-        resp.raise_for_status()
-        return resp.json()
+    http = get_functions_client()
+    return await http.post("/patchActiveWorkout", user_id=ctx.user_id, body=payload)
 
 
 async def add_set(
@@ -263,14 +229,8 @@ async def add_set(
         "ai_scope": {"exercise_instance_id": exercise_instance_id},
     }
 
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        resp = await client.post(
-            f"{FUNCTIONS_URL}/patchActiveWorkout",
-            json=payload,
-            headers=_headers(ctx),
-        )
-        resp.raise_for_status()
-        return resp.json()
+    http = get_functions_client()
+    return await http.post("/patchActiveWorkout", user_id=ctx.user_id, body=payload)
 
 
 async def remove_set(
@@ -296,14 +256,8 @@ async def remove_set(
         "ai_scope": {"exercise_instance_id": exercise_instance_id},
     }
 
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        resp = await client.post(
-            f"{FUNCTIONS_URL}/patchActiveWorkout",
-            json=payload,
-            headers=_headers(ctx),
-        )
-        resp.raise_for_status()
-        return resp.json()
+    http = get_functions_client()
+    return await http.post("/patchActiveWorkout", user_id=ctx.user_id, body=payload)
 
 
 async def complete_workout(*, ctx: RequestContext) -> dict:
@@ -311,14 +265,12 @@ async def complete_workout(*, ctx: RequestContext) -> dict:
 
     Finalizes totals, archives the workout document, and clears active state.
     """
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.post(
-            f"{FUNCTIONS_URL}/completeActiveWorkout",
-            json={"workout_id": ctx.workout_id},
-            headers=_headers(ctx),
-        )
-        resp.raise_for_status()
-        return resp.json()
+    http = get_functions_client()
+    return await http.post(
+        "/completeActiveWorkout",
+        user_id=ctx.user_id,
+        body={"workout_id": ctx.workout_id},
+    )
 
 
 __all__ = [

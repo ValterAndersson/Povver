@@ -15,13 +15,13 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import uuid
 from typing import Any
 
 from app.context import RequestContext
 from app.firestore_client import get_firestore_client
+from app.http_client import get_functions_client
 
 logger = logging.getLogger(__name__)
 
@@ -341,27 +341,17 @@ async def update_routine(
     creation/linking, Firestore transactions, and validation that would
     be error-prone to reimplement here.
     """
-    import httpx
-
-    url = os.getenv(
-        "MYON_FUNCTIONS_BASE_URL",
-        "https://us-central1-myon-53d85.cloudfunctions.net",
+    http = get_functions_client()
+    return await http.post(
+        "/updateRoutine",
+        user_id=ctx.user_id,
+        body={
+            "userId": ctx.user_id,
+            "routineId": routine_id,
+            "routineName": routine_name,
+            "workouts": workouts,
+        },
     )
-    api_key = os.getenv("MYON_API_KEY", "")
-
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.post(
-            f"{url}/updateRoutine",
-            json={
-                "userId": ctx.user_id,
-                "routineId": routine_id,
-                "routineName": routine_name,
-                "workouts": workouts,
-            },
-            headers={"x-api-key": api_key},
-        )
-        resp.raise_for_status()
-        return resp.json()
 
 
 # ============================================================================
@@ -378,27 +368,17 @@ async def update_template(
 
     Uses HTTP because patch-template handles validation and merge semantics.
     """
-    import httpx
-
-    url = os.getenv(
-        "MYON_FUNCTIONS_BASE_URL",
-        "https://us-central1-myon-53d85.cloudfunctions.net",
-    )
-    api_key = os.getenv("MYON_API_KEY", "")
     blocks = _build_exercise_blocks(exercises)
-
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.post(
-            f"{url}/patchTemplate",
-            json={
-                "userId": ctx.user_id,
-                "templateId": template_id,
-                "exercises": blocks,
-            },
-            headers={"x-api-key": api_key},
-        )
-        resp.raise_for_status()
-        return resp.json()
+    http = get_functions_client()
+    return await http.post(
+        "/patchTemplate",
+        user_id=ctx.user_id,
+        body={
+            "userId": ctx.user_id,
+            "templateId": template_id,
+            "exercises": blocks,
+        },
+    )
 
 
 __all__ = [

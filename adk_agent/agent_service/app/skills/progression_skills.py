@@ -14,20 +14,12 @@ Uses MYON_API_KEY (server-to-server key), not FIREBASE_API_KEY.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
-import httpx
-
 from app.context import RequestContext
+from app.http_client import get_functions_client
 
 logger = logging.getLogger(__name__)
-
-FUNCTIONS_URL = os.getenv(
-    "MYON_FUNCTIONS_BASE_URL",
-    "https://us-central1-myon-53d85.cloudfunctions.net",
-)
-MYON_API_KEY = os.getenv("MYON_API_KEY", "")
 
 
 async def apply_progression(
@@ -56,26 +48,21 @@ async def apply_progression(
         trigger: What triggered this (post_workout, user_request, plateau_detected)
         auto_apply: Apply immediately or queue for review
     """
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(
-            f"{FUNCTIONS_URL}/applyProgression",
-            json={
-                "userId": ctx.user_id,
-                "targetType": target_type,
-                "targetId": target_id,
-                "changes": changes,
-                "summary": summary,
-                "rationale": rationale,
-                "trigger": trigger,
-                "autoApply": auto_apply,
-            },
-            headers={
-                "Content-Type": "application/json",
-                "x-api-key": MYON_API_KEY,
-            },
-        )
-        resp.raise_for_status()
-        return resp.json()
+    http = get_functions_client()
+    return await http.post(
+        "/applyProgression",
+        user_id=ctx.user_id,
+        body={
+            "userId": ctx.user_id,
+            "targetType": target_type,
+            "targetId": target_id,
+            "changes": changes,
+            "summary": summary,
+            "rationale": rationale,
+            "trigger": trigger,
+            "autoApply": auto_apply,
+        },
+    )
 
 
 async def suggest_weight_increase(

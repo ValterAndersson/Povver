@@ -2,10 +2,14 @@
 """Tests for planner_skills — write tools that create artifacts."""
 
 import asyncio
+import json
+
+import httpx
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.context import RequestContext
+from app.http_client import FunctionsClient
 from app.skills.planner_skills import (
     _build_exercise_blocks,
     _coerce_int,
@@ -48,6 +52,12 @@ def sample_exercises():
             "weight_kg": 10,
         },
     ]
+
+
+def _make_client(handler) -> FunctionsClient:
+    client = FunctionsClient(base_url="http://test", api_key="test-key")
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return client
 
 
 # ============================================================================
@@ -226,68 +236,65 @@ def test_propose_routine_no_workouts(ctx):
 
 
 # ============================================================================
-# update_routine tests (HTTP mock)
+# update_routine tests (MockTransport)
 # ============================================================================
 
 
-def test_update_routine_calls_http(ctx):
-    """update_routine POSTs to the Firebase Function via httpx."""
+def test_update_routine_calls_http(ctx, monkeypatch):
+    """update_routine POSTs to the Firebase Function via shared client."""
+    captured = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        captured["headers"] = dict(request.headers)
+        return httpx.Response(200, json={"data": {"ok": True, "routineId": "r1"}})
+
+    mock_client = _make_client(handler)
+    monkeypatch.setattr("app.skills.planner_skills.get_functions_client", lambda: mock_client)
+
     async def _test():
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"ok": True, "routineId": "r1"}
-        mock_response.raise_for_status = MagicMock()
+        return await update_routine(
+            ctx=ctx,
+            routine_id="r1",
+            routine_name="PPL Updated",
+            workouts=[{"title": "Push", "exercises": []}],
+        )
 
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        # httpx is imported inside the function body, so patch the module
-        with patch("httpx.AsyncClient", return_value=mock_client):
-            result = await update_routine(
-                ctx=ctx,
-                routine_id="r1",
-                routine_name="PPL Updated",
-                workouts=[{"title": "Push", "exercises": []}],
-            )
-        assert result["ok"] is True
-        mock_client.post.assert_awaited_once()
-        call_json = mock_client.post.call_args[1]["json"]
-        assert call_json["userId"] == "u1"
-        assert call_json["routineId"] == "r1"
-
-    _run(_test())
+    result = _run(_test())
+    assert result["ok"] is True
+    assert captured["body"]["userId"] == "u1"
+    assert captured["body"]["routineId"] == "r1"
+    assert "updateRoutine" in captured["url"]
 
 
 # ============================================================================
-# update_template tests (HTTP mock)
+# update_template tests (MockTransport)
 # ============================================================================
 
 
-def test_update_template_calls_http(ctx, sample_exercises):
-    """update_template POSTs to patchTemplate Firebase Function via httpx."""
+def test_update_template_calls_http(ctx, sample_exercises, monkeypatch):
+    """update_template POSTs to patchTemplate Firebase Function via shared client."""
+    captured = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"data": {"ok": True, "templateId": "t1"}})
+
+    mock_client = _make_client(handler)
+    monkeypatch.setattr("app.skills.planner_skills.get_functions_client", lambda: mock_client)
+
     async def _test():
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"ok": True, "templateId": "t1"}
-        mock_response.raise_for_status = MagicMock()
+        return await update_template(
+            ctx=ctx,
+            template_id="t1",
+            exercises=sample_exercises,
+        )
 
-        mock_client = AsyncMock()
-        mock_client.post.return_value = mock_response
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        with patch("httpx.AsyncClient", return_value=mock_client):
-            result = await update_template(
-                ctx=ctx,
-                template_id="t1",
-                exercises=sample_exercises,
-            )
-        assert result["ok"] is True
-        mock_client.post.assert_awaited_once()
-        call_json = mock_client.post.call_args[1]["json"]
-        assert call_json["userId"] == "u1"
-        assert call_json["templateId"] == "t1"
-        # Exercises should be transformed through _build_exercise_blocks
-        assert isinstance(call_json["exercises"], list)
-
-    _run(_test())
+    result = _run(_test())
+    assert result["ok"] is True
+    assert captured["body"]["userId"] == "u1"
+    assert captured["body"]["templateId"] == "t1"
+    assert isinstance(captured["body"]["exercises"], list)
+    assert "patchTemplate" in captured["url"]

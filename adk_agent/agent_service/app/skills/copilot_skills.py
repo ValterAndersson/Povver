@@ -15,33 +15,14 @@ All skills call Firebase Functions directly via HTTP using the MYON_API_KEY
 from __future__ import annotations
 
 import logging
-import os
 import re
 import uuid
 from typing import Any
 
-import httpx
-
 from app.context import RequestContext
+from app.http_client import get_functions_client
 
 logger = logging.getLogger(__name__)
-
-FUNCTIONS_URL = os.getenv(
-    "MYON_FUNCTIONS_BASE_URL",
-    "https://us-central1-myon-53d85.cloudfunctions.net",
-)
-API_KEY = os.getenv("MYON_API_KEY", "")
-
-# Aggressive timeout for fast lane — these calls must be quick
-FAST_LANE_TIMEOUT = 5.0
-
-
-def _headers(ctx: RequestContext) -> dict[str, str]:
-    return {
-        "Content-Type": "application/json",
-        "x-api-key": API_KEY,
-        "x-user-id": ctx.user_id,
-    }
 
 
 async def log_set(
@@ -58,20 +39,18 @@ async def log_set(
     Calls the logSet Firebase Function with explicit values.
     The idempotency_key prevents duplicate logging on retries.
     """
-    async with httpx.AsyncClient(timeout=FAST_LANE_TIMEOUT) as client:
-        resp = await client.post(
-            f"{FUNCTIONS_URL}/logSet",
-            json={
-                "workout_id": ctx.workout_id,
-                "exercise_instance_id": exercise_instance_id,
-                "set_id": set_id,
-                "values": {"weight": weight_kg, "reps": reps, "rir": rir},
-                "idempotency_key": str(uuid.uuid4()),
-            },
-            headers=_headers(ctx),
-        )
-        resp.raise_for_status()
-        return resp.json()
+    http = get_functions_client()
+    return await http.post(
+        "/logSet",
+        user_id=ctx.user_id,
+        body={
+            "workout_id": ctx.workout_id,
+            "exercise_instance_id": exercise_instance_id,
+            "set_id": set_id,
+            "values": {"weight": weight_kg, "reps": reps, "rir": rir},
+            "idempotency_key": str(uuid.uuid4()),
+        },
+    )
 
 
 async def log_set_shorthand(
@@ -85,17 +64,15 @@ async def log_set_shorthand(
     Uses the completeCurrentSet endpoint which auto-advances to the next set.
     Intended for quick "8@100" style logging.
     """
-    async with httpx.AsyncClient(timeout=FAST_LANE_TIMEOUT) as client:
-        resp = await client.post(
-            f"{FUNCTIONS_URL}/completeCurrentSet",
-            json={
-                "workout_id": ctx.workout_id,
-                "values": {"weight": weight_kg, "reps": reps},
-            },
-            headers=_headers(ctx),
-        )
-        resp.raise_for_status()
-        return resp.json()
+    http = get_functions_client()
+    return await http.post(
+        "/completeCurrentSet",
+        user_id=ctx.user_id,
+        body={
+            "workout_id": ctx.workout_id,
+            "values": {"weight": weight_kg, "reps": reps},
+        },
+    )
 
 
 async def get_next_set(*, ctx: RequestContext) -> dict:
@@ -104,14 +81,12 @@ async def get_next_set(*, ctx: RequestContext) -> dict:
     Fetches workout state and finds the first exercise/set with status 'planned'.
     Returns the full workout data — the caller (router or LLM) interprets it.
     """
-    async with httpx.AsyncClient(timeout=FAST_LANE_TIMEOUT) as client:
-        resp = await client.get(
-            f"{FUNCTIONS_URL}/getActiveWorkout",
-            params={"workout_id": ctx.workout_id},
-            headers=_headers(ctx),
-        )
-        resp.raise_for_status()
-        return resp.json()
+    http = get_functions_client()
+    return await http.get(
+        "/getActiveWorkout",
+        user_id=ctx.user_id,
+        params={"workout_id": ctx.workout_id},
+    )
 
 
 def parse_shorthand(message: str) -> dict[str, Any] | None:
