@@ -79,12 +79,12 @@ struct MoreView: View {
                 // Avatar
                 ZStack {
                     Circle()
-                        .fill(Color.accent.opacity(0.15))
+                        .fill(Color.textTertiary.opacity(0.1))
                         .frame(width: 56, height: 56)
 
                     Text(initials)
                         .font(.system(size: 20, weight: .semibold))
-                        .foregroundColor(Color.accent)
+                        .foregroundColor(Color.textSecondary)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {

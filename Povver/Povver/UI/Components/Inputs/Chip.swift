@@ -34,20 +34,21 @@ public struct Chip: View {
                 if let icon {
                     icon
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(isSelected ? .accent : .textSecondary)
+                        .foregroundColor(isSelected ? .textPrimary : .textSecondary)
                 }
-                
+
                 Text(text)
                     .textStyle(.secondary)
-                    .foregroundColor(isSelected ? .accent : .textSecondary)
+                    .foregroundColor(isSelected ? .textPrimary : .textSecondary)
+                    .fontWeight(isSelected ? .semibold : .regular)
             }
             .padding(.horizontal, Space.md)
             .padding(.vertical, Space.sm)
-            .background(isSelected ? Color.accentMuted : Color.surface)
+            .background(isSelected ? Color.surfaceElevated : Color.surface)
             .clipShape(Capsule())
             .overlay(
                 Capsule()
-                    .stroke(isSelected ? Color.accentStroke : Color.separatorLine, lineWidth: StrokeWidthToken.hairline)
+                    .stroke(isSelected ? Color.textTertiary.opacity(0.3) : Color.separatorLine, lineWidth: StrokeWidthToken.hairline)
             )
         }
         .buttonStyle(ChipButtonStyle())
