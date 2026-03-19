@@ -44,13 +44,15 @@ function templatesCol(db, userId) {
  * @returns {Promise<Object>} Map of exercise_id -> name
  */
 async function resolveExerciseNames(db, exerciseIds) {
+  if (exerciseIds.length === 0) return {};
+  const refs = exerciseIds.map(id => db.collection('exercises').doc(id));
+  const docs = await db.getAll(...refs);
   const names = {};
-  await Promise.all(exerciseIds.map(async (exerciseId) => {
-    const doc = await db.collection('exercises').doc(exerciseId).get();
+  docs.forEach((doc, i) => {
     if (doc.exists) {
-      names[exerciseId] = doc.data().name || exerciseId;
+      names[exerciseIds[i]] = doc.data().name || exerciseIds[i];
     }
-  }));
+  });
   return names;
 }
 
@@ -131,6 +133,23 @@ async function createTemplate(db, userId, templateData, options = {}) {
   const parsed = TemplateSchema.safeParse(templateData);
   if (!parsed.success) {
     throw new ValidationError('Invalid template data', parsed.error.flatten());
+  }
+
+  // Resolve missing exercise names from catalog
+  if (Array.isArray(templateData.exercises)) {
+    const idsToResolve = templateData.exercises
+      .filter(ex => !ex.name && ex.exercise_id)
+      .map(ex => ex.exercise_id);
+
+    if (idsToResolve.length > 0) {
+      const exerciseNames = await resolveExerciseNames(db, idsToResolve);
+      templateData.exercises = templateData.exercises.map(ex => {
+        if (!ex.name && ex.exercise_id && exerciseNames[ex.exercise_id]) {
+          return { ...ex, name: exerciseNames[ex.exercise_id] };
+        }
+        return ex;
+      });
+    }
   }
 
   const col = templatesCol(db, userId);
@@ -261,6 +280,21 @@ async function patchTemplate(db, userId, templateId, patch, meta = {}) {
           throw new ValidationError(`Exercise ${i} set ${j} weight must be number or null`);
         }
       }
+    }
+
+    // Resolve missing exercise names from catalog
+    const idsToResolve = sanitizedPatch.exercises
+      .filter(ex => !ex.name && ex.exercise_id)
+      .map(ex => ex.exercise_id);
+
+    if (idsToResolve.length > 0) {
+      const exerciseNames = await resolveExerciseNames(db, idsToResolve);
+      sanitizedPatch.exercises = sanitizedPatch.exercises.map(ex => {
+        if (!ex.name && ex.exercise_id && exerciseNames[ex.exercise_id]) {
+          return { ...ex, name: exerciseNames[ex.exercise_id] };
+        }
+        return ex;
+      });
     }
 
     exercisesChanged = JSON.stringify(sanitizedPatch.exercises) !== JSON.stringify(current.exercises);

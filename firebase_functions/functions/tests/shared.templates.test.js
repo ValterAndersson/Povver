@@ -40,6 +40,7 @@ const { ValidationError, NotFoundError, ConflictError, PermissionDeniedError } =
 function createMockDb(store = {}) {
   function makeDocRef(path) {
     return {
+      _path: path,
       id: path.split('/').pop(),
       get: async () => {
         const data = store[path];
@@ -86,6 +87,17 @@ function createMockDb(store = {}) {
   }
 
   const db = {
+    getAll: async (...refs) => {
+      return refs.map(ref => {
+        const path = ref._path;
+        const data = store[path];
+        return {
+          exists: !!data,
+          id: path.split('/').pop(),
+          data: () => (data ? { ...data } : undefined),
+        };
+      });
+    },
     collection: (col) => makeColRef(col),
     batch: () => {
       const ops = [];
@@ -467,5 +479,83 @@ describe('createTemplateFromPlan', () => {
     assert.equal(result.mode, 'create');
     assert.equal(result.exerciseCount, 1);
     assert.equal(result.message, 'Template created');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createTemplate - exercise name resolution
+// ---------------------------------------------------------------------------
+
+describe('createTemplate - exercise name resolution', () => {
+  test('resolves missing exercise names from catalog via batch read', async () => {
+    const store = {
+      'exercises/bench_press': { name: 'Bench Press (Barbell)' },
+      'exercises/lat_pulldown': { name: 'Lat Pulldown (Cable)' },
+    };
+    const db = createMockDb(store);
+
+    const input = {
+      name: 'Push Day',
+      exercises: [
+        { exercise_id: 'bench_press', position: 0, sets: [{ reps: 8, rir: 2, weight: null }] },
+        { exercise_id: 'lat_pulldown', name: 'Already Named', position: 1, sets: [{ reps: 10, rir: 3, weight: null }] },
+      ],
+    };
+
+    const result = await createTemplate(db, 'user1', input);
+    // Find the stored template
+    const templateKey = Object.keys(store).find(k => k.startsWith('users/user1/templates/'));
+    assert.ok(templateKey, 'Template should be stored');
+    const stored = store[templateKey];
+
+    // Exercise without name should have it resolved from catalog
+    assert.equal(stored.exercises[0].name, 'Bench Press (Barbell)');
+    // Exercise with existing name should keep it
+    assert.equal(stored.exercises[1].name, 'Already Named');
+  });
+
+  test('exercises with name already set are not re-resolved', async () => {
+    const store = {
+      'exercises/bench_press': { name: 'Catalog Name' },
+    };
+    const db = createMockDb(store);
+
+    const input = {
+      name: 'Test',
+      exercises: [
+        { exercise_id: 'bench_press', name: 'Custom Name', position: 0, sets: [{ reps: 8, rir: 2, weight: null }] },
+      ],
+    };
+
+    await createTemplate(db, 'user1', input);
+    const templateKey = Object.keys(store).find(k => k.startsWith('users/user1/templates/'));
+    const stored = store[templateKey];
+    assert.equal(stored.exercises[0].name, 'Custom Name');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// patchTemplate - exercise name resolution
+// ---------------------------------------------------------------------------
+
+describe('patchTemplate - exercise name resolution', () => {
+  test('resolves missing names when exercises array is patched', async () => {
+    const store = {
+      'users/user1/templates/t1': {
+        name: 'Old Template',
+        exercises: [{ exercise_id: 'old_ex', name: 'Old Exercise', position: 0, sets: [] }],
+      },
+      'exercises/new_ex': { name: 'New Exercise Name' },
+    };
+    const db = createMockDb(store);
+
+    await patchTemplate(db, 'user1', 't1', {
+      exercises: [
+        { exercise_id: 'new_ex', position: 0, sets: [{ reps: 8, rir: 2, weight: null }] },
+      ],
+    });
+
+    const stored = store['users/user1/templates/t1'];
+    assert.equal(stored.exercises[0].name, 'New Exercise Name');
   });
 });
