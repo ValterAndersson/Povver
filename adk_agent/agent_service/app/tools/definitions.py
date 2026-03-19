@@ -37,13 +37,13 @@ def register_coach_skills():
     register_tool(
         "get_planning_context",
         coach_skills.get_planning_context,
-        "Get the full planning context including active routine, templates, recent workouts",
+        "Get compact training snapshot: user profile, active routine with template names, recent workouts with exercise names and set counts, strength records. One call gives full orientation.",
         {"type": "object", "properties": {}, "required": []},
     )
     register_tool(
         "get_training_analysis",
         coach_skills.get_training_analysis,
-        "Get pre-computed training analysis (insights and weekly review)",
+        "Get training analysis: active insights (plateaus, volume issues, periodization alerts) and latest weekly review. Only shows pending recommendations by default.",
         {
             "type": "object",
             "properties": {
@@ -59,11 +59,11 @@ def register_coach_skills():
     register_tool(
         "get_exercise_progress",
         coach_skills.get_exercise_progress,
-        "Get per-exercise progress with e1RM and volume trends",
+        "Get exercise progress over N weeks: weekly e1RM trend, PR, plateau detection, last session details. Use exercise name (fuzzy match).",
         {
             "type": "object",
             "properties": {
-                "exercise_id": {"type": "string", "description": "Exercise ID"},
+                "exercise_id": {"type": "string", "description": "Exercise name (fuzzy matched)"},
                 "weeks": {"type": "integer", "description": "Weeks of history (default 8)"},
             },
             "required": ["exercise_id"],
@@ -72,7 +72,7 @@ def register_coach_skills():
     register_tool(
         "get_muscle_group_progress",
         coach_skills.get_muscle_group_progress,
-        "Get weekly series for a muscle group",
+        "Get muscle group progress over N weeks: weekly volume, set counts, exercise breakdown, trend direction.",
         {
             "type": "object",
             "properties": {

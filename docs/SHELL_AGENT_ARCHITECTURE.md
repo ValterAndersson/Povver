@@ -143,14 +143,16 @@ adk_agent/agent_service/            # CURRENT — Cloud Run deployment
 │   ├── safety_gate.py              # Write operation confirmation
 │   ├── critic.py                   # Response validation
 │   ├── functional_handler.py       # Functional Lane (Flash, JSON)
-│   ├── firestore_client.py         # Firestore SDK singleton
+│   ├── http_client.py              # Shared HTTP client for Firebase Functions (connection pooling, auth)
+│   ├── firestore_client.py         # Data access: HTTP reads via http_client + direct Firestore for writes/conversations
 │   ├── observability.py            # Logging and tracing
 │   │
 │   ├── skills/                     # SHARED BRAIN - Pure logic
-│   │   ├── copilot_skills.py       # Lane 1: log_set, get_next_set
-│   │   ├── coach_skills.py         # Analytics, user data
-│   │   ├── planner_skills.py       # Artifact creation (returns data, not cards)
-│   │   ├── workout_skills.py       # Workout brief + mutation skills
+│   │   ├── copilot_skills.py       # Lane 1: log_set, get_next_set (HTTP via shared client)
+│   │   ├── coach_skills.py         # Analytics, user data (reads via firestore_client)
+│   │   ├── planner_skills.py       # Artifact creation + routine/template updates (HTTP via shared client)
+│   │   ├── workout_skills.py       # Workout mutations (HTTP via shared client)
+│   │   ├── progression_skills.py   # Training progression changes (HTTP via shared client)
 │   │   └── gated_planner.py        # Safety Gate wrapper
 │   │
 │   ├── tools/                      # Tool wrappers (context-aware)
@@ -174,6 +176,17 @@ adk_agent/canvas_orchestrator/      # DEPRECATED — Vertex AI Agent Engine (do 
 | 4 | Conversation summaries | Firestore | Per-conversation | Compressed context from long conversations |
 
 Tier 3 (`agent_memory`) allows the agent to remember user preferences, injury notes, and other facts across conversations. Documents have fields: `content`, `category`, `active`, `created_at`, `source_conversation_id`, `retired_at`, `retire_reason`.
+
+### Data Access Patterns
+
+The agent service uses two data access paths, chosen based on whether Firebase Functions provide value-added projections:
+
+| Path | Used For | Why |
+|------|----------|-----|
+| **HTTP → Firebase Functions** | Reads: planning context, templates, workouts, analytics, exercise search. Writes: all workout mutations, routine/template updates, progression. | Server-side projections (`view=compact`, `view=summary`) reduce payload size. Shared JS modules handle denormalization (exercise names, template names). Connection pooling via `http_client.py`. |
+| **Direct Firestore** | User profile, user attributes, weekly stats, conversations, messages, artifacts, agent memory | Simple single-doc reads where HTTP adds latency for no benefit. Conversation operations have no HTTP endpoint. |
+
+**Shared HTTP Client (`app/http_client.py`):** Singleton `FunctionsClient` with connection pooling via `httpx.AsyncClient`. Handles auth headers (`x-api-key`, `x-user-id`), `{"data": ...}` envelope unwrapping, and `FunctionsError` on non-2xx. All skill files and `firestore_client.py` read methods use this instead of inline httpx.
 
 ---
 
@@ -618,66 +631,24 @@ def propose_workout(user_id: str, **kwargs) -> SkillResult:
 
 The iOS client receives the artifact data in the SSE stream and renders it as a specialized view component (e.g., `WorkoutPlanView`) with action buttons.
 
-### CanvasFunctionsClient: Simplified API
+### Shared HTTP Client (`app/http_client.py`)
 
-**Removed Methods (Canvas-Specific):**
-- `propose_cards()` - No longer needed, replaced by direct artifact return
-- `bootstrap_canvas()` - Canvas initialization removed
-- `emit_event()` - Event emission removed
-
-**Remaining Methods (Workout Operations):**
-- `get_active_workout()` - Retrieve active workout state
-- `log_set()` - Log a completed set
-- `swap_exercise()` - Replace exercise in active workout
-- `complete_active_workout()` - Mark workout as completed
-- `get_exercise_summary()` - Exercise catalog data
-- `get_analysis_summary()` - Training analysis summaries
-- `get_planning_context()` - Context for workout planning
-- `get_routine()` - Fetch routine details
-- `create_routine_from_data()` - Create routine from artifact
-- `search_exercises()` - Search exercise catalog
-
-### HTTP Connection Pooling
-
-**Performance Optimization:**
-
-The `HttpClient` now uses `requests.Session()` with connection pooling to reduce latency for repeated Firebase Function calls.
+All Firebase Function calls (reads and writes) flow through a singleton `FunctionsClient` with async connection pooling:
 
 ```python
-# canvas/canvas_client.py
-class HttpClient:
-    def __init__(self):
-        self.session = requests.Session()
-        adapter = HTTPAdapter(
-            pool_connections=10,   # Number of connection pools
-            pool_maxsize=20        # Connections per pool
-        )
-        self.session.mount('https://', adapter)
-        self.session.mount('http://', adapter)
+from app.http_client import get_functions_client
 
-    def post(self, url: str, **kwargs):
-        return self.session.post(url, **kwargs)
+http = get_functions_client()
+data = await http.post("/logSet", user_id=ctx.user_id, body={...})
+data = await http.get("/getUserTemplates", user_id=uid, params={"view": "summary"})
 ```
 
-**Impact:**
-- Reuses TCP connections across tool calls within a single request
-- Reduces connection overhead by 50-70ms per Firebase call
-- Particularly beneficial for multi-tool sequences (e.g., search_exercises + propose_routine)
-
-**Singleton Pattern:**
-
-`workout_skills.py` uses a singleton client instance to maximize connection reuse across all copilot operations:
-
-```python
-# skills/workout_skills.py
-_client_instance = None
-
-def _get_client() -> CanvasFunctionsClient:
-    global _client_instance
-    if _client_instance is None:
-        _client_instance = CanvasFunctionsClient(...)
-    return _client_instance
-```
+**Features:**
+- Connection pooling via `httpx.AsyncClient` (reuses TCP connections across requests)
+- Auth headers (`x-api-key`, `x-user-id`) applied automatically
+- `{"data": ...}` envelope unwrapping (Firebase Functions `ok(res, data)` format)
+- `FunctionsError` with status code, message, and endpoint on non-2xx responses
+- Env-configured: `MYON_FUNCTIONS_BASE_URL`, `MYON_API_KEY`
 
 ---
 
