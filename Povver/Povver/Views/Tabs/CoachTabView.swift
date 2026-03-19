@@ -448,7 +448,7 @@ struct CoachTabView: View {
                 )
             }
         } else {
-            EmptyState(title: "Not signed in", message: "Login to view canvas.")
+            EmptyState(title: "Ask me anything", message: "About your training, nutrition, or recovery.")
         }
     }
 

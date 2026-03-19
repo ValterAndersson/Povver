@@ -11,12 +11,14 @@ struct MoreView: View {
     @State private var user: User?
     @State private var showingLogoutConfirmation = false
     @State private var errorMessage: String?
+    @State private var hasAppeared = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.lg) {
                 // Profile card
                 profileCard
+                    .staggeredEntrance(index: 0, active: hasAppeared)
 
                 // Activity (premium only)
                 if subscriptionService.isPremium {
@@ -32,14 +34,19 @@ struct MoreView: View {
                     .background(Color.surface)
                     .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                     .padding(.horizontal, Space.lg)
+                    .staggeredEntrance(index: 1, active: hasAppeared)
                 }
 
                 // Settings
-                sectionHeader("Settings")
-                settingsSection
+                Group {
+                    sectionHeader("Settings")
+                    settingsSection
+                }
+                .staggeredEntrance(index: 2, active: hasAppeared)
 
                 // More
                 moreSection
+                    .staggeredEntrance(index: 3, active: hasAppeared)
 
                 // Error banner
                 if let errorMessage = errorMessage {
@@ -51,6 +58,7 @@ struct MoreView: View {
 
                 // Sign Out
                 logoutButton
+                    .staggeredEntrance(index: 4, active: hasAppeared)
 
                 Spacer(minLength: Space.xxl)
             }
@@ -60,6 +68,13 @@ struct MoreView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             await loadUser()
+        }
+        .onAppear {
+            if !hasAppeared {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    hasAppeared = true
+                }
+            }
         }
         .confirmationDialog("Sign Out", isPresented: $showingLogoutConfirmation) {
             Button("Sign Out", role: .destructive) {

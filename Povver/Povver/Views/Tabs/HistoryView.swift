@@ -10,10 +10,11 @@ struct HistoryView: View {
     @State private var isLoadingMore = false
     @State private var hasMorePages = true
     @State private var totalWorkoutCount: Int = 0
-    
+    @State private var hasAppeared = false
+
     /// All workouts fetched from repository (full list for pagination)
     @State private var allWorkouts: [Workout] = []
-    
+
     /// Initial page size and load increment
     private let initialPageSize = 25
     private let loadMoreIncrement = 25
@@ -51,20 +52,23 @@ struct HistoryView: View {
     // MARK: - Empty State
     
     private var emptyStateView: some View {
-        VStack(spacing: Space.md) {
-            Image(systemName: "clock.arrow.circlepath")
-                .font(.system(size: 48))
-                .foregroundColor(Color.textTertiary)
-            
-            Text("No workouts yet")
-                .textStyle(.bodyStrong)
+        VStack(spacing: Space.lg) {
+            CoachPresenceIndicator(size: 32)
 
-            Text("Complete your first workout to see it here")
-                .textStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, Space.xl)
+            VStack(spacing: Space.sm) {
+                Text("No workouts yet")
+                    .textStyle(.sectionHeader)
+                    .foregroundColor(.textPrimary)
+                    .multilineTextAlignment(.center)
+
+                Text("Your training story starts with the first session.")
+                    .textStyle(.secondary)
+                    .foregroundColor(.textSecondary)
+                    .multilineTextAlignment(.center)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(InsetsToken.screen)
     }
     
     // MARK: - Workouts List
@@ -82,11 +86,13 @@ struct HistoryView: View {
                 }
                 .padding(.horizontal, Space.lg)
                 .padding(.top, Space.md)
-                
+                .staggeredEntrance(index: 0, active: hasAppeared)
+
                 // Weekly frequency chart
                 if !allWorkouts.isEmpty {
                     WeeklyWorkoutChart(workouts: allWorkouts)
                         .padding(.horizontal, Space.lg)
+                        .staggeredEntrance(index: 1, active: hasAppeared)
 
                     Divider()
                         .padding(.horizontal, Space.lg)
@@ -135,8 +141,16 @@ struct HistoryView: View {
                     }
                 }
                 .padding(.horizontal, Space.lg)
-                
+                .staggeredEntrance(index: 2, active: hasAppeared)
+
                 Spacer(minLength: Space.xxl)
+            }
+        }
+        .onAppear {
+            if !hasAppeared {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    hasAppeared = true
+                }
             }
         }
     }

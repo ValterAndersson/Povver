@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "firebase": {
+      "command": "firebase",
+      "args": ["mcp", "--dir", "/Users/valterandersson/Documents/Povver/firebase_functions"],
+      "env": {
+        "GOOGLE_APPLICATION_CREDENTIALS": "${FIREBASE_SA_KEY}"
+      }
+    },
+    "xcodebuild": {
+      "command": "/opt/homebrew/bin/npx",
+      "args": ["-y", "xcodebuildmcp@latest", "mcp", "--log-level", "none"]
+    },
+    "gcloud-observability": {
+      "command": "npx",
+      "args": ["-y", "@google-cloud/observability-mcp@latest"],
+      "env": {
+        "GOOGLE_APPLICATION_CREDENTIALS": "${GCP_SA_KEY}",
+        "GOOGLE_CLOUD_PROJECT": "myon-53d85"
+      }
+    },
+    "povver": {
+      "command": "npx",
+      "args": [
+        "-y", "mcp-remote@latest",
+        "https://mcp-server-919326069447.us-central1.run.app/",
+        "--header", "Authorization: Bearer 5e473c0c5a998dc9e1f82fe421b6d664d066b16863419f0b2bd6af42e3b817a1"
+      ]
+    }
+  }
+}

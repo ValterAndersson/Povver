@@ -30,7 +30,7 @@ struct WorkoutEditView: View {
                             Image(systemName: "plus.circle.fill")
                                 .font(.system(size: 18))
                             Text("Add Exercise")
-                                .font(.system(size: 15, weight: .medium))
+                                .textStyle(.secondary)
                         }
                         .foregroundColor(Color.accent)
                         .frame(maxWidth: .infinity)

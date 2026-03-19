@@ -11,7 +11,7 @@ struct LibraryView: View {
                 // Header
                 VStack(alignment: .leading, spacing: Space.xs) {
                     Text("Library")
-                        .font(.system(size: 28, weight: .bold))
+                        .textStyle(.screenTitle)
                         .foregroundColor(Color.textPrimary)
 
                     Text("Your training assets and content")
@@ -164,22 +164,23 @@ struct RoutinesListView: View {
     }
     
     private var emptyStateView: some View {
-        VStack(spacing: Space.md) {
-            Image(systemName: "calendar.badge.plus")
-                .font(.system(size: 48))
-                .foregroundColor(Color.textTertiary)
-            
-            Text("No routines yet")
-                .textStyle(.bodyStrong)
-                .foregroundColor(Color.textPrimary)
+        VStack(spacing: Space.lg) {
+            CoachPresenceIndicator(size: 32)
 
-            Text("Use the Coach to create your first training program")
-                .textStyle(.secondary)
-                .foregroundColor(Color.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, Space.xl)
+            VStack(spacing: Space.sm) {
+                Text("No programs yet")
+                    .textStyle(.sectionHeader)
+                    .foregroundColor(.textPrimary)
+                    .multilineTextAlignment(.center)
+
+                Text("Want me to design one for you?")
+                    .textStyle(.secondary)
+                    .foregroundColor(.textSecondary)
+                    .multilineTextAlignment(.center)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(InsetsToken.screen)
     }
     
     private var routinesList: some View {
@@ -270,26 +271,27 @@ struct TemplatesListView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-    
-    private var emptyStateView: some View {
-        VStack(spacing: Space.md) {
-            Image(systemName: "doc.on.doc")
-                .font(.system(size: 48))
-                .foregroundColor(Color.textTertiary)
-            
-            Text("No templates yet")
-                .textStyle(.bodyStrong)
-                .foregroundColor(Color.textPrimary)
 
-            Text("Templates are saved from completed workouts or created via Coach")
-                .textStyle(.secondary)
-                .foregroundColor(Color.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, Space.xl)
+    private var emptyStateView: some View {
+        VStack(spacing: Space.lg) {
+            CoachPresenceIndicator(size: 32)
+
+            VStack(spacing: Space.sm) {
+                Text("No templates yet")
+                    .textStyle(.sectionHeader)
+                    .foregroundColor(.textPrimary)
+                    .multilineTextAlignment(.center)
+
+                Text("Create one or ask your coach.")
+                    .textStyle(.secondary)
+                    .foregroundColor(.textSecondary)
+                    .multilineTextAlignment(.center)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(InsetsToken.screen)
     }
-    
+
     private var templatesList: some View {
         ScrollView {
             LazyVStack(spacing: Space.sm) {
@@ -536,7 +538,7 @@ struct ExercisesListView: View {
                         Image(systemName: "xmark")
                             .font(.system(size: 10, weight: .bold))
                         Text("Clear all")
-                            .font(.system(size: 12, weight: .medium))
+                            .textStyle(.micro)
                     }
                     .foregroundColor(Color.textSecondary)
                     .padding(.horizontal, 10)
@@ -574,8 +576,8 @@ struct ExercisesListView: View {
     private func activeFilterPill(label: String, color: Color, onRemove: @escaping () -> Void) -> some View {
         HStack(spacing: 4) {
             Text(label)
-                .font(.system(size: 12, weight: .medium))
-            
+                .textStyle(.micro)
+
             Button(action: onRemove) {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
@@ -629,7 +631,8 @@ struct ExercisesListView: View {
                     viewModel.setSortOption(option)
                 } label: {
                     Text(option.rawValue)
-                        .font(.system(size: 12, weight: viewModel.sortOption == option ? .semibold : .medium))
+                        .textStyle(.micro)
+                        .fontWeight(viewModel.sortOption == option ? .semibold : .medium)
                         .foregroundColor(viewModel.sortOption == option ? .textInverse : Color.textSecondary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
@@ -672,7 +675,7 @@ struct ExercisesListView: View {
 
             if !searchText.isEmpty {
                 Text("Try a different search term")
-                    .textStyle(.secondary)
+                    .textStyle(.caption)
                     .foregroundColor(Color.textTertiary)
             }
 
@@ -681,7 +684,7 @@ struct ExercisesListView: View {
                     filters.clear()
                 } label: {
                     Text("Clear all filters")
-                        .textStyle(.secondary)
+                        .textStyle(.caption)
                         .foregroundColor(Color.accent)
                 }
                 .padding(.top, Space.sm)
@@ -902,7 +905,7 @@ struct TemplateDetailView: View {
             if isEditing {
                 // Editable name
                 TextField("Template name", text: $editingName)
-                    .font(.system(size: 17, weight: .semibold))
+                    .textStyle(.bodyStrong)
                     .foregroundColor(Color.textPrimary)
                     .textFieldStyle(.plain)
                     .padding(.horizontal, Space.sm)
@@ -912,7 +915,7 @@ struct TemplateDetailView: View {
 
                 // Editable description
                 TextField("Description (optional)", text: $editingDescription)
-                    .font(.system(size: 14))
+                    .textStyle(.caption)
                     .foregroundColor(Color.textSecondary)
                     .textFieldStyle(.plain)
                     .padding(.horizontal, Space.sm)
@@ -1003,7 +1006,7 @@ struct TemplateDetailView: View {
                         Image(systemName: "plus.circle.fill")
                             .font(.system(size: 18))
                         Text("Add Exercise")
-                            .font(.system(size: 15, weight: .medium))
+                            .textStyle(.secondary)
                     }
                     .foregroundColor(Color.accent)
                     .frame(maxWidth: .infinity)
@@ -1409,7 +1412,7 @@ struct RoutineDetailView: View {
                                 Image(systemName: "plus.circle.fill")
                                     .font(.system(size: 18))
                                 Text("Add Template")
-                                    .font(.system(size: 15, weight: .medium))
+                                    .textStyle(.secondary)
                             }
                             .foregroundColor(Color.accent)
                             .frame(maxWidth: .infinity)
@@ -1430,7 +1433,7 @@ struct RoutineDetailView: View {
         if isEditing {
             VStack(alignment: .leading, spacing: Space.sm) {
                 TextField("Routine name", text: $editingName)
-                    .font(.system(size: 17, weight: .semibold))
+                    .textStyle(.bodyStrong)
                     .foregroundColor(Color.textPrimary)
                     .textFieldStyle(.plain)
                     .padding(.horizontal, Space.sm)
@@ -1439,7 +1442,7 @@ struct RoutineDetailView: View {
                     .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon))
 
                 TextField("Description (optional)", text: $editingDescription)
-                    .font(.system(size: 14))
+                    .textStyle(.caption)
                     .foregroundColor(Color.textSecondary)
                     .textFieldStyle(.plain)
                     .padding(.horizontal, Space.sm)
@@ -1449,11 +1452,11 @@ struct RoutineDetailView: View {
 
                 HStack {
                     Text("Frequency")
-                        .font(.system(size: 15))
+                        .textStyle(.secondary)
                         .foregroundColor(Color.textPrimary)
                     Spacer()
                     Stepper("\(editingFrequency)x per week", value: $editingFrequency, in: 1...7)
-                        .font(.system(size: 14))
+                        .textStyle(.caption)
                         .foregroundColor(Color.textSecondary)
                 }
                 .padding(.top, Space.xs)
