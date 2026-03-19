@@ -3,6 +3,8 @@ import SwiftUI
 /// Library Tab - Content assets and reference catalog
 /// Simple list landing with Routines, Templates, Exercises sections
 struct LibraryView: View {
+    @State private var hasAppeared = false
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.lg) {
@@ -11,13 +13,14 @@ struct LibraryView: View {
                     Text("Library")
                         .font(.system(size: 28, weight: .bold))
                         .foregroundColor(Color.textPrimary)
-                    
+
                     Text("Your training assets and content")
-                        .font(.system(size: 15))
+                        .textStyle(.secondary)
                         .foregroundColor(Color.textSecondary)
                 }
                 .padding(.horizontal, Space.lg)
                 .padding(.top, Space.md)
+                .staggeredEntrance(index: 0, active: hasAppeared)
                 
                 // Library sections - monochrome icons for premium aesthetic
                 VStack(spacing: Space.sm) {
@@ -64,13 +67,21 @@ struct LibraryView: View {
                     .buttonStyle(PlainButtonStyle())
                 }
                 .padding(.horizontal, Space.lg)
-                
+                .staggeredEntrance(index: 1, active: hasAppeared)
+
                 Spacer(minLength: Space.xxl)
             }
         }
         .background(Color.bg)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            if !hasAppeared {
+                withAnimation {
+                    hasAppeared = true
+                }
+            }
+        }
     }
 }
 
@@ -94,11 +105,11 @@ private struct LibraryRow: View {
             // Text
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.system(size: 16, weight: .semibold))
+                    .textStyle(.bodyStrong)
                     .foregroundColor(Color.textPrimary)
-                
+
                 Text(subtitle)
-                    .font(.system(size: 13))
+                    .textStyle(.caption)
                     .foregroundColor(Color.textSecondary)
             }
             
@@ -159,11 +170,11 @@ struct RoutinesListView: View {
                 .foregroundColor(Color.textTertiary)
             
             Text("No routines yet")
-                .font(.system(size: 17, weight: .semibold))
+                .textStyle(.bodyStrong)
                 .foregroundColor(Color.textPrimary)
-            
+
             Text("Use the Coach to create your first training program")
-                .font(.system(size: 14))
+                .textStyle(.secondary)
                 .foregroundColor(Color.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, Space.xl)
@@ -267,11 +278,11 @@ struct TemplatesListView: View {
                 .foregroundColor(Color.textTertiary)
             
             Text("No templates yet")
-                .font(.system(size: 17, weight: .semibold))
+                .textStyle(.bodyStrong)
                 .foregroundColor(Color.textPrimary)
-            
+
             Text("Templates are saved from completed workouts or created via Coach")
-                .font(.system(size: 14))
+                .textStyle(.secondary)
                 .foregroundColor(Color.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, Space.xl)
@@ -587,7 +598,7 @@ struct ExercisesListView: View {
                     sortChips
                     Spacer()
                     Text("\(filteredExercises.count) exercises")
-                        .font(.system(size: 13))
+                        .textStyle(.caption)
                         .foregroundColor(Color.textTertiary)
                 }
                 .padding(.horizontal, Space.md)
@@ -638,7 +649,7 @@ struct ExercisesListView: View {
             ProgressView()
                 .scaleEffect(1.2)
             Text("Loading exercises...")
-                .font(.system(size: 14))
+                .textStyle(.secondary)
                 .foregroundColor(Color.textSecondary)
                 .padding(.top, Space.md)
             Spacer()
@@ -656,21 +667,21 @@ struct ExercisesListView: View {
                 .foregroundColor(Color.textTertiary)
             
             Text("No exercises found")
-                .font(.system(size: 16, weight: .medium))
+                .textStyle(.bodyStrong)
                 .foregroundColor(Color.textSecondary)
-            
+
             if !searchText.isEmpty {
                 Text("Try a different search term")
-                    .font(.system(size: 14))
+                    .textStyle(.secondary)
                     .foregroundColor(Color.textTertiary)
             }
-            
+
             if !filters.isEmpty {
                 Button {
                     filters.clear()
                 } label: {
                     Text("Clear all filters")
-                        .font(.system(size: 14, weight: .medium))
+                        .textStyle(.secondary)
                         .foregroundColor(Color.accent)
                 }
                 .padding(.top, Space.sm)
@@ -693,12 +704,12 @@ private struct LibraryExerciseRow: View {
                 // Exercise info
                 VStack(alignment: .leading, spacing: 2) {
                     Text(exercise.capitalizedName)
-                        .font(.system(size: 15, weight: .medium))
+                        .textStyle(.secondary)
                         .foregroundColor(Color.textPrimary)
                         .lineLimit(1)
-                    
+
                     Text(exerciseSubtitle)
-                        .font(.system(size: 13))
+                        .textStyle(.caption)
                         .foregroundColor(Color.textSecondary)
                         .lineLimit(1)
                 }
@@ -862,7 +873,7 @@ struct TemplateDetailView: View {
                 .foregroundColor(Color.warning)
             
             Text("Template not found")
-                .font(.system(size: 17, weight: .semibold))
+                .textStyle(.bodyStrong)
                 .foregroundColor(Color.textPrimary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -920,7 +931,7 @@ struct TemplateDetailView: View {
 
                 if let description = template?.description, !description.isEmpty {
                     Text(description)
-                        .font(.system(size: 14))
+                        .textStyle(.secondary)
                         .foregroundColor(Color.textSecondary)
                 }
             }
@@ -933,7 +944,7 @@ struct TemplateDetailView: View {
                 .font(.system(size: 24, weight: .bold))
                 .foregroundColor(Color.textPrimary)
             Text(label)
-                .font(.system(size: 13))
+                .textStyle(.caption)
                 .foregroundColor(Color.textSecondary)
         }
     }
@@ -1310,7 +1321,7 @@ struct RoutineDetailView: View {
                 .foregroundColor(Color.textTertiary)
 
             Text("No workouts in this routine")
-                .font(.system(size: 17, weight: .semibold))
+                .textStyle(.bodyStrong)
                 .foregroundColor(Color.textPrimary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1456,7 +1467,7 @@ struct RoutineDetailView: View {
 
                 if let description = routineDescription, !description.isEmpty {
                     Text(description)
-                        .font(.system(size: 14))
+                        .textStyle(.secondary)
                         .foregroundColor(Color.textSecondary)
                 }
             }
@@ -1469,7 +1480,7 @@ struct RoutineDetailView: View {
                 .font(.system(size: 24, weight: .bold))
                 .foregroundColor(Color.textPrimary)
             Text(label)
-                .font(.system(size: 13))
+                .textStyle(.caption)
                 .foregroundColor(Color.textSecondary)
         }
     }
@@ -1598,7 +1609,7 @@ private struct TemplatePickerSheet: View {
                 } else if availableTemplates.isEmpty {
                     VStack(spacing: Space.md) {
                         Text("No more templates to add")
-                            .font(.system(size: 15))
+                            .textStyle(.secondary)
                             .foregroundColor(Color.textSecondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1609,10 +1620,10 @@ private struct TemplatePickerSheet: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(template.name)
-                                    .font(.system(size: 16, weight: .medium))
+                                    .textStyle(.bodyStrong)
                                     .foregroundColor(Color.textPrimary)
                                 Text("\(template.exerciseCount) exercises, \(template.setCount) sets")
-                                    .font(.system(size: 13))
+                                    .textStyle(.caption)
                                     .foregroundColor(Color.textSecondary)
                             }
                         }
