@@ -142,6 +142,12 @@ async function saveRoutine(db, userId, conversationId, artifactId) {
     }
   }
 
+  // Build template_names from created/updated templates
+  const templateNames = {};
+  workouts.forEach((workout, i) => {
+    templateNames[templateIds[i]] = workout.title || `Day ${workout.day}`;
+  });
+
   // Create or update routine
   const routinesPath = `users/${userId}/routines`;
   const routineData = {
@@ -149,6 +155,7 @@ async function saveRoutine(db, userId, conversationId, artifactId) {
     description: content.description || null,
     frequency: content.frequency || templateIds.length,
     template_ids: templateIds,
+    template_names: templateNames,
     updated_at: now,
   };
 
@@ -314,6 +321,11 @@ async function saveAsNew(db, userId, conversationId, artifactId) {
       templateIds.push(newRef.id);
     }
 
+    const templateNames = {};
+    workouts.forEach((workout, i) => {
+      templateNames[templateIds[i]] = workout.title || `Day ${workout.day}`;
+    });
+
     const routinesPath = `users/${userId}/routines`;
     const newRoutineRef = db.collection(routinesPath).doc();
     const routineId = newRoutineRef.id;
@@ -324,6 +336,7 @@ async function saveAsNew(db, userId, conversationId, artifactId) {
       description: content.description || null,
       frequency: content.frequency || templateIds.length,
       template_ids: templateIds,
+      template_names: templateNames,
       cursor: 0,
       created_at: now,
       updated_at: now,

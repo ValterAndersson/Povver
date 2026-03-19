@@ -186,18 +186,25 @@ async function createRoutineFromDraftCore(userId, canvasId, draftId, options = {
       console.log('[createRoutineFromDraft] created template', { templateId: newTemplateRef.id });
     }
   }
-  
+
+  // Build template_names from created templates
+  const templateNames = {};
+  dayCards.forEach(({ workout }, i) => {
+    templateNames[templateIds[i]] = workout.title || dayCards[i].data.content?.title || 'Workout';
+  });
+
   // 4. Create or update routine
   const routinesPath = `users/${userId}/routines`;
   const sourceRoutineId = summary.meta?.sourceRoutineId;
   let routineId;
   let isUpdate = false;
-  
+
   const routineData = {
     name: summaryContent.name || 'My Routine',
     description: summaryContent.description || null,
     frequency: summaryContent.frequency || templateIds.length,
     template_ids: templateIds,
+    template_names: templateNames,
     updated_at: now,
   };
   
