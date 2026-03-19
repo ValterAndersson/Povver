@@ -10,7 +10,7 @@ public struct Toast: View {
     public var body: some View {
         HStack(spacing: Space.sm) {
             Icon(icon, size: .md, color: Color.textInverse)
-            PovverText(text, style: .callout, color: Color.textInverse)
+            Text(text).textStyle(.body).foregroundStyle(Color.textInverse)
         }
         .padding(InsetsToken.symmetric(vertical: Space.sm, horizontal: Space.md))
         .background(Color.accent)

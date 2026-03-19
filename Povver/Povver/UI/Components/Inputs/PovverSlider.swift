@@ -18,9 +18,9 @@ public struct PovverSlider: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: Space.xs) {
             HStack {
-                PovverText(title, style: .subheadline, color: Color.textSecondary)
+                Text(title).textStyle(.secondary).foregroundStyle(Color.textSecondary)
                 Spacer()
-                PovverText(formatter(value), style: .subheadline)
+                Text(formatter(value)).textStyle(.secondary)
             }
             Slider(value: $value, in: range, step: step)
                 .tint(Color.accent)

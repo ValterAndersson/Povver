@@ -14,8 +14,8 @@ public struct PovverToggle: View {
     public var body: some View {
         Toggle(isOn: $isOn) {
             VStack(alignment: .leading, spacing: Space.xxs) {
-                PovverText(title, style: .body)
-                if let subtitle { PovverText(subtitle, style: .footnote, color: Color.textSecondary) }
+                Text(title).textStyle(.body)
+                if let subtitle { Text(subtitle).textStyle(.caption).foregroundStyle(Color.textSecondary) }
             }
         }
         .toggleStyle(SwitchToggleStyle(tint: Color.accent))

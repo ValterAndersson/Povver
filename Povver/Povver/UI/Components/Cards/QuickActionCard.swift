@@ -19,7 +19,7 @@ public struct QuickActionCard: View {
                         .resizable().scaledToFit()
                         .frame(width: IconSizeToken.md, height: IconSizeToken.md)
                         .foregroundColor(Color.textPrimary)
-                    PovverText(title, style: .subheadline)
+                    Text(title).textStyle(.secondary)
                         .lineLimit(2)
                     Spacer()
                     Icon("chevron.right", size: .md, color: Color.textSecondary)

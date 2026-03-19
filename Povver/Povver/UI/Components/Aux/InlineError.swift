@@ -8,7 +8,7 @@ public struct InlineError: View {
             Image(systemName: "exclamationmark.circle.fill")
                 .foregroundColor(Color.destructive)
                 .frame(width: IconSizeToken.md, height: IconSizeToken.md)
-            PovverText(message, style: .footnote, color: Color.destructive)
+            Text(message).textStyle(.caption).foregroundStyle(Color.destructive)
                 .lineLimit(2)
         }
         .padding(.vertical, Space.xs)

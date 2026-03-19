@@ -13,7 +13,7 @@ public struct PovverSegmented<Option: Hashable & CustomStringConvertible>: View 
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Space.xs) {
-            PovverText(title, style: .subheadline, color: Color.textSecondary)
+            Text(title).textStyle(.secondary).foregroundStyle(Color.textSecondary)
             Picker(title, selection: $selection) {
                 ForEach(options, id: \.self) { option in
                     SwiftUI.Text(option.description).tag(option)

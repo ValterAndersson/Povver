@@ -1,5 +1,6 @@
 import SwiftUI
 
+@available(*, deprecated, message: "Use Text(\"...\").textStyle(.style) instead")
 public enum PovverTextStyle {
     case display, title1, title2, title3
     case headline, body, callout, subheadline, footnote, caption

@@ -15,8 +15,8 @@ public struct Banner: View {
         HStack(alignment: .top, spacing: Space.sm) {
             Icon(iconName, size: .md, color: onColor)
             VStack(alignment: .leading, spacing: Space.xs) {
-                PovverText(title, style: .headline, color: onColor)
-                if let message { PovverText(message, style: .subheadline, color: onColor) }
+                Text(title).textStyle(.bodyStrong).foregroundStyle(onColor)
+                if let message { Text(message).textStyle(.secondary).foregroundStyle(onColor) }
             }
             Spacer()
         }

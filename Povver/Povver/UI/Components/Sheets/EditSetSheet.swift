@@ -30,15 +30,15 @@ public struct EditSetSheet: View {
         ) {
             VStack(alignment: .leading, spacing: Space.lg) {
                 HStack {
-                    PovverText("Sets", style: .subheadline, color: Color.textSecondary)
-                    Stepper(value: $sets, in: 1...10) { PovverText(String(sets), style: .headline) }
+                    Text("Sets").textStyle(.secondary).foregroundStyle(Color.textSecondary)
+                    Stepper(value: $sets, in: 1...10) { Text(String(sets)).textStyle(.bodyStrong) }
                 }
                 HStack {
-                    PovverText("Reps", style: .subheadline, color: Color.textSecondary)
-                    Stepper(value: $reps, in: 1...30) { PovverText(String(reps), style: .headline) }
+                    Text("Reps").textStyle(.secondary).foregroundStyle(Color.textSecondary)
+                    Stepper(value: $reps, in: 1...30) { Text(String(reps)).textStyle(.bodyStrong) }
                 }
                 HStack {
-                    PovverText("Weight", style: .subheadline, color: Color.textSecondary)
+                    Text("Weight").textStyle(.secondary).foregroundStyle(Color.textSecondary)
                     Slider(
                         value: Binding(
                             get: { WeightFormatter.display(weightKg, unit: weightUnit) },
@@ -49,7 +49,7 @@ public struct EditSetSheet: View {
                         in: 0...(weightUnit == .lbs ? 660 : 300),  // 300kg ≈ 660lbs
                         step: WeightFormatter.plateIncrement(unit: weightUnit)
                     ).tint(Color.accent)
-                    PovverText(WeightFormatter.format(weightKg, unit: weightUnit), style: .headline)
+                    Text(WeightFormatter.format(weightKg, unit: weightUnit)).textStyle(.bodyStrong)
                         .monospacedDigit()
                         .frame(width: 80, alignment: .trailing)
                 }

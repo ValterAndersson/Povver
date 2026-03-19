@@ -22,7 +22,7 @@ public struct PovverTextField: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Space.xs) {
-            PovverText(title, style: .subheadline, color: Color.textSecondary)
+            Text(title).textStyle(.secondary).foregroundStyle(Color.textSecondary)
             HStack(spacing: Space.sm) {
                 if isSecure {
                     SecureField(placeholder, text: $text)
@@ -46,7 +46,7 @@ public struct PovverTextField: View {
             .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous))
 
             if let message = validation.message {
-                PovverText(message, style: .footnote, color: validation.color)
+                Text(message).textStyle(.caption).foregroundStyle(validation.color)
             }
         }
     }
