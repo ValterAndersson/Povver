@@ -199,7 +199,7 @@ struct FocusModeWorkoutScreen: View {
                 }
 
                 ZStack {
-                    Color.bg.ignoresSafeArea()
+                    Color.bgWorkout.ignoresSafeArea()
 
                     if let workout = service.workout {
                         workoutContent(workout, safeAreaBottom: geometry.safeAreaInsets.bottom)
@@ -208,7 +208,7 @@ struct FocusModeWorkoutScreen: View {
                     }
                 }
             }
-            .background(Color.bg)
+            .background(Color.bgWorkout)
         }
     }
 
@@ -953,6 +953,12 @@ struct FocusModeWorkoutScreen: View {
                                 .foregroundColor(Color.accent)
                                 .frame(width: 44, height: 44)
                                 .contentShape(Rectangle())
+                                .overlay(alignment: .topTrailing) {
+                                    Circle()
+                                        .fill(Color.accent)
+                                        .frame(width: 6, height: 6)
+                                        .offset(x: 2, y: -2)
+                                }
                         }
                         .buttonStyle(PlainButtonStyle())
                         .opacity(showCollapsedActions ? 1.0 : 0)

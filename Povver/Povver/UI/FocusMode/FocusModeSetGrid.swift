@@ -325,8 +325,9 @@ struct FocusModeSetGrid: View {
                 let reps = set.displayReps ?? 10
                 let rir = set.displayRir
                 onLogSet(exercise.instanceId, set.id, weight, reps, rir)
+                HapticManager.setCompleted()
             }
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+
         } label: {
             ZStack {
                 // Circle background: filled when done, ring when not
