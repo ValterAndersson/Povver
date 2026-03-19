@@ -13,6 +13,8 @@ struct FloatingWorkoutBanner: View {
     let elapsedTime: TimeInterval
     let onTap: () -> Void
 
+    @State private var breatheScale: CGFloat = 1.0
+
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: Space.sm) {
@@ -36,9 +38,15 @@ struct FloatingWorkoutBanner: View {
             .padding(.vertical, 12)
             .background(Color.accent)
             .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
-            .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
+            .shadowStyle(ShadowsToken.level2)
         }
         .buttonStyle(PlainButtonStyle())
+        .scaleEffect(breatheScale)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 4).repeatForever(autoreverses: true)) {
+                breatheScale = 1.02
+            }
+        }
     }
 
     private func formatDuration(_ interval: TimeInterval) -> String {
