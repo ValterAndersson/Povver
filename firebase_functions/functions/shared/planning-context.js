@@ -271,7 +271,8 @@ async function fetchTemplates(db, userId, templateIds, includeExercises = false)
 async function getPlanningContext(db, userId, options = {}) {
   const {
     includeTemplates = true,
-    includeTemplateExercises = false,
+    // Compact view needs exercise arrays to extract exercise names
+    includeTemplateExercises = options.view === 'compact' ? true : false,
     includeRecentWorkouts = true,
     workoutLimit = 20,
   } = options;
@@ -330,11 +331,83 @@ async function getPlanningContext(db, userId, options = {}) {
   // 6. Strength summary (derived from workout data, no extra reads)
   result.strengthSummary = buildStrengthSummary(result.recentWorkoutsSummary || []);
 
+  // Apply view projection
+  if (options.view === 'compact') {
+    return compactPlanningContext(result);
+  }
+
   return result;
+}
+
+/**
+ * Compact planning context for agent consumption.
+ * Uses camelCase field names for MCP compatibility.
+ *
+ * @param {Object} ctx - Full planning context from getPlanningContext()
+ * @returns {Object} Compact context (~2KB)
+ */
+function compactPlanningContext(ctx) {
+  const user = ctx.user ? {
+    id: ctx.user.id,
+    name: ctx.user.name,
+    weight_unit: ctx.weight_unit,
+    fitness_level: ctx.user.attributes?.fitness_level || null,
+    fitness_goal: ctx.user.attributes?.fitness_goal || null,
+  } : null;
+
+  const activeRoutine = ctx.activeRoutine ? {
+    id: ctx.activeRoutine.id,
+    name: ctx.activeRoutine.name,
+    template_ids: ctx.activeRoutine.template_ids,
+    template_names: ctx.activeRoutine.template_names || null,
+    frequency: ctx.activeRoutine.frequency,
+  } : null;
+
+  const nextWorkout = ctx.nextWorkout ? {
+    templateId: ctx.nextWorkout.templateId,
+    templateIndex: ctx.nextWorkout.templateIndex,
+    templateCount: ctx.nextWorkout.templateCount,
+    templateName: ctx.nextWorkout.template?.name || null,
+  } : null;
+
+  const recentWorkouts = (ctx.recentWorkoutsSummary || []).slice(0, 10).map(w => ({
+    id: w.id,
+    end_time: w.end_time,
+    source_template_id: w.source_template_id,
+    exercises: (w.exercises || []).map(ex => ({
+      name: ex.name,
+      working_sets: ex.working_sets,
+    })),
+  }));
+
+  // Compute days since last workout
+  let daysSinceLastWorkout = null;
+  if (recentWorkouts.length > 0 && recentWorkouts[0].end_time) {
+    const lastDate = new Date(recentWorkouts[0].end_time);
+    if (!isNaN(lastDate.getTime())) {
+      daysSinceLastWorkout = Math.floor((Date.now() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
+    }
+  }
+
+  return {
+    user,
+    activeRoutine,
+    nextWorkout,
+    templates: (ctx.templates || []).map(t => ({
+      id: t.id,
+      name: t.name,
+      exerciseCount: t.exerciseCount || t.exercises?.length || 0,
+      exerciseNames: (t.exercises || []).map(ex => ex.name || ex.exercise_id || 'Unknown'),
+    })),
+    recentWorkouts,
+    strengthSummary: ctx.strengthSummary || [],
+    daysSinceLastWorkout,
+  };
 }
 
 module.exports = {
   getPlanningContext,
+  compactPlanningContext,
   fetchUserContext,
   fetchRecentWorkouts,
   fetchTemplates,

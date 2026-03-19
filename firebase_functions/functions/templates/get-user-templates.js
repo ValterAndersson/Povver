@@ -21,7 +21,9 @@ async function getUserTemplatesHandler(req, res) {
   if (!userId) return fail(res, 'UNAUTHENTICATED', 'Authentication required', null, 401);
 
   try {
-    const result = await listTemplates(db, userId);
+    const view = req.query?.view; // 'summary' for compact agent responses
+    const opts = view ? { view } : {};
+    const result = await listTemplates(db, userId, opts);
     return ok(res, result);
   } catch (err) {
     return mapErrorToResponse(res, err);

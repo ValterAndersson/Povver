@@ -746,7 +746,7 @@ async function getAnalysisSummary(db, userId, options = {}, admin) {
   }
 
   if (results.recommendation_history) {
-    const recommendations = [];
+    let recommendations = [];
     for (const doc of results.recommendation_history.docs) {
       const data = doc.data();
       const rec = data.recommendation || {};
@@ -773,6 +773,12 @@ async function getAnalysisSummary(db, userId, options = {}, admin) {
         applied_by: data.applied_by || null,
       });
     }
+
+    // Filter expired unless explicitly requested
+    if (!options.include_expired) {
+      recommendations = recommendations.filter(r => r.state === 'pending_review');
+    }
+
     response.recommendation_history = recommendations;
   }
 

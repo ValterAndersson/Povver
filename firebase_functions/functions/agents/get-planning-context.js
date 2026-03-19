@@ -37,11 +37,13 @@ async function getPlanningContextHandler(req, res) {
   }
 
   const body = req.body || {};
+  const query = req.query || {};
   const options = {
     includeTemplates: body.includeTemplates !== false,
     includeTemplateExercises: body.includeTemplateExercises === true,
     includeRecentWorkouts: body.includeRecentWorkouts !== false,
     workoutLimit: parseInt(body.workoutLimit) || 20,
+    view: body.view || query.view, // 'compact' for agent responses
   };
 
   try {

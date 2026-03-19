@@ -28,9 +28,11 @@ const { formatValidationResponse } = require('../utils/validation-response');
  * @param {FirebaseFirestore.Firestore} db
  * @param {string} userId
  * @param {string} routineId
+ * @param {Object} [opts={}] - Options
+ * @param {boolean} [opts.include_templates] - When true, inline template summaries
  * @returns {Object} routine document with is_active flag
  */
-async function getRoutine(db, userId, routineId) {
+async function getRoutine(db, userId, routineId, opts = {}) {
   if (!routineId) {
     throw new ValidationError('Missing required parameters', ['routineId']);
   }
@@ -47,6 +49,31 @@ async function getRoutine(db, userId, routineId) {
   const routine = { id: routineSnap.id, ...routineSnap.data() };
   const activeRoutineId = userSnap.exists ? userSnap.data().activeRoutineId : null;
   routine.is_active = routine.id === activeRoutineId;
+
+  // Optional: include inline template summaries
+  if (opts.include_templates) {
+    const templateIds = routine.template_ids || [];
+    if (templateIds.length > 0) {
+      const templatesCol = db.collection('users').doc(userId).collection('templates');
+      const templateRefs = templateIds.map(tid => templatesCol.doc(tid));
+      const templateDocs = await db.getAll(...templateRefs);
+
+      routine.templates = templateDocs
+        .filter(d => d.exists)
+        .map((d) => {
+          const t = d.data();
+          return {
+            id: d.id,
+            name: t.name || 'Untitled',
+            position: templateIds.indexOf(d.id),
+            exercise_names: (t.exercises || []).map(ex => ex.name || ex.exercise_id || 'Unknown'),
+            exercise_count: (t.exercises || []).length,
+          };
+        });
+    } else {
+      routine.templates = [];
+    }
+  }
 
   return routine;
 }
@@ -105,6 +132,9 @@ async function createRoutine(db, userId, routineInput) {
   // Collect template IDs from either format
   const templateIds = routineInput.template_ids || routineInput.templateIds || [];
 
+  // Declare outside the if-block so it's always available for enhancedRoutine
+  let templateNames = {};
+
   // Validate all template_ids exist
   if (templateIds.length > 0) {
     const templatesCol = db.collection('users').doc(userId).collection('templates');
@@ -130,6 +160,14 @@ async function createRoutine(db, userId, routineInput) {
         ],
       });
     }
+
+    // Extract template names from already-fetched docs (no additional reads)
+    templateDocs.forEach((doc, idx) => {
+      if (doc.exists) {
+        const data = doc.data();
+        templateNames[templateIds[idx]] = data.name || 'Untitled';
+      }
+    });
   }
 
   const now = admin.firestore.FieldValue.serverTimestamp();
@@ -137,6 +175,7 @@ async function createRoutine(db, userId, routineInput) {
     ...routineInput,
     frequency: routineInput.frequency || 3,
     template_ids: templateIds,
+    template_names: templateNames,
     created_at: now,
     updated_at: now,
   };
@@ -238,25 +277,44 @@ async function patchRoutine(db, userId, routineId, patch) {
       throw new ValidationError('template_ids must be an array');
     }
 
-    // Validate all templates exist (parallel reads)
-    const templateChecks = await Promise.all(
-      sanitizedPatch.template_ids.map(async (tid) => {
-        const templateDoc = await db.collection('users').doc(userId).collection('templates').doc(tid).get();
-        return { tid, exists: templateDoc.exists };
-      })
-    );
+    // Validate all templates exist and collect names
+    if (sanitizedPatch.template_ids.length === 0) {
+      sanitizedPatch.template_names = {};
+      // Clear dangling cursor when all templates removed
+      if (current.last_completed_template_id) {
+        sanitizedPatch.last_completed_template_id = null;
+        sanitizedPatch.last_completed_at = null;
+        patchedFields.push('last_completed_template_id', 'last_completed_at');
+      }
+    } else {
+      const templatesCol = db.collection('users').doc(userId).collection('templates');
+      const templateRefs = sanitizedPatch.template_ids.map(tid => templatesCol.doc(tid));
+      const templateDocs = await db.getAll(...templateRefs);
 
-    const missing = templateChecks.filter(c => !c.exists);
-    if (missing.length > 0) {
-      throw new ValidationError(`Templates not found: ${missing.map(m => m.tid).join(', ')}`);
-    }
+      const missing = [];
+      const templateNames = {};
+      templateDocs.forEach((doc, idx) => {
+        const tid = sanitizedPatch.template_ids[idx];
+        if (!doc.exists) {
+          missing.push(tid);
+        } else {
+          templateNames[tid] = doc.data().name || 'Untitled';
+        }
+      });
 
-    // Cursor consistency: clear if last_completed_template_id is no longer in template_ids
-    const currentCursorId = current.last_completed_template_id;
-    if (currentCursorId && !sanitizedPatch.template_ids.includes(currentCursorId)) {
-      sanitizedPatch.last_completed_template_id = null;
-      sanitizedPatch.last_completed_at = null;
-      patchedFields.push('last_completed_template_id', 'last_completed_at');
+      if (missing.length > 0) {
+        throw new ValidationError(`Templates not found: ${missing.join(', ')}`);
+      }
+
+      sanitizedPatch.template_names = templateNames;
+
+      // Cursor consistency: clear if last_completed_template_id is no longer in template_ids
+      const currentCursorId = current.last_completed_template_id;
+      if (currentCursorId && !sanitizedPatch.template_ids.includes(currentCursorId)) {
+        sanitizedPatch.last_completed_template_id = null;
+        sanitizedPatch.last_completed_at = null;
+        patchedFields.push('last_completed_template_id', 'last_completed_at');
+      }
     }
   }
 

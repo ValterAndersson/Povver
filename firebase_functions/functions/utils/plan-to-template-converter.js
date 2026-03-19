@@ -84,15 +84,22 @@ function convertPlanBlockToTemplateExercise(block, blockIndex) {
   
   // Convert all sets
   const templateSets = sets.map((s, idx) => convertPlanSetToTemplateSet(s, idx, blockIndex));
-  
-  return {
+
+  const result = {
     id: block.id || uuidv4(),
     exercise_id: exerciseId,
     position: blockIndex,
     sets: templateSets,
-    // Optional fields - preserve if present
     rest_between_sets: typeof block.rest_between_sets === 'number' ? block.rest_between_sets : null
   };
+
+  // Pass through exercise name if available (name preferred, exercise_name as fallback)
+  const exerciseName = block.name || block.exercise_name;
+  if (exerciseName) {
+    result.name = exerciseName;
+  }
+
+  return result;
 }
 
 /**

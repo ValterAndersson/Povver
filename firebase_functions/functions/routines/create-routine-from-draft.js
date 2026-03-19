@@ -68,6 +68,7 @@
 
 const admin = require('firebase-admin');
 const { convertPlanToTemplate } = require('../utils/plan-to-template-converter');
+const { resolveExerciseNames } = require('../shared/templates');
 
 /**
  * Creates a routine from a canvas draft.
@@ -144,7 +145,20 @@ async function createRoutineFromDraftCore(userId, canvasId, draftId, options = {
       blocks: dayCard.content?.blocks || [],
       estimated_duration: workout.estimated_duration || dayCard.content?.estimated_duration_minutes,
     });
-    
+
+    // Resolve missing exercise names from catalog
+    const idsToResolve = (templateData.exercises || [])
+      .filter(ex => !ex.name && ex.exercise_id)
+      .map(ex => ex.exercise_id);
+    if (idsToResolve.length > 0) {
+      const nameMap = await resolveExerciseNames(db, idsToResolve);
+      templateData.exercises.forEach(ex => {
+        if (!ex.name && nameMap[ex.exercise_id]) {
+          ex.name = nameMap[ex.exercise_id];
+        }
+      });
+    }
+
     if (sourceTemplateId) {
       // Update existing template
       const templateRef = db.doc(`${templatesPath}/${sourceTemplateId}`);
@@ -186,18 +200,25 @@ async function createRoutineFromDraftCore(userId, canvasId, draftId, options = {
       console.log('[createRoutineFromDraft] created template', { templateId: newTemplateRef.id });
     }
   }
-  
+
+  // Build template_names from created templates
+  const templateNames = {};
+  dayCards.forEach(({ workout }, i) => {
+    templateNames[templateIds[i]] = workout.title || dayCards[i].data.content?.title || 'Workout';
+  });
+
   // 4. Create or update routine
   const routinesPath = `users/${userId}/routines`;
   const sourceRoutineId = summary.meta?.sourceRoutineId;
   let routineId;
   let isUpdate = false;
-  
+
   const routineData = {
     name: summaryContent.name || 'My Routine',
     description: summaryContent.description || null,
     frequency: summaryContent.frequency || templateIds.length,
     template_ids: templateIds,
+    template_names: templateNames,
     updated_at: now,
   };
   

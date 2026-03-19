@@ -17,80 +17,15 @@ const planningContext = require('../shared/planning-context');
 
 const db = admin.firestore();
 
-/** Compact a workout to summary-only (no set-level data) */
-function summarizeWorkout(w: any) {
-  const exercises = (w.exercises || []).map((ex: any) => ({
-    name: ex.name,
-    exercise_id: ex.exercise_id,
-    sets: (ex.sets || []).length,
-  }));
-  return {
-    id: w.id,
-    end_time: w.end_time,
-    source_template_id: w.source_template_id,
-    name: w.name || null,
-    exercises,
-    analytics: w.analytics ? {
-      total_sets: w.analytics.total_sets,
-      total_reps: w.analytics.total_reps,
-      total_volume: w.analytics.total_weight,
-    } : null,
-  };
-}
-
-/** Compact planning context to fit within MCP token limits */
-function compactSnapshot(ctx: any) {
-  return {
-    user: ctx.user ? {
-      id: ctx.user.id,
-      name: ctx.user.name,
-      weight_unit: ctx.weight_unit,
-      attributes: ctx.user.attributes ? {
-        fitness_level: ctx.user.attributes.fitness_level,
-        fitness_goal: ctx.user.attributes.fitness_goal,
-        weight_format: ctx.user.attributes.weight_format,
-      } : null,
-    } : null,
-    activeRoutine: ctx.activeRoutine ? {
-      id: ctx.activeRoutine.id,
-      name: ctx.activeRoutine.name,
-      template_ids: ctx.activeRoutine.template_ids,
-      frequency: ctx.activeRoutine.frequency,
-    } : null,
-    nextWorkout: ctx.nextWorkout ? {
-      templateId: ctx.nextWorkout.templateId,
-      templateIndex: ctx.nextWorkout.templateIndex,
-      templateCount: ctx.nextWorkout.templateCount,
-      templateName: ctx.nextWorkout.template?.name || null,
-    } : null,
-    templates: (ctx.templates || []).map((t: any) => ({
-      id: t.id,
-      name: t.name,
-      exerciseCount: t.exerciseCount || t.exercises?.length || 0,
-    })),
-    recentWorkouts: (ctx.recentWorkoutsSummary || []).slice(0, 10).map((w: any) => ({
-      id: w.id,
-      end_time: w.end_time,
-      source_template_id: w.source_template_id,
-      exercises: (w.exercises || []).map((ex: any) => ({
-        name: ex.name,
-        working_sets: ex.working_sets,
-      })),
-    })),
-    strengthSummary: ctx.strengthSummary || [],
-  };
-}
-
 export function registerTools(server: McpServer, userId: string) {
   // Read tools
   server.tool('get_training_snapshot', 'Get compact overview: user profile, active routine, next workout, recent workouts (summary), strength records', {},
     async () => {
       const ctx = await planningContext.getPlanningContext(db, userId, {
-        includeTemplateExercises: false,
         workoutLimit: 10,
+        view: 'compact',
       });
-      const compact = compactSnapshot(ctx);
-      return { content: [{ type: 'text' as const, text: JSON.stringify(compact, null, 2) }] };
+      return { content: [{ type: 'text' as const, text: JSON.stringify(ctx, null, 2) }] };
     }
   );
 
@@ -101,25 +36,19 @@ export function registerTools(server: McpServer, userId: string) {
     }
   );
 
-  server.tool('get_routine', 'Get a specific routine with template IDs', {
-    routine_id: z.string().describe('Routine ID')
-  }, async ({ routine_id }) => {
-    const routine = await routines.getRoutine(db, userId, routine_id);
+  server.tool('get_routine', 'Get a specific routine with template names and exercise summaries', {
+    routine_id: z.string().describe('Routine ID'),
+    include_templates: z.boolean().default(true).describe('Include template exercise summaries')
+  }, async ({ routine_id, include_templates }) => {
+    const routine = await routines.getRoutine(db, userId, routine_id, { include_templates });
     return { content: [{ type: 'text' as const, text: JSON.stringify(routine, null, 2) }] };
   });
 
   // --- Templates ---
   server.tool('list_templates', 'List all workout templates (names + IDs, no exercises). Use get_template for full exercise list.', {},
     async () => {
-      const items = await templates.listTemplates(db, userId);
-      const summaries = (items || []).map((t: any) => ({
-        id: t.id,
-        name: t.name,
-        description: t.description,
-        exercise_count: t.exercises?.length || 0,
-        exercise_names: (t.exercises || []).map((e: any) => e.name),
-      }));
-      return { content: [{ type: 'text' as const, text: JSON.stringify(summaries, null, 2) }] };
+      const result = await templates.listTemplates(db, userId, { view: 'summary' });
+      return { content: [{ type: 'text' as const, text: JSON.stringify(result.items, null, 2) }] };
     }
   );
 
@@ -134,10 +63,9 @@ export function registerTools(server: McpServer, userId: string) {
   server.tool('list_workouts', 'List recent workouts (summaries: date, exercises, set counts). Use get_workout for full set data.', {
     limit: z.number().default(10).describe('Max results (default 10)')
   }, async ({ limit }) => {
-    const result = await workouts.listWorkouts(db, userId, { limit: limit || 10 });
-    const summaries = (result.items || []).map(summarizeWorkout);
+    const result = await workouts.listWorkouts(db, userId, { limit: limit || 10, view: 'summary' });
     return { content: [{ type: 'text' as const, text: JSON.stringify({
-      workouts: summaries,
+      workouts: result.items,
       analytics: result.analytics,
       hasMore: result.hasMore,
     }, null, 2) }] };
@@ -155,15 +83,16 @@ export function registerTools(server: McpServer, userId: string) {
     query: z.string().describe('Search query'),
     limit: z.number().default(10).describe('Max results')
   }, async ({ query, limit }) => {
-    const result = await exercises.searchExercises(db, { query, limit: limit || 10 });
+    const result = await exercises.searchExercises(db, { query, limit: limit || 10, fields: 'lean' });
     return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
   });
 
   // --- Training Analysis ---
   server.tool('get_training_analysis', 'Get training analysis insights', {
-    sections: z.array(z.string()).optional().describe('Sections to include')
-  }, async ({ sections }) => {
-    const analysis = await trainingQueries.getAnalysisSummary(db, userId, { sections }, admin);
+    sections: z.array(z.string()).optional().describe('Sections: insights, weekly_review, recommendation_history'),
+    include_expired: z.boolean().default(false).describe('Include expired/applied recommendations')
+  }, async ({ sections, include_expired }) => {
+    const analysis = await trainingQueries.getAnalysisSummary(db, userId, { sections, include_expired }, admin);
     return { content: [{ type: 'text' as const, text: JSON.stringify(analysis, null, 2) }] };
   });
 
@@ -184,9 +113,18 @@ export function registerTools(server: McpServer, userId: string) {
   });
 
   server.tool('query_sets', 'Query raw set-level training data', {
-    target: z.record(z.string(), z.any()).describe('Target filter (exercise, muscle_group, or muscle)'),
+    exercise_name: z.string().optional().describe('Exercise name (fuzzy match)'),
+    muscle_group: z.string().optional().describe('Muscle group (e.g., "chest", "back", "shoulders")'),
+    muscle: z.string().optional().describe('Specific muscle (e.g., "posterior deltoid")'),
+    exercise_ids: z.array(z.string()).optional().describe('Exercise IDs (max 10)'),
     limit: z.number().default(50).describe('Max results')
-  }, async ({ target, limit }) => {
+  }, async ({ exercise_name, muscle_group, muscle, exercise_ids, limit }) => {
+    const target: Record<string, any> = {};
+    if (exercise_name) target.exercise_name = exercise_name;
+    if (muscle_group) target.muscle_group = muscle_group;
+    if (muscle) target.muscle = muscle;
+    if (exercise_ids) target.exercise_ids = exercise_ids;
+
     const data = await trainingQueries.querySets(db, userId, { target, limit: limit || 50 });
     return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
   });
@@ -211,7 +149,17 @@ export function registerTools(server: McpServer, userId: string) {
 
   server.tool('create_template', 'Create a new workout template', {
     name: z.string().describe('Template name'),
-    exercises: z.array(z.any()).describe('Exercise list with sets')
+    exercises: z.array(z.object({
+      exercise_id: z.string().describe('Exercise ID from search_exercises'),
+      name: z.string().optional().describe('Exercise name'),
+      position: z.number().describe('Order in template (0-based)'),
+      sets: z.array(z.object({
+        type: z.string().default('Working Set').describe('Set type (e.g., "Working Set", "warmup")'),
+        reps: z.number().describe('Target reps'),
+        weight: z.number().nullable().describe('Target weight (kg) or null for bodyweight'),
+        rir: z.number().describe('Reps in reserve (0-5)'),
+      })),
+    })).describe('Exercises with set prescriptions'),
   }, async (args) => {
     const tmpl = await templates.createTemplate(db, userId, args);
     return { content: [{ type: 'text' as const, text: JSON.stringify(tmpl, null, 2) }] };
@@ -219,7 +167,21 @@ export function registerTools(server: McpServer, userId: string) {
 
   server.tool('update_template', 'Update an existing template', {
     template_id: z.string().describe('Template ID'),
-    updates: z.record(z.string(), z.any()).describe('Fields to update')
+    updates: z.object({
+      name: z.string().optional(),
+      description: z.string().optional(),
+      exercises: z.array(z.object({
+        exercise_id: z.string().describe('Exercise ID'),
+        name: z.string().optional().describe('Exercise name'),
+        position: z.number().describe('Order (0-based)'),
+        sets: z.array(z.object({
+          type: z.string().default('Working Set').describe('Set type (e.g., "Working Set", "warmup")'),
+          reps: z.number().describe('Target reps'),
+          weight: z.number().nullable().describe('Target weight (kg)'),
+          rir: z.number().describe('Reps in reserve (0-5)'),
+        })),
+      })).optional(),
+    }).describe('Fields to update'),
   }, async ({ template_id, updates }) => {
     const tmpl = await templates.patchTemplate(db, userId, template_id, updates);
     return { content: [{ type: 'text' as const, text: JSON.stringify(tmpl, null, 2) }] };

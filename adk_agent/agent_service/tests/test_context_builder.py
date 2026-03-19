@@ -234,6 +234,40 @@ class TestFormatSnapshot:
         assert "Active routine" not in result
         assert "Latest insight" not in result
 
+    def test_http_compact_view_shape(self):
+        """HTTP compact view uses camelCase keys and flat user fields."""
+        planning = {
+            "user": {
+                "name": "Val",
+                "weight_unit": "lbs",
+                "fitness_level": "intermediate",
+                "fitness_goal": "Build Muscle",
+            },
+            "activeRoutine": {"id": "r1", "name": "PPL", "template_ids": ["t1"]},
+            "templates": [{"id": "t1", "name": "Push"}],
+            "recentWorkouts": [{"id": "w1", "name": "Push Day"}],
+            "strengthSummary": [],
+            "daysSinceLastWorkout": 2,
+        }
+        result = _format_snapshot(planning)
+        assert "User: Val" in result
+        assert "Fitness level: intermediate" in result
+        assert "Goal: Build Muscle" in result
+        assert "Weight unit: lbs" in result
+        assert "Active routine: PPL" in result
+        # No analysis key in compact view — should not appear
+        assert "Latest insight" not in result
+
+    def test_http_compact_view_no_routine(self):
+        """HTTP compact view with null activeRoutine."""
+        planning = {
+            "user": {"name": "New User", "weight_unit": "kg"},
+            "activeRoutine": None,
+        }
+        result = _format_snapshot(planning)
+        assert "User: New User" in result
+        assert "Active routine" not in result
+
 
 class TestFormatHistory:
     def test_maps_types_to_roles(self):

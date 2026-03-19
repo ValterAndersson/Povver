@@ -219,6 +219,7 @@ const TemplateExerciseSchema = z.object({
   id: z.string().optional(),
   exercise_id: IdSchema.optional(), // server uses exerciseId sometimes; keep minimal
   exerciseId: IdSchema.optional(),   // backward compat
+  name: z.string().max(MAX_NAME_LENGTH).optional(), // resolved from exercise catalog at write time
   position: z.number().int().nonnegative().optional(),
   sets: z.array(TemplateSetSchema).min(0).max(MAX_SETS_PER_EXERCISE),
   rest_between_sets: z.number().int().optional(),

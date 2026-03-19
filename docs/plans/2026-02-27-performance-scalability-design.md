@@ -3,55 +3,70 @@
 > **Document Purpose**: Comprehensive performance and scalability audit with ranked implementation plan. Written for LLM/agentic coding agents to execute without ambiguity.
 >
 > **Created**: 2026-02-27
-> **Status**: Approved design, ready for implementation planning
+> **Revised**: 2026-03-04 — Principal architect review with multi-agent adversarial validation. Corrected write counts (126 vs original 35-45), identified SSE race conditions blocking concurrency >1, added Phase 0 (observability), added missing security items, corrected rate limiting approach (Redis over Firestore), removed phantom workspace_entries claim.
+> **Status**: Revised design, ready for implementation planning
 > **Scope**: Full-stack review — iOS, Firebase Functions, Firestore, Vertex AI Agent Engine
-> **Target**: Scale from current (<1k users) to 100k concurrent users
+> **Target**: Scale from current (<1k users) to 10k users (3-month horizon), architected for 100k
 
 ---
 
 ## Table of Contents
 
 1. [Executive Summary](#executive-summary)
-2. [Current Architecture Quick Reference](#current-architecture-quick-reference)
-3. [Phase 1 — Emergency Fixes (Week 1)](#phase-1--emergency-fixes-week-1)
-   - [1.1 SSE Proxy Connection Cap](#11-sse-proxy-connection-cap)
+2. [Architecture Review Findings (2026-03-04)](#architecture-review-findings-2026-03-04)
+3. [Current Architecture Quick Reference](#current-architecture-quick-reference)
+4. [Phase 0 — Observability Foundation (Week 0)](#phase-0--observability-foundation-week-0)
+   - [0.1 Cloud Monitoring Dashboards](#01-cloud-monitoring-dashboards)
+   - [0.2 Alerting Rules](#02-alerting-rules)
+   - [0.3 Cost Tracking](#03-cost-tracking)
+5. [Phase 1 — Emergency Fixes (Weeks 1–2)](#phase-1--emergency-fixes-weeks-12)
+   - [1.1 SSE Proxy Connection Cap (Conservative)](#11-sse-proxy-connection-cap-conservative)
    - [1.2 Subscription Gate Caching](#12-subscription-gate-caching)
    - [1.3 GCP Token Caching in exchange-token](#13-gcp-token-caching-in-exchange-token)
    - [1.4 Parallelize get-planning-context Reads](#14-parallelize-get-planning-context-reads)
-   - [1.5 Recommendation Listener Leak](#15-recommendation-listener-leak)
-4. [Phase 2 — UX Speed (Weeks 2–3)](#phase-2--ux-speed-weeks-23)
+   - [1.5 Set maxInstances on All Functions](#15-set-maxinstances-on-all-functions)
+   - [1.6 Add Rate Limiting to Write Endpoints](#16-add-rate-limiting-to-write-endpoints)
+   - [1.7 Enable Firebase App Check](#17-enable-firebase-app-check)
+   - [1.8 Request Vertex AI Quota Increase](#18-request-vertex-ai-quota-increase)
+   - [1.9 Recommendation Listener Cleanup](#19-recommendation-listener-cleanup)
+6. [Phase 2 — UX Speed (Weeks 3–4)](#phase-2--ux-speed-weeks-34)
    - [2.1 iOS App Launch Waterfall](#21-ios-app-launch-waterfall)
-   - [2.2 Wire CacheManager Into Repositories](#22-wire-cachemanager-into-repositories)
+   - [2.2 Repository Caching](#22-repository-caching)
    - [2.3 Server-Side Workout History Pagination](#23-server-side-workout-history-pagination)
-5. [Phase 3 — Scale Infrastructure (Month 2)](#phase-3--scale-infrastructure-month-2)
-   - [3.1 Async Analytics Processing (Trigger Fan-Out)](#31-async-analytics-processing-trigger-fan-out)
-   - [3.2 Global Rate Limiting](#32-global-rate-limiting)
-   - [3.3 Function Bundle Splitting](#33-function-bundle-splitting)
-   - [3.4 Firestore TTL Policies](#34-firestore-ttl-policies)
-   - [3.5 v1 to v2 Function Migration](#35-v1-to-v2-function-migration)
-6. [Phase 4 — Optimization (Ongoing)](#phase-4--optimization-ongoing)
-   - [4.1 Expand Fast Lane Patterns](#41-expand-fast-lane-patterns)
-   - [4.2 Planning Context Caching](#42-planning-context-caching)
-   - [4.3 Batch Analytics Writes](#43-batch-analytics-writes)
-   - [4.4 Training Analyst Horizontal Scaling](#44-training-analyst-horizontal-scaling)
-   - [4.5 iOS SSE Connection Reuse](#45-ios-sse-connection-reuse)
-7. [Appendix A — Current Bottleneck Map](#appendix-a--current-bottleneck-map)
-8. [Appendix B — Cost Projections](#appendix-b--cost-projections)
-9. [Appendix C — File Reference Index](#appendix-c--file-reference-index)
+7. [Phase 3 — Scale Infrastructure (Month 2)](#phase-3--scale-infrastructure-month-2)
+   - [3.1 Fix SSE Race Conditions + Raise Concurrency](#31-fix-sse-race-conditions--raise-concurrency)
+   - [3.2 Async Analytics Processing (Hybrid Model)](#32-async-analytics-processing-hybrid-model)
+   - [3.3 Fix Trigger Idempotency](#33-fix-trigger-idempotency)
+   - [3.4 Global Rate Limiting (Redis)](#34-global-rate-limiting-redis)
+   - [3.5 Firestore TTL Policies](#35-firestore-ttl-policies)
+   - [3.6 Training Analyst Horizontal Scaling](#36-training-analyst-horizontal-scaling)
+8. [Phase 4 — Optimization (Deferred)](#phase-4--optimization-deferred)
+   - [4.1 Function Bundle Splitting](#41-function-bundle-splitting)
+   - [4.2 v1 to v2 Function Migration](#42-v1-to-v2-function-migration)
+   - [4.3 Expand Fast Lane Patterns](#43-expand-fast-lane-patterns)
+   - [4.4 Evaluate Cloud Run for SSE](#44-evaluate-cloud-run-for-sse)
+9. [Appendix A — Current Bottleneck Map](#appendix-a--current-bottleneck-map)
+10. [Appendix B — Cost Projections (Revised)](#appendix-b--cost-projections-revised)
+11. [Appendix C — File Reference Index](#appendix-c--file-reference-index)
+12. [Appendix D — Scaling Thresholds](#appendix-d--scaling-thresholds)
 
 ---
 
 ## Executive Summary
 
-### Would the system scale to 100k concurrent users today?
+### Would the system scale to 10k concurrent users today?
 
-**No.** Three critical blockers:
+**No.** Five critical blockers (revised from original three after multi-agent code review):
 
-1. **SSE streaming capped at 20 concurrent connections** — `streamAgentNormalized` is configured with `maxInstances: 20, concurrency: 1`. User #21 gets a 503 error. This is the single biggest blocker.
+1. **SSE streaming capped at 20 concurrent connections** — `streamAgentNormalized` is configured with `maxInstances: 20, concurrency: 1` (index.js:234). User #21 gets a 503 error. **Additionally, concurrency cannot be raised above 1 without code changes** — module-level shared mutable state (`eventStartTimes`, `toolArgsCache`, `currentActiveAgent` at lines 453-457 of stream-agent-normalized.js) would cause cross-stream data corruption.
 
-2. **Workout completion triggers write storm** — Completing one workout fires 35–45 Firestore writes synchronously (set_facts, weekly_stats, exercise_usage_stats, series, rollups). At 100k users × 3 workouts/week = 4.5M trigger writes/hour during peak.
+2. **Workout completion triggers ~126 synchronous Firestore writes** (revised from original 35–45 estimate). Breakdown: 30 set_facts + 28 series batch writes + 28 min/max transactions + 10 e1rm transactions + 10 exercise_usage_stats + 8 analytics rollups + 1 analysis job + ~11 other. Two analytics systems (legacy + token-safe) run in parallel. At 10k users × 4 workouts/week = 5M trigger writes/week.
 
-3. **Rate limiting is per-instance, not global** — The in-memory `Map()` in `rate-limiter.js` resets on cold starts and doesn't share state across instances. A determined user can make `N × 120` agent requests/hour where N = number of function instances.
+3. **Rate limiting is per-instance AND only covers 1 of 67 endpoints** — The in-memory `Map()` resets on cold starts and only `streamAgentNormalized` uses it. The other 66 endpoints (including write-heavy ones like `upsertWorkout`, `logSet`, `artifactAction`) have zero rate limiting and no `maxInstances` caps.
+
+4. **Vertex AI Agent Engine default quota: 10 concurrent sessions** — This will be hit before the SSE cap. Must request quota increase via GCP Console.
+
+5. **Zero observability** — No monitoring dashboards, no alerting rules, no cost tracking. Cannot detect or respond to scaling issues.
 
 ### What's already good?
 
@@ -60,15 +75,18 @@
 - **HTTP connection pooling** — Agent-to-Firebase calls reuse TCP connections via `requests.Session()` with `HTTPAdapter(pool_connections=10, pool_maxsize=20)`.
 - **Pre-computed training analysis** — Heavy analytics are pre-computed by background workers, not computed on-demand.
 - **ContextVar isolation** — Per-request state isolation prevents cross-user data leaks in concurrent Vertex AI environments.
+- **Firestore is the right database** — Cost analysis confirms Firestore is cheaper and simpler than PostgreSQL up to 100k users. Migration would increase costs and break real-time iOS UX.
+- **Self-compacting series data** — `analytics_series_exercise` has weekly compaction jobs that prevent document growth.
 
-### Implementation Roadmap
+### Implementation Roadmap (Revised)
 
 | Phase | Duration | Items | Key Metric |
 |-------|----------|-------|------------|
-| **Phase 1: Emergency** | Week 1 | #1.1–#1.5 | SSE capacity 20→5,000; planning context 200ms→50ms |
-| **Phase 2: UX Speed** | Weeks 2–3 | #2.1–#2.3 | App launch 2.5s→<500ms; Firestore reads -80% |
-| **Phase 3: Scale** | Month 2 | #3.1–#3.5 | Trigger writes -80%; rate limiting global |
-| **Phase 4: Optimize** | Ongoing | #4.1–#4.5 | LLM cost -10%; latency polish |
+| **Phase 0: Observability** | Week 0 (parallel with Phase 1) | #0.1–#0.3 | Dashboards + alerts + cost tracking live |
+| **Phase 1: Emergency** | Weeks 1–2 | #1.1–#1.9 | SSE capacity 20→100; all endpoints capped; App Check enabled |
+| **Phase 2: UX Speed** | Weeks 3–4 | #2.1–#2.3 | App launch improved; Firestore reads -80%; paginated history |
+| **Phase 3: Scale Infra** | Month 2 | #3.1–#3.6 | SSE 100→2,000 (after race fix); trigger writes 126→20 sync; global rate limiting |
+| **Phase 4: Optimize** | Deferred until >10k users | #4.1–#4.4 | Bundle splitting; v1→v2 migration; Fast Lane expansion |
 
 ---
 
@@ -103,7 +121,7 @@ Vertex AI Agent Engine (agent_engine_app.py)
   │ 2. set_current_context(ctx)
   │ 3. route_request(message) → Lane routing
   │ 4. If Slow Lane: ShellAgent.run() → LLM + tools
-  │    └─ tool_get_planning_context() → HTTP to Firebase → 4+ sequential Firestore reads ← FIX #1.4
+  │    └─ tool_get_planning_context() → HTTP to Firebase → 4-6 Firestore reads (partially parallelized) ← FIX #1.4
   │ 5. Stream response chunks
   ▼
 Firebase Function (event transformation)
@@ -114,13 +132,104 @@ iOS App (handleIncomingStreamEvent)
 
 ---
 
-## Phase 1 — Emergency Fixes (Week 1)
+## Architecture Review Findings (2026-03-04)
 
-### 1.1 SSE Proxy Connection Cap
+Multi-agent adversarial review with source code verification. These findings correct and supplement the original plan.
+
+### Corrected Claims
+
+| Original Claim | Verified Finding | Impact |
+|----------------|-----------------|--------|
+| 35–45 Firestore writes per workout completion | **~126 writes** (30 set_facts + 28 series + 28 min/max txns + 10 e1rm + 10 exercise_usage + 8 analytics + 1 job + 11 other) | Cost projections were 3x low |
+| `concurrency: 10` is safe for SSE proxy | **UNSAFE** — module-level `eventStartTimes` Map, `toolArgsCache` Map, and `currentActiveAgent` variable (stream-agent-normalized.js:453-457) are shared across concurrent requests, causing cross-stream data corruption | Must fix race conditions before raising concurrency |
+| 4+ sequential Firestore reads in planning context | **4-6 reads, partially parallelized** — templates use `Promise.all`, but user→routine→workouts path is sequential. Optimization is valid but impact is moderate (~100ms savings, not 150ms+) | Lower priority than originally stated |
+| `workspace_entries` grows to 75M events/week | **Collection does not exist** in schema, codebase, or Firestore rules | Remove from plan |
+| 5-minute subscription cache TTL is acceptable | **Too long** — user upgrades to premium, can't use features for up to 5 minutes. Unacceptable UX | Use 1-minute TTL + instant invalidation on webhook |
+| Firestore-based daily cap for rate limiting | **Wrong tool** — Firestore writes add 200-600ms latency overhead per rate limit check, eventual consistency across regions exploitable | Use Memorystore Redis (~$50/month, 1-5ms latency) |
+
+### Missing Critical Items (Not in Original Plan)
+
+| Item | Severity | Finding |
+|------|----------|---------|
+| **Observability** | P0 | Zero monitoring dashboards, alerting, or cost tracking. Cannot detect or respond to scaling issues. Added as Phase 0. |
+| **Only 1/67 endpoints rate-limited** | P1 | 66 endpoints have no rate limiting or `maxInstances` caps. `upsertWorkout`, `logSet`, `artifactAction`, `exchangeToken` are all unprotected. Added to Phase 1. |
+| **Vertex AI quota (10 concurrent sessions)** | P1 | Default Agent Engine quota is 10 concurrent sessions per project. Will be hit before SSE cap at ~500 DAU. Added to Phase 1. |
+| **Firebase App Check not enabled** | P2 | Free bot detection, 10-minute setup. Blocks automated abuse. Added to Phase 1. |
+| **Trigger idempotency gaps** | P2 | `set_facts`, `series_*`, and `training_analysis_jobs` writes have no retry guards. Trigger retries cause duplicate/inflated data. Only `weekly_stats` (via `processed_ids`) and `exercise_usage_stats` (via `last_processed_workout_id`) are protected. Added to Phase 3. |
+| **Dual analytics systems** | P2 | Legacy (`weekly_stats`, `analytics_rollups`, `analytics_series_*`) and token-safe (`set_facts`, `series_exercises`, `series_muscle_groups`, `series_muscles`) both write on every workout completion. Nobody deprecated the legacy system. Consider consolidation in Phase 4. |
+| **Cloud Functions v2 timeout limit** | P2 | v2 HTTP functions have a 9-minute (540s) hard limit. Current `timeoutSeconds: 300` is safe but long agent streams could approach this. Consider Cloud Run migration for SSE long-term (Phase 4). |
+| **Load testing strategy** | P2 | No methodology for validating scaling changes before production deployment. Should be added before Phase 3 changes. |
+| **Rollback strategy** | P2 | v1→v2 migration and async analytics changes are high-risk. Need staged rollout with automated rollback triggers. |
+
+### Items Deprioritized
+
+| Item | Original Phase | Reason |
+|------|---------------|--------|
+| Planning Context Caching (#4.2) | Phase 4 | Already <150ms after parallelization fix. Marginal ROI. |
+| iOS SSE Connection Reuse (#4.5) | Phase 4 | HTTP/2 already reuses connections. Claim of 200-500ms savings is misleading — refers to cold start overhead, not connection setup. |
+| Batch Analytics Writes (#4.3) | Phase 4 | Merged into Phase 3 async analytics worker. Not a separate item. |
+
+### Scaling Thresholds
+
+The original plan treats 100k users as a binary target. The actual scaling journey has different breakpoints:
+
+| Users | What Breaks First | Minimum Fix |
+|-------|--------------------|-------------|
+| **1k→5k** | SSE cap (20 connections during peak) | Raise `maxInstances` to 100 (Phase 1.1) |
+| **5k→10k** | Cold starts noticeable (P95 spikes); Vertex AI quota hit | Set `minInstances` on hot paths; request quota increase |
+| **10k→25k** | Per-instance rate limiting ineffective; analytics triggers slow | Deploy Redis rate limiter; begin async analytics migration |
+| **25k→50k** | Firestore write costs ($400+/month from triggers alone) | Complete async analytics; consolidate dual analytics systems |
+| **50k→100k** | Single-region latency for global users; support volume | Multi-region evaluation; bundle splitting; Cloud Run for SSE |
+
+---
+
+## Phase 0 — Observability Foundation (Week 0)
+
+**Run in parallel with Phase 1. Cannot scale what you cannot measure.**
+
+### 0.1 Cloud Monitoring Dashboards
+
+Create dashboards in GCP Cloud Monitoring for:
+
+- **SSE Health**: Current connection count vs maxInstances, P50/P95/P99 stream duration, 503 error rate
+- **Function Performance**: Invocation rate by endpoint (top 10), P50/P95 latency by endpoint, cold start frequency
+- **Firestore Operations**: Read/write rate by collection (identify hot collections), transaction contention rate
+- **Agent System**: Fast Lane vs Slow Lane ratio, Vertex AI session count, agent tool latency
+- **Error Rates**: 4xx and 5xx by endpoint, function crash rate
+
+### 0.2 Alerting Rules
+
+| Alert | Condition | Channel | Severity |
+|-------|-----------|---------|----------|
+| SSE capacity critical | connections > 80% of maxInstances for 5 min | PagerDuty / SMS | P0 |
+| Error rate spike | any endpoint > 1% error rate for 5 min | Slack | P1 |
+| Latency degradation | P95 > 5 seconds for `streamAgentNormalized` for 10 min | Slack | P1 |
+| Firestore write spike | writes > 10k/minute for 5 min | Slack | P2 (cost warning) |
+| Function budget alert | monthly cost > $500 / $1,000 / $5,000 thresholds | Email | P2 |
+
+### 0.3 Cost Tracking
+
+1. Enable BigQuery billing export in GCP Console
+2. Set budget alerts at $500, $1,000, $5,000 monthly thresholds
+3. Add structured logging with request IDs across function calls for trace correlation
+
+#### Files to Modify
+
+| File | Change |
+|------|--------|
+| GCP Console | Create Cloud Monitoring dashboards and alerting policies |
+| GCP Console | Enable BigQuery billing export, set budget alerts |
+| `firebase_functions/functions/utils/logger-helpers.js` | **NEW** — Request ID generation and propagation helper |
+
+---
+
+## Phase 1 — Emergency Fixes (Weeks 1–2)
+
+### 1.1 SSE Proxy Connection Cap (Conservative)
 
 **Priority**: P0 — System literally cannot serve >20 concurrent agent conversations
 **Severity**: CRITICAL
-**Effort**: Low (configuration change)
+**Effort**: Low (configuration change only — no code changes in this phase)
 
 #### Problem
 
@@ -128,7 +237,7 @@ The SSE streaming proxy `streamAgentNormalized` is configured with hard limits t
 
 ```javascript
 // File: firebase_functions/functions/index.js
-// Line: ~230-233
+// Line: ~234
 exports.streamAgentNormalized = onRequestV2(
   { timeoutSeconds: 300, memory: '512MiB', maxInstances: 20, concurrency: 1 },
   requireFlexibleAuth(streamAgentNormalizedHandler)
@@ -139,31 +248,47 @@ exports.streamAgentNormalized = onRequestV2(
 - `concurrency: 1` = each instance handles exactly 1 request at a time
 - **Result**: Maximum 20 simultaneous SSE streams across ALL users
 
-At 100k users with even 0.5% streaming simultaneously = 500 concurrent streams needed. Current capacity handles 4% of that.
+#### Why concurrency CANNOT be raised above 1 yet
 
-#### Fix
+**CRITICAL: Race conditions in module-level shared state** (verified 2026-03-04).
+
+Lines 453-457 of `stream-agent-normalized.js` declare mutable state at module level:
+
+```javascript
+const eventStartTimes = new Map();      // SHARED across concurrent requests
+const toolArgsCache = new Map();         // SHARED across concurrent requests
+let currentActiveAgent = 'orchestrator'; // SHARED across concurrent requests
+```
+
+With `concurrency > 1`, multiple SSE streams in the same instance would:
+1. **Cross-contaminate tool timing** — Stream A's `eventStartTimes.set('tool_X', ts)` overwritten by Stream B
+2. **Corrupt agent attribution** — Stream A sets `currentActiveAgent = 'coach'`, Stream B sees wrong agent
+3. **Leak tool args** — Stream A's `toolArgsCache` visible to Stream B's completion handler
+
+**Also**: GCP token cache (lines 110-111) has a thundering-herd race — multiple concurrent requests detecting expired token all refresh simultaneously.
+
+**These race conditions must be fixed before raising concurrency. See Phase 3.1.**
+
+#### Fix (Phase 1 — Conservative)
 
 ```javascript
 // File: firebase_functions/functions/index.js
-// Change the configuration:
 exports.streamAgentNormalized = onRequestV2(
   {
-    timeoutSeconds: 300,
+    timeoutSeconds: 540,      // Was: 300. Use full v2 HTTP allowance (9 min max).
     memory: '512MiB',
-    maxInstances: 500,    // Was: 20. Support 500 instances.
-    concurrency: 10       // Was: 1. Node.js async I/O handles 10 concurrent SSE streams per instance.
+    maxInstances: 100,        // Was: 20. 5× capacity with zero code risk.
+    concurrency: 1,           // KEEP AT 1 — race conditions exist (see Phase 3.1).
   },
   requireFlexibleAuth(streamAgentNormalizedHandler)
 );
 ```
 
-**Why `concurrency: 10` is safe for SSE:**
-- SSE connections are I/O-bound (waiting on Vertex AI stream), not CPU-bound
-- Node.js event loop handles concurrent async streams efficiently
-- Each stream uses ~2–5MB memory (within 512MiB budget for 10 streams)
-- The original `concurrency: 1` was overly conservative
+**Capacity after fix**: 100 instances × 1 stream = **100 concurrent streams** (5× current)
 
-**Capacity after fix**: 500 instances × 10 streams = **5,000 concurrent streams**
+**Why conservative**: Provides 5× capacity improvement with zero code changes and zero race condition risk. Buys time for proper Phase 3.1 refactor. Zero recurring cost — `minInstances` deferred until revenue justifies always-on instances.
+
+**Full concurrency unlock**: After Phase 3.1 fixes race conditions → maxInstances: 200, concurrency: 10 = **2,000 concurrent streams**
 
 #### Files to Modify
 
@@ -228,12 +353,12 @@ async function isPremiumUser(userId) {
 
 #### Fix
 
-Add a 5-minute in-memory cache. Expose an `invalidatePremiumCache(userId)` function for the subscription webhook to call.
+Add a 1-minute in-memory cache (revised from original 5 minutes — 5 min is unacceptable UX for upgrade flow). Expose an `invalidatePremiumCache(userId)` function for the subscription webhook to call for instant invalidation.
 
 ```javascript
 // File: firebase_functions/functions/utils/subscription-gate.js
 
-const PREMIUM_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const PREMIUM_CACHE_TTL_MS = 60 * 1000; // 1 minute (revised from 5 min — upgrade must be near-instant)
 const premiumCache = new Map();
 
 async function isPremiumUser(userId) {
@@ -476,68 +601,127 @@ if (user.activeRoutineId) {
 
 ---
 
-### 1.5 Recommendation Listener Leak
+### 1.5 Set maxInstances on All Functions
 
-**Priority**: P1 — Accumulates orphaned Firestore listeners, wastes read quota
-**Severity**: MEDIUM
-**Effort**: Low
+**Priority**: P1 — 64/67 functions have no instance caps, enabling runaway scaling and bill shock
+**Severity**: HIGH
+**Effort**: Low (configuration only)
 
 #### Problem
 
-`RecommendationRepository.startListening()` is called in `MainTabsView.task` but `stopListening()` is never called anywhere. Listeners survive logout and accumulate across sessions.
-
-```swift
-// File: Povver/Povver/Repositories/RecommendationRepository.swift
-// Lines: ~11-38 — startListening() creates addSnapshotListener
-// stopListening() exists but is NEVER CALLED
-
-// File: Povver/Povver/Views/MainTabsView.swift
-// Line: ~140 — starts the listener on tab appearance
-```
+Only 3 functions have `maxInstances` set. The other 64 can scale to GCP's default limit (1,000 instances per function), enabling:
+- Runaway scaling during traffic spikes → bill shock
+- Resource exhaustion of downstream services (Firestore, Vertex AI)
+- No backpressure mechanism
 
 #### Fix
 
-Call `stopListening()` in two places:
+Set `maxInstances` in `index.js` for all functions by tier:
 
-1. **On logout** — in `AuthService.signOut()` or wherever session teardown happens
-2. **On ViewModel deinit** — if `RecommendationsViewModel` owns the listener lifecycle
-
-```swift
-// Option A: In AuthService.signOut() or RootView session teardown
-RecommendationRepository.shared.stopListening()
-
-// Option B: In RecommendationsViewModel (if it exists as ObservableObject)
-deinit {
-    RecommendationRepository.shared.stopListening()
-}
-```
-
-Also audit all `addSnapshotListener` usage across the codebase to verify matching `.remove()` calls:
-- Search pattern: `grep -r "addSnapshotListener" Povver/Povver/`
-- Each result should have a corresponding `ListenerRegistration` stored and `.remove()` called
+| Tier | Functions | maxInstances | Rationale |
+|------|-----------|-------------|-----------|
+| **Hot path** | `streamAgentNormalized` | 100 (Phase 1.1) | Already addressed |
+| **Write-heavy** | `logSet`, `upsertWorkout`, `artifactAction`, `completeActiveWorkout` | 50 | Cap write amplification |
+| **Read-heavy** | `getUserWorkouts`, `getUserTemplates`, `getRoutine`, `getTemplate`, `searchExercises`, `getPlanningContext` | 100 | Higher concurrency acceptable for reads |
+| **Auth/Token** | `exchangeToken`, `getServiceToken` | 30 | Protect GCP metadata service |
+| **Standard** | All remaining endpoints | 50 | Reasonable default |
+| **Triggers** | All Firestore triggers | 30 | Prevent trigger storms |
 
 #### Files to Modify
 
 | File | Change |
 |------|--------|
-| `Povver/Povver/Repositories/RecommendationRepository.swift` | Verify `stopListening()` removes listener correctly |
-| `Povver/Povver/Views/RootView.swift` or `Services/AuthService.swift` | Call `stopListening()` on sign-out |
-| `Povver/Povver/ViewModels/RecommendationsViewModel.swift` | Add cleanup in deinit |
-
-#### Verification
-
-1. Login → navigate to Coach tab (starts listener) → logout → login again
-2. Check Firestore usage dashboard — should not see accumulating read operations from old listeners
-3. Check Xcode console for Firestore listener debug messages
-
-#### Cross-References
-
-- Listener convention: `CLAUDE.md` → "Listener cleanup" rule
-- CanvasViewModel listener pattern (correct implementation): `Povver/Povver/ViewModels/CanvasViewModel.swift:101-102`
+| `firebase_functions/functions/index.js` | Add `maxInstances` to all v2 exports; for v1 functions, add it when migrating to v2 |
 
 ---
 
-## Phase 2 — UX Speed (Weeks 2–3)
+### 1.6 Add Rate Limiting to Write Endpoints
+
+**Priority**: P1 — Write endpoints have zero abuse protection
+**Severity**: HIGH
+**Effort**: Low-Medium
+
+#### Problem
+
+Only `streamAgentNormalized` uses `agentLimiter`. Write-heavy endpoints like `logSet`, `upsertWorkout`, and `artifactAction` can be called without limit.
+
+#### Fix
+
+Extend the existing `rate-limiter.js` pattern to cover write endpoints:
+
+```javascript
+// File: firebase_functions/functions/utils/rate-limiter.js
+// Add these alongside existing agentLimiter:
+
+const writeLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 60 });   // 60 writes/minute
+const authLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 10 });    // 10 auth calls/minute
+```
+
+Apply `writeLimiter.check(userId)` in: `logSet`, `upsertWorkout`, `artifactAction`, `completeActiveWorkout`, `startActiveWorkout`.
+
+Apply `authLimiter.check(userId)` in: `exchangeToken`, `getServiceToken`.
+
+**Note**: These are still per-instance limiters. Global limiting via Redis is in Phase 3.4. This provides burst protection at zero cost.
+
+#### Files to Modify
+
+| File | Change |
+|------|--------|
+| `firebase_functions/functions/utils/rate-limiter.js` | Export `writeLimiter` and `authLimiter` |
+| `firebase_functions/functions/active_workout/log-set.js` | Add `writeLimiter.check()` |
+| `firebase_functions/functions/workouts/upsert-workout.js` | Add `writeLimiter.check()` |
+| `firebase_functions/functions/artifacts/artifact-action.js` | Add `writeLimiter.check()` |
+| `firebase_functions/functions/auth/exchange-token.js` | Add `authLimiter.check()` |
+
+---
+
+### 1.7 Enable Firebase App Check
+
+**Priority**: P2 — Free bot detection, blocks automated abuse
+**Severity**: MEDIUM
+**Effort**: Low (10-minute setup)
+
+#### Fix
+
+1. Enable App Check in Firebase Console with DeviceCheck (iOS) attestation provider
+2. Enforce App Check on critical endpoints (opt-in enforcement allows gradual rollout)
+3. Add App Check token verification middleware to `stream-agent-normalized.js`
+
+This blocks automated scripts from calling Firebase Functions without a legitimate iOS app attestation.
+
+---
+
+### 1.8 Request Vertex AI Quota Increase
+
+**Priority**: P1 — Default 10 concurrent sessions will be hit before SSE cap
+**Severity**: HIGH
+**Effort**: Low (GCP Console request)
+
+#### Problem
+
+Vertex AI Agent Engine default quota is ~10 concurrent sessions per project. At even 500 DAU with 2 agent messages/session, peak concurrent sessions could easily exceed 10.
+
+#### Fix
+
+1. Go to GCP Console → IAM & Admin → Quotas → Vertex AI → Reasoning Engines
+2. Request increase to 100 concurrent sessions
+3. Monitor usage via Phase 0 dashboards
+
+---
+
+### 1.9 Recommendation Listener Cleanup
+
+**Priority**: P2 — Wasteful but not a true leak
+**Severity**: LOW (downgraded from original MEDIUM)
+**Effort**: Low
+
+**Revised assessment**: The listener runs as long as MainTabsView exists (app lifecycle), which is by design. It's not leaking across sessions. The real issue is that it runs even when the user isn't on the More tab.
+
+Fix: Call `stopListening()` in `MoreView.onDisappear` and `startListening()` in `MoreView.onAppear`.
+
+---
+
+## Phase 2 — UX Speed (Weeks 3–4)
 
 ### 2.1 iOS App Launch Waterfall
 
@@ -839,86 +1023,196 @@ func loadMore() async {
 
 ## Phase 3 — Scale Infrastructure (Month 2)
 
-### 3.1 Async Analytics Processing (Trigger Fan-Out)
+### 3.1 Fix SSE Race Conditions + Raise Concurrency
 
-**Priority**: P0 — Workout completion triggers 35–45 synchronous Firestore writes
+**Priority**: P0 — Required to unlock SSE concurrency beyond 1
+**Severity**: CRITICAL
+**Effort**: Medium (code refactor, must be tested carefully)
+
+#### Problem
+
+Module-level shared mutable state in `stream-agent-normalized.js` (lines 453-457) causes cross-stream data corruption when `concurrency > 1`:
+
+```javascript
+// Lines 453-457 — MODULE LEVEL (shared across all concurrent requests)
+const eventStartTimes = new Map();
+const toolArgsCache = new Map();
+let currentActiveAgent = 'orchestrator';
+```
+
+Additionally, the GCP token cache (lines 110-111) has a thundering-herd race:
+
+```javascript
+let cachedGcpToken = null;     // Two concurrent requests both see expired → both refresh
+let tokenExpiresAt = 0;
+```
+
+#### Fix
+
+**Step 1: Move shared state into request scope**
+
+```javascript
+// Inside streamAgentNormalizedHandler, create per-request state:
+const requestState = {
+  eventStartTimes: new Map(),
+  toolArgsCache: new Map(),
+  currentActiveAgent: 'orchestrator'
+};
+
+// Pass requestState through closure to transformToIOSEvent:
+const transform = createTransformer(requestState);
+```
+
+**Step 2: Fix token cache thundering herd**
+
+```javascript
+let tokenRefreshPromise = null;
+
+async function getGcpAuthToken() {
+  if (cachedGcpToken && Date.now() < tokenExpiresAt - TOKEN_BUFFER_MS) {
+    return cachedGcpToken;
+  }
+  if (!tokenRefreshPromise) {
+    tokenRefreshPromise = refreshToken().then(token => {
+      tokenRefreshPromise = null;
+      return token;
+    });
+  }
+  return tokenRefreshPromise;
+}
+```
+
+**Step 3: Raise concurrency after verification**
+
+```javascript
+exports.streamAgentNormalized = onRequestV2(
+  {
+    timeoutSeconds: 540,
+    memory: '512MiB',
+    maxInstances: 200,
+    concurrency: 10,       // NOW safe after race condition fix
+  },
+  requireFlexibleAuth(streamAgentNormalizedHandler)
+);
+```
+
+**Capacity after fix**: 200 instances × 10 streams = **2,000 concurrent streams**
+
+#### Files to Modify
+
+| File | Change |
+|------|--------|
+| `firebase_functions/functions/strengthos/stream-agent-normalized.js` | Move eventStartTimes, toolArgsCache, currentActiveAgent into handler scope. Fix token cache race. |
+| `firebase_functions/functions/index.js` | Update config: maxInstances: 200, concurrency: 10, minInstances: 5 |
+
+#### Verification
+
+1. Deploy to staging with `concurrency: 2` first
+2. Open 2+ concurrent agent conversations from same user
+3. Verify tool timing data is correct per-stream (no cross-contamination)
+4. Verify agent attribution is correct (no "coach" label on "orchestrator" streams)
+5. Load test with 10 concurrent streams per instance
+6. Monitor memory usage (should remain <100MB per instance even at 10 concurrent)
+
+---
+
+### 3.2 Async Analytics Processing (Hybrid Model)
+
+**Priority**: P0 — Workout completion triggers ~126 synchronous Firestore writes (revised from 35–45)
 **Severity**: CRITICAL
 **Effort**: High
 
 #### Problem
 
-`onWorkoutCompleted` in `triggers/weekly-analytics.js` does massive synchronous work:
+`onWorkoutCompleted` in `triggers/weekly-analytics.js` does massive synchronous work. Verified write count for a typical workout (10 exercises, 30 sets, 6 muscle groups):
 
 ```
-Workout completion trigger fires:
-├── 1. Update weekly_stats/{weekId} (transaction)
-├── 2. Upsert analytics_rollup/{weekId}
-├── 3. Append N × muscle_weekly_series (10 writes for 10 muscle groups)
-├── 4. Append M × exercise_daily_series (8 writes for 8 exercises)
-├── 5. Generate set_facts (24 documents for 24 sets)
-├── 6. Update series_exercises
-├── 7. Check isPremiumUser (Firestore read — see #1.2)
-├── 8. Enqueue training_analysis_job (if premium)
-├── 9. Update exercise_usage_stats (8 transactions for 8 exercises)
-└── Total: 35-45 writes, 5-15 seconds execution
+Workout completion trigger fires (~126 total writes):
+├── 1. Update weekly_stats/{weekId} (1 transaction)                          [1 write]
+├── 2. Upsert analytics_rollup/{weekId} (1 transaction)                     [1 write]
+├── 3. Append muscle_weekly_series (1 transaction per muscle)                [6 writes]
+├── 4. Update watermark analytics_state/current                              [1 write]
+├── 5. Append exercise_daily_series (1 transaction per exercise)             [10 writes]
+├── 6. Generate set_facts (1 doc per set, batched)                           [30 writes]
+├── 7. Update series (batch: exercises + muscle_groups + muscles)             [28 writes]
+├── 8. updateMinMaxForSeries (1 transaction per series doc)                  [28 writes]
+├── 9. updateE1rmMax (1 transaction per exercise)                            [10 writes]
+├── 10. Check isPremiumUser (Firestore read — see #1.2)
+├── 11. Enqueue training_analysis_job (if premium)                           [1 write]
+├── 12. Update exercise_usage_stats (1 transaction per exercise)             [10 writes]
+└── Total: ~126 writes, 5-15 seconds execution
 ```
 
-**At 100k users × 3 workouts/week:**
-- 300k trigger executions/week
-- 10.5–13.5M Firestore writes/week from triggers alone
-- Cost: ~$19–24/week in Firestore writes ($1,000–1,250/year)
+**Note**: Two analytics systems run in parallel — legacy (`weekly_stats`, `analytics_rollups`, `analytics_series_*`) and token-safe (`set_facts`, `series_*`). This doubles the write volume. Consider consolidating in Phase 4.
+
+**At 10k users × 4 workouts/week:**
+- 40k trigger executions/week
+- ~5M Firestore writes/week from triggers alone
+- Cost: ~$9/week in Firestore writes (~$470/year)
 - Trigger execution: 5–15s per workout (can timeout, causing retries and duplicate writes)
 
-**Risk**: Firestore triggers are "at-least-once". Long-running triggers that timeout will retry, causing duplicate analytics. The current code has some idempotency but not comprehensive.
+**Risk**: Firestore triggers are "at-least-once". Long-running triggers that timeout will retry, causing duplicate analytics. Only `weekly_stats` (via `processed_ids` array) and `exercise_usage_stats` (via `last_processed_workout_id`) have idempotency guards. The other ~100 writes (set_facts, series_*, min/max transactions) will duplicate on retry.
 
-#### Fix
+#### Fix (Hybrid Model — Revised)
 
-Replace the heavy trigger with a lightweight job enqueue. Process analytics in a background Cloud Run worker.
+Instead of moving ALL analytics to a background worker (which delays user-visible data), use a **hybrid model**: keep essential user-facing writes synchronous, enqueue heavy agent-facing analytics to a background worker.
 
-**Step 1: Slim trigger (enqueue only)**
+**What stays synchronous (trigger writes immediately — user sees these):**
+- `weekly_stats` update (1 write) — powers iOS progress charts
+- `analytics_rollups` update (1 write) — weekly/monthly aggregates
+- `exercise_usage_stats` updates (10 writes) — powers "recent exercises" sort
+- `analytics_state/current` watermark (1 write)
+- **Total: ~13 synchronous writes**
+
+**What moves to background worker (agent-facing, can be eventual):**
+- `set_facts` generation (30 writes)
+- All `series_*` updates (28 batch + 28 min/max + 10 e1rm = 66 writes)
+- `analytics_series_muscle` (6 writes)
+- `analytics_series_exercise` (10 writes)
+- `training_analysis_job` enqueue (1 write)
+- **Total: ~113 writes processed asynchronously**
+
+**Step 1: Slim the trigger**
 
 ```javascript
 // File: firebase_functions/functions/triggers/weekly-analytics.js
-// REPLACE the heavy onWorkoutCompleted with:
+// Keep essential writes synchronous, enqueue heavy analytics:
 
-exports.onWorkoutCompleted = onDocumentUpdated(
-  'users/{userId}/workouts/{workoutId}',
-  async (event) => {
-    const beforeStatus = event.data.before.data()?.status;
-    const afterStatus = event.data.after.data()?.status;
+// Phase A: Essential writes (synchronous — user-visible data)
+const essentialBatch = db.batch();
+// ... weekly_stats, analytics_rollups, exercise_usage_stats ...
+await essentialBatch.commit();
 
-    // Only fire on actual completion
-    if (beforeStatus === 'completed' || afterStatus !== 'completed') return;
+// Phase B: Enqueue heavy analytics for background processing
+await db.collection('analytics_processing_queue').add({
+  type: 'WORKOUT_ANALYTICS',
+  userId,
+  workoutId,
+  status: 'queued',
+  created_at: admin.firestore.FieldValue.serverTimestamp(),
+  workout_snapshot: event.data.after.data(), // Avoid re-read
+});
 
-    const { userId, workoutId } = event.params;
-
-    // Single write — enqueue analytics job
-    await admin.firestore().collection('analytics_processing_queue').add({
-      type: 'WORKOUT_ANALYTICS',
-      userId,
-      workoutId,
-      status: 'queued',
-      created_at: admin.firestore.FieldValue.serverTimestamp(),
-      // Include workout snapshot to avoid re-read
-      workout_snapshot: event.data.after.data(),
-    });
-
-    logger.info('[onWorkoutCompleted] Job enqueued', { userId, workoutId });
-  }
-);
+logger.info('[onWorkoutCompleted] Essential writes done, analytics enqueued', { userId, workoutId });
 ```
 
-**Step 2: Background worker (Cloud Run Job or Cloud Function)**
+**Step 2: Background worker**
 
-Create a new scheduled function or Cloud Run Job that polls `analytics_processing_queue` and processes jobs in batches. The worker does all the heavy analytics work that currently lives in the trigger.
-
-**Step 3: Migrate existing analytics logic to worker**
-
-Move the body of the current `onWorkoutCompleted` trigger into the worker, with:
-- Batch writes (collect all writes, execute in a single `batch.commit()`)
-- Idempotency (check if job already processed)
+Create a Cloud Function triggered by `analytics_processing_queue` writes (or a scheduled poller):
+- Processes `set_facts`, `series_*`, and training analysis jobs
+- Uses `db.batch()` for writes (1 batch commit instead of 66 individual writes)
+- Full idempotency (check `processing_status` field before processing)
 - Retry with exponential backoff
-- Rate limiting (max N jobs/minute to prevent Firestore write spikes)
+
+**Step 3: User impact during worker delay**
+
+| Analytics | Delay Tolerance | User Impact If Delayed |
+|-----------|----------------|------------------------|
+| Weekly stats, routine cursor | 0 (sync) | None — written synchronously |
+| Exercise usage stats | 0 (sync) | None — written synchronously |
+| set_facts | 5-30 min | Agent can't analyze latest workout (acceptable) |
+| Series updates | 5-30 min | Progress charts slightly stale (acceptable) |
+| Training analysis | 24 hours | Weekly review delayed (acceptable for premium) |
 
 #### Files to Modify
 
@@ -938,125 +1232,126 @@ Move the body of the current `onWorkoutCompleted` trigger into the worker, with:
 
 ---
 
-### 3.2 Global Rate Limiting
+### 3.3 Fix Trigger Idempotency
 
-**Priority**: P0 — Current in-memory rate limiter is bypassable
+**Priority**: P1 — Trigger retries cause duplicate/inflated analytics data
+**Severity**: HIGH
+**Effort**: Medium
+
+#### Problem
+
+Firestore triggers are "at-least-once". If the trigger times out (5-15s execution), it retries automatically. Only 2 of 9 write paths have idempotency guards:
+
+| Write Path | Has Guard? | Retry Behavior |
+|------------|-----------|----------------|
+| `weekly_stats` | **Yes** (`processed_ids` array) | Safe — skips if already processed |
+| `exercise_usage_stats` | **Yes** (`last_processed_workout_id`) | Safe — skips if already processed |
+| `set_facts` | **No** | Writes duplicate docs (merge=true mitigates, but wasteful) |
+| `series_exercises` | **No** | `FieldValue.increment()` — **inflates stats on retry** |
+| `series_muscle_groups` | **No** | `FieldValue.increment()` — **inflates stats on retry** |
+| `series_muscles` | **No** | `FieldValue.increment()` — **inflates stats on retry** |
+| `updateMinMaxForSeries` | **No** | Transactions are idempotent (compare-and-set), but wasteful |
+| `analytics_rollups` | **Partial** | Relies on weekly_stats check upstream |
+| `training_analysis_jobs` | **No** | Creates duplicate jobs |
+
+#### Fix
+
+Add a global idempotency check at the start of the trigger:
+
+```javascript
+// At top of onWorkoutCompleted:
+const processingRef = db.collection('users').doc(userId)
+  .collection('workout_processing').doc(workoutId);
+
+const existing = await processingRef.get();
+if (existing.exists && existing.data().status === 'completed') {
+  logger.info('[onWorkoutCompleted] Already processed, skipping', { userId, workoutId });
+  return;
+}
+
+// Mark as processing (idempotency fence)
+await processingRef.set({
+  status: 'processing',
+  started_at: admin.firestore.FieldValue.serverTimestamp()
+});
+
+// ... do all analytics work ...
+
+// Mark as completed
+await processingRef.update({ status: 'completed', completed_at: admin.firestore.FieldValue.serverTimestamp() });
+```
+
+Add 7-day TTL on `workout_processing` docs.
+
+---
+
+### 3.4 Global Rate Limiting (Redis)
+
+**Priority**: P0 — Current in-memory rate limiter is bypassable across instances
 **Severity**: CRITICAL
 **Effort**: Medium
 
 #### Problem
 
-See [Appendix A](#appendix-a--current-bottleneck-map) for full analysis. The `rate-limiter.js` uses a per-instance `Map()` that resets on cold starts and doesn't share state across instances.
+The `rate-limiter.js` uses a per-instance `Map()` that resets on cold starts and doesn't share state across instances. With Phase 1.1 raising maxInstances to 100, a single user could effectively make `100 × 120 = 12,000` agent requests/hour.
 
-#### Fix
+#### Why NOT Firestore (Original Plan Was Wrong)
 
-Add a Firestore-based daily user cap as a circuit breaker, keeping the in-memory limiter for burst protection:
+The original plan proposed Firestore-based rate limiting. This is the **wrong tool**:
+- Firestore write latency: 100-300ms per rate limit check (adds 200-600ms overhead)
+- At 10k concurrent users: 10k+ writes/sec to `rate_limits` collection
+- Eventual consistency across regions allows exploitation
+- Cost: $1.80/day just for rate limit writes at 10k users
+
+#### Fix — Memorystore for Redis
+
+Deploy a basic Redis instance and use atomic `INCR` + `EXPIRE` for rate limiting:
 
 ```javascript
 // File: firebase_functions/functions/utils/rate-limiter.js
-// Add a Firestore-based daily cap alongside the existing in-memory limiter:
+const redis = require('redis').createClient(process.env.REDIS_URL);
 
-async function checkDailyLimit(userId, dailyMax = 500) {
-  const db = admin.firestore();
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-  const ref = db.collection('rate_limits').doc(`${userId}_${today}`);
-
-  return db.runTransaction(async (tx) => {
-    const doc = await tx.get(ref);
-    const count = doc.exists ? doc.data().count : 0;
-
-    if (count >= dailyMax) {
-      logger.warn('[rate_limit] Daily limit exceeded', { userId, count, dailyMax });
-      return false;
-    }
-
-    tx.set(ref, {
-      count: count + 1,
-      userId,
-      date: today,
-      updated_at: admin.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
-
-    return true;
-  });
+async function checkGlobalRateLimit(userId, limit = 120, windowSec = 3600) {
+  const key = `rl:${userId}:${Math.floor(Date.now() / (windowSec * 1000))}`;
+  const count = await redis.incr(key);
+  if (count === 1) await redis.expire(key, windowSec);
+  return count <= limit;
 }
 ```
 
-Add TTL to rate_limit documents so they auto-clean:
-- Set `expires_at` field to `today + 2 days`
-- Configure Firestore TTL policy on `rate_limits` collection
+| Metric | Firestore Approach | Redis Approach |
+|--------|-------------------|----------------|
+| Latency per check | 200-600ms | 1-5ms |
+| Monthly cost (10k users) | ~$54 | ~$50 (1GB basic instance) |
+| Consistency | Eventual | Strong (single-instance) |
+| Accuracy | Approximate | Exact |
+
+**Deployment**:
+```bash
+gcloud redis instances create povver-rate-limiter \
+  --size=1 --region=us-central1 --tier=basic
+```
+
+Keep the existing per-instance `Map()` as a first-pass burst limiter (zero latency). Redis serves as the authoritative global limiter.
 
 #### Files to Modify
 
 | File | Change |
 |------|--------|
-| `firebase_functions/functions/utils/rate-limiter.js` | Add `checkDailyLimit()` function |
-| `firebase_functions/functions/strengthos/stream-agent-normalized.js` | Call `checkDailyLimit()` before streaming |
-| `firestore.rules` | Add rules for `rate_limits` collection (admin-only writes) |
+| `firebase_functions/functions/utils/rate-limiter.js` | Add Redis-based `checkGlobalRateLimit()` alongside existing in-memory limiter |
+| `firebase_functions/functions/strengthos/stream-agent-normalized.js` | Call `checkGlobalRateLimit()` before streaming |
+| `firebase_functions/functions/package.json` | Add `redis` dependency |
+| GCP Console | Deploy Memorystore Redis instance |
+| VPC / Serverless VPC Connector | Required for Cloud Functions to reach Memorystore |
 
 #### Cross-References
 
 - Current rate limiter: `firebase_functions/functions/utils/rate-limiter.js`
-- Where it's called: `firebase_functions/functions/strengthos/stream-agent-normalized.js` (search for `agentLimiter`)
 - Security doc: `docs/SECURITY.md`
 
 ---
 
-### 3.3 Function Bundle Splitting
-
-**Priority**: P1 — Cold starts load 106 functions, takes 1–3 seconds
-**Severity**: MEDIUM
-**Effort**: High
-
-#### Problem
-
-All 106 functions are exported from a single `index.js`. Every cold start loads all function code, even if only one function is invoked.
-
-#### Fix
-
-Split into 3 deployment groups using Firebase's codebase feature:
-
-```json
-// File: firebase.json
-{
-  "functions": [
-    {
-      "source": "functions",
-      "codebase": "hot",
-      "predeploy": ["npm --prefix functions run lint"],
-      "only": ["logSet", "getActiveWorkout", "completeCurrentSet",
-               "patchActiveWorkout", "streamAgentNormalized", "startActiveWorkout",
-               "completeActiveWorkout", "addExercise", "swapExercise",
-               "autofillExercise", "artifactAction", "openCanvas"]
-    },
-    {
-      "source": "functions",
-      "codebase": "warm",
-      "only": ["getPlanningContext", "getUser", "getUserWorkouts",
-               "getUserTemplates", "getUserRoutines", "getTemplate",
-               "getRoutine", "searchExercises", "getServiceToken"]
-    },
-    {
-      "source": "functions",
-      "codebase": "cold",
-      "only": ["*"]  // Everything else
-    }
-  ]
-}
-```
-
-**Note**: This requires restructuring `index.js` to support selective exports. This is a significant refactor — defer to Phase 3.
-
-#### Files to Modify
-
-| File | Change |
-|------|--------|
-| `firebase.json` | Add codebase splitting configuration |
-| `firebase_functions/functions/index.js` | Restructure exports for selective loading |
-
----
-
-### 3.4 Firestore TTL Policies
+### 3.5 Firestore TTL Policies
 
 **Priority**: P1 — Unbounded collection growth
 **Severity**: MEDIUM
@@ -1066,13 +1361,15 @@ Split into 3 deployment groups using Firebase's codebase feature:
 
 Several collections grow without bounds:
 
-| Collection | Growth Rate (100k users) | Recommendation |
+| Collection | Growth Rate (10k users) | Recommendation |
 |------------|--------------------------|----------------|
-| `set_facts` | 45 docs/user/week → 1.17B docs in 5 years | 2-year TTL |
-| `workspace_entries` | 75M events/week | 30-day TTL (or remove if canvas deprecated) |
+| `set_facts` | 45 docs/user/week → 117M docs in 5 years (at 10k users) | 2-year TTL |
 | `idempotency` (in active_workouts) | 24 docs/workout | 7-day TTL |
-| `rate_limits` (new, from #3.2) | 1 doc/user/day | 2-day TTL |
+| `workout_processing` (new, from #3.3) | 1 doc/user/workout | 7-day TTL |
+| `rate_limits` (new, from #3.4) | N/A if using Redis | Only needed if Firestore fallback |
 | `template changelog` | Has 90-day `expires_at` but verify TTL policy is deployed | Verify |
+
+> **Note**: `workspace_entries` was listed in the original plan but does not exist in the schema, codebase, or Firestore rules. Removed.
 
 #### Fix
 
@@ -1085,11 +1382,11 @@ gcloud firestore fields ttls update expires_at \
   --project=myon-53d85
 
 gcloud firestore fields ttls update expires_at \
-  --collection-group=workspace_entries \
+  --collection-group=workout_processing \
   --project=myon-53d85
 
 gcloud firestore fields ttls update expires_at \
-  --collection-group=rate_limits \
+  --collection-group=idempotency \
   --project=myon-53d85
 ```
 
@@ -1100,52 +1397,58 @@ gcloud firestore fields ttls update expires_at \
 | File | Change |
 |------|--------|
 | `firebase_functions/functions/training/set-facts-generator.js` | Add `expires_at` field (2 years from `workout_date`) |
-| `firebase_functions/functions/strengthos/stream-agent-normalized.js` | Add `expires_at` to workspace_entries writes (30 days) |
 | `firebase_functions/functions/active_workout/log-set.js` | Add `expires_at` to idempotency docs (7 days) |
+| `firebase_functions/functions/triggers/weekly-analytics.js` | Add `expires_at` to workout_processing docs (7 days) |
 | `scripts/backfill_ttl.js` | **NEW** — backfill `expires_at` on existing documents |
 
 ---
 
-### 3.5 v1 to v2 Function Migration
+### 3.6 Training Analyst Horizontal Scaling
 
-**Priority**: P2 — v1 = 1 request per instance; v2 with concurrency = 80 requests per instance
+**Priority**: P1 — Serial queue processor cannot keep up at 10k+ users
 **Severity**: MEDIUM
-**Effort**: Medium (per-function, low risk)
+**Effort**: Low (configuration change)
 
 #### Problem
 
-~80 functions still use v1 (`functions.https.onRequest`), which spawns a new instance for every concurrent request. v2 with `concurrency: 80` handles 80 concurrent requests per instance.
+Training analyst Cloud Run Job runs with `parallelism: 1` — sequential queue processing. At 10k users (23k jobs/week), sequential processing takes ~32 hours/week. At 100k users, it cannot keep up.
 
 #### Fix
 
-Migrate high-traffic v1 functions to v2 format. Priority order:
-
-1. `getUser` / `updateUser` — high frequency user profile ops
-2. `getUserTemplates` / `getTemplate` / `createTemplate` — template CRUD
-3. `getUserRoutines` / `getRoutine` / `createRoutine` — routine CRUD
-4. `getExercises` / `searchExercises` — catalog reads
-5. All remaining v1 functions
-
-Migration pattern:
-```javascript
-// BEFORE (v1):
-exports.getUser = functions.https.onRequest((req, res) => withApiKey(getUser)(req, res));
-
-// AFTER (v2):
-const { onRequest } = require('firebase-functions/v2/https');
-exports.getUser = onRequest(
-  { memory: '256MiB', maxInstances: 200, concurrency: 80 },
-  (req, res) => withApiKey(getUser)(req, res)
-);
+```yaml
+# File: adk_agent/training_analyst/cloud-run-worker.yaml
+parallelism: 10  # Was: 1. Run 10 workers in parallel.
 ```
+
+**Capacity**: 10x throughput. Scales to ~100k users.
+
+**Long-term (>100k users)**: Migrate to Cloud Tasks + Cloud Run Service for auto-scaling 0-100 workers.
 
 ---
 
-## Phase 4 — Optimization (Ongoing)
+## Phase 4 — Optimization (Deferred Until >10k Users)
 
-### 4.1 Expand Fast Lane Patterns
+### 4.1 Function Bundle Splitting
 
-**Effort**: Low | **Impact**: ~10% reduction in LLM costs
+**Effort**: High | **Impact**: Cold starts from 2-4s to ~500ms
+**Priority**: P2 — Only worth complexity at scale
+
+Split 107 functions into 4 codebases using Firebase's `codebase` feature: core (user/workout/template CRUD), agent (SSE, canvas), analytics (triggers, series), catalog (exercise admin). Set `minInstances` on hot codebases only.
+
+**File**: `firebase.json`, `firebase_functions/functions/index.js`
+
+### 4.2 v1 to v2 Function Migration
+
+**Effort**: Medium | **Impact**: 80x instance efficiency for migrated functions
+**Priority**: P2 — 55/107 functions still v1 (51%)
+
+Staged migration: 1 function at a time, 24h monitoring between each. Priority: `getUser` → template CRUD → routine CRUD → exercise reads.
+
+**Risk mitigation**: v1 and v2 have different env var patterns (`functions.config()` vs `process.env`). Test each migration in isolation.
+
+### 4.3 Expand Fast Lane Patterns
+
+**Effort**: Low | **Impact**: ~5-10% reduction in LLM costs (revised from 10%)
 
 Add more regex patterns to `adk_agent/canvas_orchestrator/app/shell/router.py` for common queries that don't need LLM reasoning:
 
@@ -1157,49 +1460,40 @@ Add more regex patterns to `adk_agent/canvas_orchestrator/app/shell/router.py` f
 
 **File**: `adk_agent/canvas_orchestrator/app/shell/router.py:~58-79`
 
-### 4.2 Planning Context Caching
+### 4.4 Evaluate Cloud Run for SSE (Long-Term)
 
-**Effort**: Medium | **Impact**: 5–8 Firestore reads → 1 read per agent interaction
+**Effort**: High | **Impact**: 60-minute timeout (vs 9-minute v2 limit), better autoscaling
 
-Cache planning context in Firestore under `users/{uid}/agent_cache/planning_context` with 5-minute TTL. Invalidate on routine/template mutations.
+Cloud Functions v2 HTTP functions have a 540-second (9-minute) hard timeout. For long agent conversations, Cloud Run offers:
+- Up to 60-minute request timeout
+- CPU-based autoscaling (better for I/O-bound SSE)
+- Lower cold start latency (~500ms vs ~2s)
+- Native HTTP/2 and WebSocket support
 
-**Files**: `firebase_functions/functions/agents/get-planning-context.js`
+**Trigger**: Evaluate when agent sessions regularly approach 5-minute durations or when SSE concurrency needs exceed 2,000.
 
-### 4.3 Batch Analytics Writes
+**Migration path**: Containerize `streamAgentNormalized` handler → Deploy to Cloud Run → Route via Firebase Hosting rewrites.
 
-**Effort**: Medium | **Impact**: 18+ individual writes → 1 batched write on workout completion
+### Deprioritized Items (Removed from Active Plan)
 
-Collect all muscle/exercise series writes into a single `db.batch()` call instead of individual writes. Part of the #3.1 worker implementation.
-
-**File**: The new `firebase_functions/functions/workers/analytics-processor.js`
-
-### 4.4 Training Analyst Horizontal Scaling
-
-**Effort**: Low | **Impact**: Prevents job queue backlog at scale
-
-Configure Cloud Run Job for `adk_agent/training_analyst/` with:
-- `maxInstances: 20`
-- Job prioritization (post-workout = P1, weekly = P2, daily = P3)
-- Rate limiting (max 1 analysis per user per hour)
-
-**File**: `adk_agent/training_analyst/` deployment configuration
-
-### 4.5 iOS SSE Connection Reuse
-
-**Effort**: Medium | **Impact**: Saves 200–500ms TCP+TLS handshake on mobile
-
-Reuse `URLSession` across queries in the same conversation. Currently each `streamQuery` call creates a new connection.
-
-**File**: `Povver/Povver/Services/DirectStreamingService.swift:~112-268`
+| Item | Original Phase | Reason for Removal |
+|------|---------------|-------------------|
+| **Planning Context Caching** | Phase 4 | Already <150ms after #1.4 parallelization. Caching adds invalidation complexity for ~50ms savings. Marginal ROI. |
+| **iOS SSE Connection Reuse** | Phase 4 | HTTP/2 already reuses connections. The 200-500ms claim refers to cold start overhead, not connection setup. Misleading. |
+| **Batch Analytics Writes** | Phase 4 | Merged into Phase 3.2 (async analytics worker uses batched writes internally). Not a separate item. |
+| **Consolidate Dual Analytics Systems** | N/A | Legacy (`weekly_stats`, `analytics_rollups`) and token-safe (`set_facts`, `series_*`) both run on every workout. Consolidation would halve write volume but requires iOS app migration to read from `series_*` instead of `weekly_stats`. Consider when approaching 50k users. |
 
 ---
 
-## Appendix A — Current Bottleneck Map
+## Appendix A — Current Bottleneck Map (Revised)
 
 ```
 USER ACTION                    BOTTLENECK                           FIX ITEM
 ───────────────────────────────────────────────────────────────────────────────
-App Launch                     Sequential prefetch waterfall         #2.1
+No Monitoring                  Zero observability into system health  #0.1-0.3
+
+App Launch                     Login flow blocks on 2 sequential     #2.1
+                                awaits before showing MainTabsView
                                No caching on exercise catalog        #2.2
                                Full workout history load              #2.3
 
@@ -1218,25 +1512,56 @@ Complete Workout                Trigger fan-out: 35-45 writes         #3.1
 Browse Library                 Exercise catalog: 500+ reads           #2.2
 Browse History                 Full collection scan                   #2.3
 
-Background (cold start)        106 functions loaded per instance      #3.3
-Background (data growth)       Unbounded set_facts, workouts          #3.4
+Endpoint Security              66/67 endpoints have no rate limit     #1.5, #1.6
+                               or maxInstances cap
+
+Complete Workout                Trigger fires ~126 Firestore writes   #3.2
+                               No idempotency on retry for ~100       #3.3
+                                of those writes
+
+Background (cold start)        107 functions loaded per instance      #4.1
+Background (data growth)       Unbounded set_facts, idempotency       #3.5
+Background (agent quota)       Vertex AI default 10 concurrent        #1.8
 ```
 
 ---
 
-## Appendix B — Cost Projections
+## Appendix B — Cost Projections (Revised)
 
-### Current (estimated at 100k DAU)
+> **Note**: Original cost projections were based on 100k DAU with incorrect write counts (35-45 vs actual ~126). Revised projections below use verified data and target 10k users (3-month horizon) with extrapolation to 100k.
+
+### At 10k Active Users (3-Month Target)
 
 | Component | Monthly Cost | Notes |
 |-----------|-------------|-------|
-| Firestore Reads | ~$90k | 500+ reads/session × 100k users |
-| Firestore Writes | ~$25k | Trigger fan-out dominates |
-| LLM Tokens (Gemini Flash) | ~$630k | 200k requests/day × $0.15 avg |
-| Firebase Functions | ~$20k | Instance hours |
-| **Total** | **~$765k/mo** | |
+| Firestore Reads | ~$100 | 50 reads/session × 10k users × 2 sessions/day |
+| Firestore Writes | ~$60 | 126 writes/workout × 40k workouts/month |
+| Firestore Storage | ~$10 | ~50GB total |
+| LLM Tokens (Gemini 2.5 Flash) | ~$1,200 | 10k users × $0.12/user/month |
+| Firebase Functions | ~$50 | Invocations + compute |
+| Vertex AI Agent Engine | ~$50 | Session overhead |
+| **Total** | **~$1,470/mo** | |
 
-### After All Optimizations (estimated)
+**Revenue at 10k users (5% conversion, $8.49 net/user)**: ~$4,245/month → **71% gross margin**
+
+### Extrapolated to 100k Active Users
+
+| Component | Monthly Cost | Notes |
+|-----------|-------------|-------|
+| Firestore Reads | ~$600 | With caching optimizations (#2.2) |
+| Firestore Writes | ~$350 | With async analytics (#3.2) reducing sync writes by 85% |
+| Firestore Storage + Indexes | ~$500 | 2TB+ at scale |
+| LLM Tokens (Gemini 2.5 Flash) | ~$4,800 | **Largest cost driver** |
+| Firebase Functions | ~$400 | With v2 migration + bundle splitting |
+| Redis (Memorystore) | ~$50 | Rate limiting |
+| Vertex AI Agent Engine | ~$200 | Session overhead |
+| **Total** | **~$6,900/mo** | |
+
+**Revenue at 100k users (5% conversion, $8.49 net/user)**: ~$42,450/month → **84% gross margin**
+
+### Original Estimates (Struck — Incorrect)
+
+~~Original projections estimated $765k/month at 100k users. This was based on incorrect assumptions: 500+ reads/session (actual: 50-100 with caching), 200k LLM requests/day at $0.15 avg (actual: $0.002-0.003/request with Gemini 2.5 Flash), and 35-45 trigger writes (actual: ~126, but optimizable to ~13 sync). Firestore is NOT the cost crisis originally portrayed — LLM tokens are the dominant cost at scale.~~
 
 | Component | Monthly Cost | Savings |
 |-----------|-------------|---------|
@@ -1311,8 +1636,67 @@ Background (data growth)       Unbounded set_facts, workouts          #3.4
 
 | File | When to Update |
 |------|----------------|
-| `docs/SYSTEM_ARCHITECTURE.md` | After #3.1 (async analytics), #3.2 (rate limiting) |
-| `docs/FIREBASE_FUNCTIONS_ARCHITECTURE.md` | After #3.1, #3.3, #3.5 |
+| `docs/SYSTEM_ARCHITECTURE.md` | After #3.1 (SSE refactor), #3.2 (async analytics), #3.4 (rate limiting) |
+| `docs/FIREBASE_FUNCTIONS_ARCHITECTURE.md` | After #3.2, #4.1, #4.2 |
 | `docs/IOS_ARCHITECTURE.md` | After #2.1, #2.2, #2.3 |
-| `docs/FIRESTORE_SCHEMA.md` | After #3.2 (rate_limits collection), #3.4 (TTL fields) |
-| `docs/SECURITY.md` | After #3.2 (global rate limiting) |
+| `docs/FIRESTORE_SCHEMA.md` | After #3.3 (workout_processing), #3.5 (TTL fields) |
+| `docs/SECURITY.md` | After #1.5 (maxInstances), #1.6 (rate limiting), #3.4 (global rate limiting) |
+
+---
+
+## Appendix D — Scaling Thresholds
+
+Break-glass reference for what to prioritize at each growth stage.
+
+### 1k → 5k Users
+
+**What breaks**: SSE connection cap (20) hit during peak workout hours (6-9 PM).
+
+**Minimum fix**: Raise `maxInstances` to 100 (Phase 1.1 — config change only).
+
+**Cost**: ~$300-500/month total infrastructure.
+
+### 5k → 10k Users
+
+**What breaks**: Cold starts noticeable (P95 latency spikes). Vertex AI quota (10 sessions) exceeded. Rate limiting ineffective (multiple instances).
+
+**Minimum fix**:
+- Phase 0 (observability — you MUST have monitoring before this scale)
+- Phase 1.1-1.8 (SSE cap, caching, maxInstances, App Check, Vertex AI quota)
+- Phase 2.2-2.3 (repository caching, workout pagination)
+
+**Cost**: ~$1,500/month total infrastructure.
+
+### 10k → 25k Users
+
+**What breaks**: Per-instance rate limiting exploitable. Analytics trigger writes become expensive ($200+/month). Training analyst queue falls behind.
+
+**Minimum fix**:
+- Phase 3.1 (SSE race conditions → concurrency: 10)
+- Phase 3.2 (hybrid analytics model)
+- Phase 3.4 (Redis rate limiting)
+- Phase 3.6 (training analyst parallelism)
+
+**Cost**: ~$3,000/month total infrastructure (+ $50 Redis).
+
+### 25k → 50k Users
+
+**What breaks**: Firestore write costs from dual analytics systems. Bundle size causing slow cold starts.
+
+**Minimum fix**:
+- Consider consolidating legacy + token-safe analytics (halves writes)
+- Phase 4.1 (bundle splitting)
+- Phase 4.2 (v1→v2 migration)
+
+**Cost**: ~$5,000/month total infrastructure.
+
+### 50k → 100k Users
+
+**What breaks**: Single-region latency for global users. Cloud Functions v2 timeout limit. Function instance costs.
+
+**Minimum fix**:
+- Phase 4.4 (Cloud Run for SSE)
+- Multi-region evaluation
+- Consider read replicas or edge caching
+
+**Cost**: ~$7,000/month total infrastructure.

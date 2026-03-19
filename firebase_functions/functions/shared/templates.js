@@ -44,13 +44,15 @@ function templatesCol(db, userId) {
  * @returns {Promise<Object>} Map of exercise_id -> name
  */
 async function resolveExerciseNames(db, exerciseIds) {
+  if (exerciseIds.length === 0) return {};
+  const refs = exerciseIds.map(id => db.collection('exercises').doc(id));
+  const docs = await db.getAll(...refs);
   const names = {};
-  await Promise.all(exerciseIds.map(async (exerciseId) => {
-    const doc = await db.collection('exercises').doc(exerciseId).get();
+  docs.forEach((doc, i) => {
     if (doc.exists) {
-      names[exerciseId] = doc.data().name || exerciseId;
+      names[exerciseIds[i]] = doc.data().name || exerciseIds[i];
     }
-  }));
+  });
   return names;
 }
 
@@ -107,9 +109,21 @@ async function getTemplate(db, userId, templateId) {
  * @param {string} userId
  * @returns {Promise<{items: Object[], count: number}>}
  */
-async function listTemplates(db, userId) {
+async function listTemplates(db, userId, opts = {}) {
   const snapshot = await templatesCol(db, userId).limit(500).get();
   const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+  if (opts.view === 'summary') {
+    const summaries = items.map(t => ({
+      id: t.id,
+      name: t.name,
+      description: t.description || null,
+      exercise_count: (t.exercises || []).length,
+      exercise_names: (t.exercises || []).map(ex => ex.name || ex.exercise_id || 'Unknown'),
+    }));
+    return { items: summaries, count: summaries.length };
+  }
+
   return { items, count: items.length };
 }
 
@@ -131,6 +145,23 @@ async function createTemplate(db, userId, templateData, options = {}) {
   const parsed = TemplateSchema.safeParse(templateData);
   if (!parsed.success) {
     throw new ValidationError('Invalid template data', parsed.error.flatten());
+  }
+
+  // Resolve missing exercise names from catalog
+  if (Array.isArray(templateData.exercises)) {
+    const idsToResolve = templateData.exercises
+      .filter(ex => !ex.name && ex.exercise_id)
+      .map(ex => ex.exercise_id);
+
+    if (idsToResolve.length > 0) {
+      const exerciseNames = await resolveExerciseNames(db, idsToResolve);
+      templateData.exercises = templateData.exercises.map(ex => {
+        if (!ex.name && ex.exercise_id && exerciseNames[ex.exercise_id]) {
+          return { ...ex, name: exerciseNames[ex.exercise_id] };
+        }
+        return ex;
+      });
+    }
   }
 
   const col = templatesCol(db, userId);
@@ -263,6 +294,21 @@ async function patchTemplate(db, userId, templateId, patch, meta = {}) {
       }
     }
 
+    // Resolve missing exercise names from catalog
+    const idsToResolve = sanitizedPatch.exercises
+      .filter(ex => !ex.name && ex.exercise_id)
+      .map(ex => ex.exercise_id);
+
+    if (idsToResolve.length > 0) {
+      const exerciseNames = await resolveExerciseNames(db, idsToResolve);
+      sanitizedPatch.exercises = sanitizedPatch.exercises.map(ex => {
+        if (!ex.name && ex.exercise_id && exerciseNames[ex.exercise_id]) {
+          return { ...ex, name: exerciseNames[ex.exercise_id] };
+        }
+        return ex;
+      });
+    }
+
     exercisesChanged = JSON.stringify(sanitizedPatch.exercises) !== JSON.stringify(current.exercises);
   }
 
@@ -318,6 +364,23 @@ async function patchTemplate(db, userId, templateId, patch, meta = {}) {
 
   await batch.commit();
 
+  // Propagate name change to routines that reference this template
+  if (sanitizedPatch.name) {
+    try {
+      const routinesSnap = await db.collection('users').doc(userId).collection('routines').limit(100).get();
+      for (const rDoc of routinesSnap.docs) {
+        const rData = rDoc.data();
+        const tids = rData.template_ids || rData.templateIds || [];
+        if (tids.includes(templateId)) {
+          const updatedNames = { ...(rData.template_names || {}), [templateId]: sanitizedPatch.name };
+          await db.collection('users').doc(userId).collection('routines').doc(rDoc.id).update({ template_names: updatedNames });
+        }
+      }
+    } catch (propErr) {
+      console.warn(`template_names propagation failed for template ${templateId}:`, propErr.message);
+    }
+  }
+
   return {
     templateId,
     patchedFields,
@@ -351,7 +414,7 @@ async function deleteTemplate(db, userId, templateId) {
 
   // Clean up routine references
   // READ BOTH fields for backward compat: template_ids (canonical) and templateIds (legacy)
-  const routinesSnapshot = await db.collection('users').doc(userId).collection('routines').get();
+  const routinesSnapshot = await db.collection('users').doc(userId).collection('routines').limit(100).get();
   const routines = routinesSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 
   const routinesToUpdate = routines.filter(routine => {
@@ -365,6 +428,13 @@ async function deleteTemplate(db, userId, templateId) {
     const updatedTemplateIds = currentIds.filter(id => id !== templateId);
 
     const updateData = { template_ids: updatedTemplateIds };
+
+    // Remove from template_names map if it exists
+    if (routine.template_names && routine.template_names[templateId]) {
+      const updatedNames = { ...routine.template_names };
+      delete updatedNames[templateId];
+      updateData.template_names = updatedNames;
+    }
 
     if (routine.last_completed_template_id === templateId) {
       updateData.last_completed_template_id = null;
@@ -464,6 +534,19 @@ async function createTemplateFromPlan(db, userId, params) {
 
   let templateId;
 
+  // Resolve missing exercise names from catalog
+  const idsToResolve = exercises
+    .filter(ex => !ex.name && ex.exercise_id)
+    .map(ex => ex.exercise_id);
+  if (idsToResolve.length > 0) {
+    const nameMap = await resolveExerciseNames(db, idsToResolve);
+    exercises.forEach(ex => {
+      if (!ex.name && nameMap[ex.exercise_id]) {
+        ex.name = nameMap[ex.exercise_id];
+      }
+    });
+  }
+
   if (mode === 'create') {
     const templateData = {
       user_id: userId,
@@ -517,4 +600,5 @@ module.exports = {
   patchTemplate,
   deleteTemplate,
   createTemplateFromPlan,
+  resolveExerciseNames,
 };

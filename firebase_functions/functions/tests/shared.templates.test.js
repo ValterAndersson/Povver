@@ -40,6 +40,7 @@ const { ValidationError, NotFoundError, ConflictError, PermissionDeniedError } =
 function createMockDb(store = {}) {
   function makeDocRef(path) {
     return {
+      _path: path,
       id: path.split('/').pop(),
       get: async () => {
         const data = store[path];
@@ -86,6 +87,17 @@ function createMockDb(store = {}) {
   }
 
   const db = {
+    getAll: async (...refs) => {
+      return refs.map(ref => {
+        const path = ref._path;
+        const data = store[path];
+        return {
+          exists: !!data,
+          id: path.split('/').pop(),
+          data: () => (data ? { ...data } : undefined),
+        };
+      });
+    },
     collection: (col) => makeColRef(col),
     batch: () => {
       const ops = [];
@@ -167,6 +179,51 @@ describe('listTemplates', () => {
     const db = createMockDb(store);
     const result = await listTemplates(db, 'user1');
     assert.equal(result.count, 2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listTemplates - view support
+// ---------------------------------------------------------------------------
+
+describe('listTemplates - view support', () => {
+  test('view=summary returns compact shape with exercise names', async () => {
+    const store = {
+      'users/u1/templates/t1': {
+        name: 'Push Day',
+        description: 'Chest and shoulders',
+        exercises: [
+          { exercise_id: 'bench', name: 'Bench Press', position: 0, sets: [{ reps: 8 }, { reps: 8 }] },
+          { exercise_id: 'ohp', name: 'Overhead Press', position: 1, sets: [{ reps: 10 }] },
+        ],
+        analytics: { total_volume: 5000 },
+        created_at: 'ts',
+      },
+    };
+    const db = createMockDb(store);
+
+    const result = await listTemplates(db, 'u1', { view: 'summary' });
+    assert.equal(result.items.length, 1);
+    const t = result.items[0];
+    assert.equal(t.name, 'Push Day');
+    assert.equal(t.exercise_count, 2);
+    assert.deepEqual(t.exercise_names, ['Bench Press', 'Overhead Press']);
+    // Should NOT have full exercise objects
+    assert.equal(t.exercises, undefined);
+    assert.equal(t.analytics, undefined);
+  });
+
+  test('default view returns full documents (backwards compatible)', async () => {
+    const store = {
+      'users/u1/templates/t1': {
+        name: 'Push Day',
+        exercises: [{ exercise_id: 'bench', sets: [{ reps: 8 }] }],
+      },
+    };
+    const db = createMockDb(store);
+
+    const result = await listTemplates(db, 'u1');
+    assert.ok(result.items[0].exercises, 'Default view should include exercises');
   });
 });
 
@@ -343,6 +400,46 @@ describe('deleteTemplate', () => {
 });
 
 // ---------------------------------------------------------------------------
+// deleteTemplate - template_names cleanup
+// ---------------------------------------------------------------------------
+
+describe('deleteTemplate - template_names cleanup', () => {
+  test('removes entry from template_names on affected routines', async () => {
+    const store = {
+      'users/u1/templates/t1': { name: 'Push Day', exercises: [] },
+      'users/u1/routines/r1': {
+        template_ids: ['t1', 't2'],
+        template_names: { t1: 'Push Day', t2: 'Pull Day' },
+      },
+    };
+    const db = createMockDb(store);
+
+    await deleteTemplate(db, 'u1', 't1');
+
+    const routine = store['users/u1/routines/r1'];
+    assert.deepEqual(routine.template_ids, ['t2']);
+    assert.deepEqual(routine.template_names, { t2: 'Pull Day' });
+  });
+
+  test('handles routines without template_names gracefully', async () => {
+    const store = {
+      'users/u1/templates/t1': { name: 'Push Day', exercises: [] },
+      'users/u1/routines/r1': {
+        template_ids: ['t1', 't2'],
+        // no template_names field (legacy routine)
+      },
+    };
+    const db = createMockDb(store);
+
+    await deleteTemplate(db, 'u1', 't1');
+
+    const routine = store['users/u1/routines/r1'];
+    assert.deepEqual(routine.template_ids, ['t2']);
+    assert.equal(routine.template_names, undefined);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // createTemplateFromPlan
 // ---------------------------------------------------------------------------
 
@@ -467,5 +564,147 @@ describe('createTemplateFromPlan', () => {
     assert.equal(result.mode, 'create');
     assert.equal(result.exerciseCount, 1);
     assert.equal(result.message, 'Template created');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createTemplate - exercise name resolution
+// ---------------------------------------------------------------------------
+
+describe('createTemplate - exercise name resolution', () => {
+  test('resolves missing exercise names from catalog via batch read', async () => {
+    const store = {
+      'exercises/bench_press': { name: 'Bench Press (Barbell)' },
+      'exercises/lat_pulldown': { name: 'Lat Pulldown (Cable)' },
+    };
+    const db = createMockDb(store);
+
+    const input = {
+      name: 'Push Day',
+      exercises: [
+        { exercise_id: 'bench_press', position: 0, sets: [{ reps: 8, rir: 2, weight: null }] },
+        { exercise_id: 'lat_pulldown', name: 'Already Named', position: 1, sets: [{ reps: 10, rir: 3, weight: null }] },
+      ],
+    };
+
+    const result = await createTemplate(db, 'user1', input);
+    // Find the stored template
+    const templateKey = Object.keys(store).find(k => k.startsWith('users/user1/templates/'));
+    assert.ok(templateKey, 'Template should be stored');
+    const stored = store[templateKey];
+
+    // Exercise without name should have it resolved from catalog
+    assert.equal(stored.exercises[0].name, 'Bench Press (Barbell)');
+    // Exercise with existing name should keep it
+    assert.equal(stored.exercises[1].name, 'Already Named');
+  });
+
+  test('exercises with name already set are not re-resolved', async () => {
+    const store = {
+      'exercises/bench_press': { name: 'Catalog Name' },
+    };
+    const db = createMockDb(store);
+
+    const input = {
+      name: 'Test',
+      exercises: [
+        { exercise_id: 'bench_press', name: 'Custom Name', position: 0, sets: [{ reps: 8, rir: 2, weight: null }] },
+      ],
+    };
+
+    await createTemplate(db, 'user1', input);
+    const templateKey = Object.keys(store).find(k => k.startsWith('users/user1/templates/'));
+    const stored = store[templateKey];
+    assert.equal(stored.exercises[0].name, 'Custom Name');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// patchTemplate - template name propagation
+// ---------------------------------------------------------------------------
+
+describe('patchTemplate - template name propagation', () => {
+  test('updates template_names on routines when template name changes', async () => {
+    const store = {
+      'users/u1/templates/t1': {
+        name: 'Old Name',
+        exercises: [{ exercise_id: 'ex1', name: 'Test', position: 0, sets: [{ reps: 8, rir: 2 }] }],
+      },
+      'users/u1/routines/r1': {
+        template_ids: ['t1', 't2'],
+        template_names: { t1: 'Old Name', t2: 'Other' },
+      },
+    };
+    const db = createMockDb(store);
+
+    await patchTemplate(db, 'u1', 't1', { name: 'New Name' });
+
+    assert.equal(store['users/u1/templates/t1'].name, 'New Name');
+    assert.equal(store['users/u1/routines/r1'].template_names.t1, 'New Name');
+    assert.equal(store['users/u1/routines/r1'].template_names.t2, 'Other');
+  });
+
+  test('does not propagate when name is not being changed', async () => {
+    const store = {
+      'users/u1/templates/t1': {
+        name: 'Original',
+        exercises: [{ exercise_id: 'ex1', name: 'Test', position: 0, sets: [{ reps: 8, rir: 2 }] }],
+      },
+      'users/u1/routines/r1': {
+        template_ids: ['t1'],
+        template_names: { t1: 'Original' },
+      },
+    };
+    const db = createMockDb(store);
+
+    await patchTemplate(db, 'u1', 't1', { description: 'Updated description' });
+
+    // template_names should NOT have changed
+    assert.equal(store['users/u1/routines/r1'].template_names.t1, 'Original');
+  });
+
+  test('self-heals routines without template_names (legacy)', async () => {
+    const store = {
+      'users/u1/templates/t1': {
+        name: 'Old Name',
+        exercises: [{ exercise_id: 'ex1', name: 'Test', position: 0, sets: [{ reps: 8, rir: 2 }] }],
+      },
+      'users/u1/routines/r1': {
+        template_ids: ['t1'],
+        // no template_names — legacy routine
+      },
+    };
+    const db = createMockDb(store);
+
+    // Should not throw and should create template_names on legacy routine
+    await patchTemplate(db, 'u1', 't1', { name: 'New Name' });
+    assert.equal(store['users/u1/templates/t1'].name, 'New Name');
+    assert.deepStrictEqual(store['users/u1/routines/r1'].template_names, { t1: 'New Name' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// patchTemplate - exercise name resolution
+// ---------------------------------------------------------------------------
+
+describe('patchTemplate - exercise name resolution', () => {
+  test('resolves missing names when exercises array is patched', async () => {
+    const store = {
+      'users/user1/templates/t1': {
+        name: 'Old Template',
+        exercises: [{ exercise_id: 'old_ex', name: 'Old Exercise', position: 0, sets: [] }],
+      },
+      'exercises/new_ex': { name: 'New Exercise Name' },
+    };
+    const db = createMockDb(store);
+
+    await patchTemplate(db, 'user1', 't1', {
+      exercises: [
+        { exercise_id: 'new_ex', position: 0, sets: [{ reps: 8, rir: 2, weight: null }] },
+      ],
+    });
+
+    const stored = store['users/user1/templates/t1'];
+    assert.equal(stored.exercises[0].name, 'New Exercise Name');
   });
 });
