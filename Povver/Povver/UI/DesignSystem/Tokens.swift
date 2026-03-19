@@ -34,6 +34,10 @@ public extension Color {
     static let destructive = Color("dsDestructive")
     static let warning = Color("dsWarning")
     static let success = Color("dsSuccess")
+
+    // MARK: Workout Mode
+    /// Cooler/deeper background for active workout screens
+    static let bgWorkout = Color(light: Color(hex: "EEF0F2"), dark: Color(hex: "080A0E"))
 }
 
 // MARK: - Light/Dark Mode Color Helper
@@ -121,6 +125,11 @@ public enum MotionToken {
     public static let fast: Double = 0.12
     public static let medium: Double = 0.18
     public static let slow: Double = 0.25
+
+    /// Spring animation presets
+    public static let snappy = Animation.spring(response: 0.3, dampingFraction: 0.7)
+    public static let gentle = Animation.spring(response: 0.5, dampingFraction: 0.8)
+    public static let bouncy = Animation.spring(response: 0.4, dampingFraction: 0.6)
 }
 
 public struct ShadowStyle: Equatable {
@@ -197,6 +206,7 @@ public enum TextStyle {
     case secondary      // 15/regular - secondary text
     case caption        // 13/regular - captions
     case micro          // 12/regular - smallest text
+    case sectionLabel   // 11/semibold uppercased tracking:1 - section labels
     case metricL        // 28/semibold monospaced - large numbers
     case metricM        // 22/semibold monospaced - medium numbers
     case metricS        // 17/semibold monospaced - small numbers
@@ -211,6 +221,7 @@ public enum TextStyle {
         case .secondary: return TypographyToken.secondary
         case .caption: return TypographyToken.caption
         case .micro: return TypographyToken.micro
+        case .sectionLabel: return .system(size: 11, weight: .semibold)
         case .metricL: return TypographyToken.metricL
         case .metricM: return TypographyToken.metricM
         case .metricS: return TypographyToken.metricS
@@ -220,8 +231,17 @@ public enum TextStyle {
 
 public extension View {
     /// Apply a named text style from the design system
+    @ViewBuilder
     func textStyle(_ style: TextStyle) -> some View {
-        self.font(style.font)
+        switch style {
+        case .sectionLabel:
+            self.font(style.font)
+                .foregroundStyle(Color.textSecondary)
+                .textCase(.uppercase)
+                .tracking(1)
+        default:
+            self.font(style.font)
+        }
     }
 }
 
@@ -373,6 +393,20 @@ public extension View {
     /// Apply a consistent shadow using a design token
     func shadowStyle(_ style: ShadowStyle) -> some View {
         shadow(color: style.color, radius: style.blur, x: style.x, y: style.y)
+    }
+}
+
+// MARK: - Workout Active Environment Key
+
+private struct WorkoutActiveKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+
+public extension EnvironmentValues {
+    /// Whether the view hierarchy is inside an active workout session
+    var workoutActive: Bool {
+        get { self[WorkoutActiveKey.self] }
+        set { self[WorkoutActiveKey.self] = newValue }
     }
 }
 
