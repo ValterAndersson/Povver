@@ -978,7 +978,9 @@ struct WarmupDivider: View {
 struct CompletionCircle: View {
     let isDone: Bool
     let action: () -> Void
-    
+
+    @State private var pulseScale: CGFloat = 1.0
+
     var body: some View {
         Button(action: action) {
             ZStack {
@@ -988,17 +990,30 @@ struct CompletionCircle: View {
                         lineWidth: isDone ? 2 : 1.5
                     )
                     .frame(width: 20, height: 20)
-                
+
                 if isDone {
                     Image(systemName: "checkmark")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(Color.success)
                 }
             }
+            .scaleEffect(pulseScale)
             .frame(width: 44, height: 44) // 44pt hit target
             .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
+        .onChange(of: isDone) { _, newValue in
+            if newValue {
+                withAnimation(.spring(response: 0.12, dampingFraction: 0.5)) {
+                    pulseScale = 1.15
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                    withAnimation(.spring(response: 0.12, dampingFraction: 0.8)) {
+                        pulseScale = 1.0
+                    }
+                }
+            }
+        }
     }
 }
 
