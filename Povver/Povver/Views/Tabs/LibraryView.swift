@@ -155,7 +155,7 @@ struct LibraryView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             if !hasAppeared {
-                withAnimation {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                     hasAppeared = true
                 }
             }
