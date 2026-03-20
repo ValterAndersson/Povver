@@ -425,59 +425,99 @@ struct FocusModeWorkoutScreen: View {
     
     private var workoutStartView: some View {
         ScrollView {
-            VStack(spacing: Space.xl) {
+            VStack(spacing: Space.lg) {
                 Spacer(minLength: 40)
-                
+
                 // Icon
                 Image(systemName: "figure.strengthtraining.traditional")
                     .font(.system(size: 48))
                     .foregroundColor(Color.accent)
-                
+
                 Text("Start a Workout")
-                    .font(.system(size: 24, weight: .bold))
+                    .textStyle(.screenTitle)
                     .foregroundColor(Color.textPrimary)
-                
+
                 if isLoadingStartData {
                     ProgressView()
                         .padding(.vertical, Space.lg)
                 } else {
-                    // Start Options
-                    VStack(spacing: Space.md) {
-                        // Next Scheduled (from routine cursor)
+                    VStack(spacing: Space.lg) {
+                        // Tier 2 hero card + primary CTA when a scheduled workout exists
                         if let nextInfo = nextWorkoutInfo, nextInfo.hasNextWorkout {
-                            startOptionButton(
-                                icon: "calendar",
-                                title: nextInfo.template?.name ?? "Next Scheduled",
-                                subtitle: "\(nextInfo.templateIndex + 1)/\(nextInfo.templateCount) in \(nextInfo.routineName ?? "routine")",
-                                isPrimary: true
-                            ) {
+                            // Hero card: workout info
+                            VStack(alignment: .leading, spacing: Space.xs) {
+                                Text(nextInfo.template?.name ?? "Next Scheduled")
+                                    .textStyle(.bodyStrong)
+                                    .foregroundColor(Color.textPrimary)
+
+                                Text("Day \(nextInfo.templateIndex + 1) of \(nextInfo.templateCount)")
+                                    .textStyle(.secondary)
+                                    .foregroundColor(Color.textSecondary)
+
+                                if let template = nextInfo.template {
+                                    Text("\(template.exerciseCount) exercises")
+                                        .textStyle(.caption)
+                                        .foregroundColor(Color.textSecondary)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, Space.lg)
+                            .padding(.vertical, Space.lg)
+                            .background(Color.surfaceElevated)
+                            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusCard, style: .continuous))
+                            .shadowStyle(ShadowsToken.level1)
+
+                            // Full-width emerald CTA
+                            PovverButton("Start Session") {
                                 Task { await startFromNextWorkout() }
                             }
-                        }
-                        
-                        // Empty Workout
-                        startOptionButton(
-                            icon: "plus.circle.fill",
-                            title: "Start Empty Workout",
-                            subtitle: "Add exercises as you go",
-                            isPrimary: nextWorkoutInfo?.hasNextWorkout != true
-                        ) {
-                            Task { await startEmptyWorkout() }
-                        }
-                        
-                        // From Template
-                        startOptionButton(
-                            icon: "doc.on.doc",
-                            title: "From Template",
-                            subtitle: templates.isEmpty ? "No templates saved" : "\(templates.count) template\(templates.count == 1 ? "" : "s")",
-                            isDisabled: templates.isEmpty
-                        ) {
-                            showingTemplatePicker = true
+
+                            // Secondary text links
+                            VStack(spacing: Space.md) {
+                                Button {
+                                    Task { await startEmptyWorkout() }
+                                } label: {
+                                    Text("Start Empty Workout")
+                                        .textStyle(.secondary)
+                                        .foregroundColor(Color.textSecondary)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+
+                                if !templates.isEmpty {
+                                    Button {
+                                        showingTemplatePicker = true
+                                    } label: {
+                                        Text("From Template")
+                                            .textStyle(.secondary)
+                                            .foregroundColor(Color.textSecondary)
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
+                                }
+                            }
+                            .padding(.top, Space.sm)
+                        } else {
+                            // No scheduled workout: empty workout as primary CTA
+                            PovverButton("Start Empty Workout") {
+                                Task { await startEmptyWorkout() }
+                            }
+
+                            // From Template as secondary text link
+                            if !templates.isEmpty {
+                                Button {
+                                    showingTemplatePicker = true
+                                } label: {
+                                    Text("From Template")
+                                        .textStyle(.secondary)
+                                        .foregroundColor(Color.textSecondary)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                .padding(.top, Space.sm)
+                            }
                         }
                     }
                     .padding(.horizontal, Space.lg)
                 }
-                
+
                 Spacer()
             }
             .padding(.top, Space.xl)
@@ -599,64 +639,7 @@ struct FocusModeWorkoutScreen: View {
         .presentationDetents([.medium, .large])
     }
     
-    /// v1.1 compliant start option: neutral surface with accent icon
-    /// No full accent-fill rows - only small PrimaryButton or accent icon accents
-    private func startOptionButton(
-        icon: String,
-        title: String,
-        subtitle: String,
-        isPrimary: Bool = false,
-        isDisabled: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: Space.md) {
-                // Icon: accent for primary, textSecondary for others
-                Image(systemName: icon)
-                    .font(.system(size: 20))
-                    .foregroundColor(isDisabled ? Color.textTertiary : (isPrimary ? Color.accent : Color.textSecondary))
-                    .frame(width: 32)
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(isDisabled ? Color.textTertiary : Color.textPrimary)
-                    
-                    Text(subtitle)
-                        .font(.system(size: 13))
-                        .foregroundColor(isDisabled ? Color.textTertiary : Color.textSecondary)
-                }
-                
-                Spacer()
-                
-                // Primary: show "Start" label, others show chevron
-                if isPrimary && !isDisabled {
-                    Text("Start")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.textInverse)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.accent)
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon))
-                } else {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(isDisabled ? Color.textTertiary : Color.textTertiary)
-                }
-            }
-            .padding(.horizontal, Space.lg)
-            .padding(.vertical, 16)
-            .background(Color.surface)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
-            .overlay(
-                RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl)
-                    .stroke(Color.separatorLine, lineWidth: 0.5)
-            )
-        }
-        .buttonStyle(PlainButtonStyle())
-        .disabled(isDisabled)
-        .opacity(isDisabled ? 0.6 : 1)
-    }
+    // startOptionButton removed — replaced by Tier 2 hero card + PovverButton CTA in workoutStartView
     
     // MARK: - Workout Content
     
