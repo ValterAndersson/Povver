@@ -29,6 +29,9 @@ struct WorkoutCompletionSummary: View {
     @State private var workout: Workout?
     @State private var isLoading = true
     @State private var revealPhase = 0
+    @State private var weeklyWorkoutCounts: [WeekWorkoutCount] = []
+    @State private var routineFrequency: Int = 4
+    @State private var coachReflection: String? = nil
 
     private var weightUnit: WeightUnit { UserService.shared.weightUnit }
 
@@ -100,11 +103,39 @@ struct WorkoutCompletionSummary: View {
                                 .offset(y: revealPhase >= 3 ? 0 : 8)
                                 .animation(MotionToken.gentle, value: revealPhase)
 
+                            // Phase 4: Consistency Map with animated fill
+                            if !weeklyWorkoutCounts.isEmpty {
+                                TrainingConsistencyMap(
+                                    weeks: weeklyWorkoutCounts,
+                                    routineFrequency: routineFrequency
+                                )
+                                .padding(.horizontal, Space.lg)
+                                .opacity(revealPhase >= 4 ? 1 : 0)
+                                .offset(y: revealPhase >= 4 ? 0 : 8)
+                                .animation(MotionToken.bouncy, value: revealPhase)
+                            }
+
                             // Phase 5: Full workout detail (reuse existing component)
                             WorkoutSummaryContent(workout: workout)
                                 .opacity(revealPhase >= 5 ? 1 : 0)
                                 .offset(y: revealPhase >= 5 ? 0 : 8)
                                 .animation(MotionToken.gentle, value: revealPhase)
+
+                            // Coach reflection (if available)
+                            if let reflection = coachReflection, !reflection.isEmpty {
+                                VStack(spacing: Space.sm) {
+                                    CoachPresenceIndicator(size: 24)
+                                    Text(reflection)
+                                        .textStyle(.secondary)
+                                        .foregroundStyle(Color.textSecondary)
+                                        .multilineTextAlignment(.center)
+                                        .padding(.horizontal, Space.lg)
+                                }
+                                .padding(.top, Space.md)
+                                .opacity(revealPhase >= 6 ? 1 : 0)
+                                .offset(y: revealPhase >= 6 ? 0 : 8)
+                                .animation(MotionToken.gentle, value: revealPhase)
+                            }
                         }
                     }
                 } else {
@@ -188,6 +219,15 @@ struct WorkoutCompletionSummary: View {
             totalVolume: w.analytics.totalWeight
         )
 
+        // Load consistency map data
+        let trainingService = TrainingDataService.shared
+        weeklyWorkoutCounts = (try? await trainingService.fetchWeeklyWorkoutCounts(weeks: 12)) ?? []
+
+        // Load coach reflection from post-workout summary
+        if let summary = try? await trainingService.fetchPostWorkoutSummary(workoutId: workoutId) {
+            coachReflection = summary.summary
+        }
+
         // Sequenced reveal: stagger each phase for a polished entrance.
         // Runs in a Task tied to the .task modifier, so it cancels automatically on disappear.
         await startRevealSequence()
@@ -202,6 +242,7 @@ struct WorkoutCompletionSummary: View {
             .milliseconds(200),  // phase 3 (cumulative 0.5s)
             .milliseconds(200),  // phase 4 (cumulative 0.7s)
             .milliseconds(300),  // phase 5 (cumulative 1.0s)
+            .milliseconds(200),  // phase 6 (cumulative 1.2s)
         ]
         for (index, delay) in phaseDelays.enumerated() {
             try? await Task.sleep(for: delay)
