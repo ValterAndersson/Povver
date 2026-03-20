@@ -670,21 +670,25 @@ struct ExercisesListView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "line.3.horizontal.decrease")
                             .font(.system(size: 14, weight: .medium))
-                        
+
                         if filters.activeCount > 0 {
                             Text("·")
                             Text("\(filters.activeCount)")
                                 .font(.system(size: 13, weight: .semibold).monospacedDigit())
                         }
                     }
-                    .foregroundColor(filters.isEmpty ? Color.textSecondary : Color.accent)
+                    .foregroundColor(filters.isEmpty ? Color.textSecondary : Color.textPrimary)
+                    .fontWeight(filters.isEmpty ? .regular : .semibold)
                     .padding(.horizontal, Space.md)
                     .padding(.vertical, 12)
-                    .background(filters.isEmpty ? Color.surface : Color.accent.opacity(0.12))
+                    .background(filters.isEmpty ? Color.surface : Color.surfaceElevated)
                     .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
                     .overlay(
                         RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl)
-                            .stroke(filters.isEmpty ? Color.clear : Color.accent.opacity(0.3), lineWidth: 1)
+                            .stroke(
+                                Color.separatorLine,
+                                lineWidth: filters.isEmpty ? StrokeWidthToken.hairline : StrokeWidthToken.thin
+                            )
                     )
                 }
                 .buttonStyle(PlainButtonStyle())
@@ -808,12 +812,19 @@ struct ExercisesListView: View {
                 } label: {
                     Text(option.rawValue)
                         .textStyle(.micro)
-                        .fontWeight(viewModel.sortOption == option ? .semibold : .medium)
-                        .foregroundColor(viewModel.sortOption == option ? .textInverse : Color.textSecondary)
+                        .fontWeight(viewModel.sortOption == option ? .semibold : .regular)
+                        .foregroundColor(viewModel.sortOption == option ? Color.textPrimary : Color.textSecondary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
-                        .background(viewModel.sortOption == option ? Color.accent : Color.surfaceElevated)
+                        .background(viewModel.sortOption == option ? Color.surface : Color.clear)
                         .clipShape(Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(
+                                    viewModel.sortOption == option ? Color.separatorLine : Color.separatorLine,
+                                    lineWidth: viewModel.sortOption == option ? StrokeWidthToken.thin : StrokeWidthToken.hairline
+                                )
+                        )
                 }
                 .buttonStyle(PlainButtonStyle())
             }
