@@ -265,12 +265,14 @@ extension WorkoutRow {
         time: String,
         duration: String,
         exerciseCount: Int,
+        hasPR: Bool = false,
         isSyncing: Bool = false,
         action: (() -> Void)? = nil
     ) -> WorkoutRow {
         WorkoutRow(
             title: name,
             subtitle: "\(time) • \(duration) • \(exerciseCount) exercises",
+            badge: hasPR ? Badge("PR", color: .accent) : nil,
             variant: .list,
             isSyncing: isSyncing,
             action: action

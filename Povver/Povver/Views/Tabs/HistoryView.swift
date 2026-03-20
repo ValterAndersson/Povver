@@ -113,6 +113,7 @@ struct HistoryView: View {
                                     time: formatTime(workout.date),
                                     duration: formatDuration(workout.duration),
                                     exerciseCount: workout.exerciseCount,
+                                    hasPR: workout.hasPR,
                                     isSyncing: saveService.isSaving(workout.id)
                                 )
                             }
@@ -194,7 +195,8 @@ struct HistoryView: View {
                         duration: workout.endTime.timeIntervalSince(workout.startTime),
                         exerciseCount: workout.exercises.count,
                         setCount: workout.exercises.flatMap { $0.sets }.count,
-                        totalVolume: workout.analytics.totalWeight
+                        totalVolume: workout.analytics.totalWeight,
+                        hasPR: false  // TODO: Derive from analysis_insights when wired
                     )
                 }
             
@@ -222,7 +224,8 @@ struct HistoryView: View {
                 duration: workout.endTime.timeIntervalSince(workout.startTime),
                 exerciseCount: workout.exercises.count,
                 setCount: workout.exercises.flatMap { $0.sets }.count,
-                totalVolume: workout.analytics.totalWeight
+                totalVolume: workout.analytics.totalWeight,
+                hasPR: false  // TODO: Derive from analysis_insights when wired
             )
         }
         
@@ -260,6 +263,7 @@ struct HistoryWorkoutItem: Identifiable {
     let exerciseCount: Int
     let setCount: Int
     let totalVolume: Double
+    let hasPR: Bool  // TODO: Wire to analysis_insights.highlights (type: "pr") when available
 }
 
 // MARK: - Workout Group
