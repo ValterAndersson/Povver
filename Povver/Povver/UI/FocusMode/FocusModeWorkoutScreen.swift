@@ -615,11 +615,11 @@ struct FocusModeWorkoutScreen: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(template.name)
-                                    .font(.system(size: 16, weight: .medium))
+                                    .textStyle(.secondary).fontWeight(.medium)
                                     .foregroundColor(Color.textPrimary)
-                                
+
                                 Text("\(template.exerciseCount) exercises • \(template.setCount) sets")
-                                    .font(.system(size: 13))
+                                    .textStyle(.caption)
                                     .foregroundColor(Color.textSecondary)
                             }
                             
@@ -927,9 +927,9 @@ struct FocusModeWorkoutScreen: View {
                 // Pre-workout state (tab bar is visible for navigation)
                 HStack {
                     Text("Train")
-                        .font(.system(size: 17, weight: .semibold))
+                        .textStyle(.sectionHeader)
                         .foregroundColor(Color.textPrimary)
-                    
+
                     Spacer()
                     // No X button - users can navigate via tab bar
                 }
@@ -980,7 +980,7 @@ struct FocusModeWorkoutScreen: View {
                     Image(systemName: "globe")
                         .foregroundColor(Color.textSecondary)
                     Text(TimeZone.current.identifier)
-                        .font(.system(size: 14))
+                        .textStyle(.caption)
                         .foregroundColor(Color.textSecondary)
                     Spacer()
                 }
@@ -1069,7 +1069,7 @@ struct FocusModeWorkoutScreen: View {
             ProgressView()
                 .scaleEffect(1.2)
             Text("Starting workout...")
-                .font(.system(size: 15))
+                .textStyle(.secondary)
                 .foregroundColor(Color.textSecondary)
         }
     }
@@ -1082,7 +1082,7 @@ struct FocusModeWorkoutScreen: View {
                 Image(systemName: "plus.circle.fill")
                     .font(.system(size: 20))
                 Text("Add Exercise")
-                    .font(.system(size: 15, weight: .medium))
+                    .textStyle(.secondary).fontWeight(.medium)
             }
             .foregroundColor(Color.accent)
             .frame(maxWidth: .infinity)
@@ -1104,7 +1104,7 @@ struct FocusModeWorkoutScreen: View {
                 presentSheet(.finishWorkout)
             } label: {
                 Text("Finish Workout")
-                    .font(.system(size: 17, weight: .semibold))
+                    .textStyle(.bodyStrong)
                     .foregroundColor(.textInverse)
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
@@ -1118,7 +1118,7 @@ struct FocusModeWorkoutScreen: View {
                 showingCancelConfirmation = true
             } label: {
                 Text("Discard Workout")
-                    .font(.system(size: 15, weight: .medium))
+                    .textStyle(.secondary).fontWeight(.medium)
                     .foregroundColor(Color.destructive)
             }
             .buttonStyle(PlainButtonStyle())

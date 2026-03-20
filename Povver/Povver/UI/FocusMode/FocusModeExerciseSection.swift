@@ -110,7 +110,7 @@ struct FocusModeExerciseSection: View {
                 Image(systemName: icon)
                     .font(.system(size: 11, weight: .medium))
                 Text(label)
-                    .font(.system(size: 12, weight: .medium))
+                    .textStyle(.micro).fontWeight(.medium)
             }
             .foregroundColor(Color.accent)
             .padding(.horizontal, 10)
@@ -308,7 +308,7 @@ struct FocusModeExerciseSectionNew: View {
                             .font(.system(size: 11))
                             .foregroundColor(Color.textTertiary)
                         Text(notes)
-                            .font(.system(size: 13))
+                            .textStyle(.caption)
                             .foregroundColor(Color.textSecondary)
                             .lineLimit(1)
                             .truncationMode(.tail)
