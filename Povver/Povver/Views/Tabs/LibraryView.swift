@@ -1,9 +1,21 @@
 import SwiftUI
 
-/// Library Tab - Content assets and reference catalog
-/// Simple list landing with Routines, Templates, Exercises sections
+/// Library Tab - Content-rich dashboard with active routine hero,
+/// template cards, and exercise browsing
 struct LibraryView: View {
+    @State private var routines: [FocusModeWorkoutService.RoutineInfo] = []
+    @State private var templates: [FocusModeWorkoutService.TemplateInfo] = []
+    @State private var nextWorkoutInfo: FocusModeWorkoutService.NextWorkoutInfo? = nil
+    @State private var isLoading = true
     @State private var hasAppeared = false
+
+    private var activeRoutine: FocusModeWorkoutService.RoutineInfo? {
+        routines.first(where: { $0.isActive })
+    }
+
+    private var inactiveRoutines: [FocusModeWorkoutService.RoutineInfo] {
+        routines.filter { !$0.isActive }
+    }
 
     var body: some View {
         ScrollView {
@@ -14,60 +26,126 @@ struct LibraryView: View {
                         .textStyle(.screenTitle)
                         .foregroundColor(Color.textPrimary)
 
-                    Text("Your training assets and content")
+                    Text("\(routines.count) routines, \(templates.count) templates")
                         .textStyle(.secondary)
                         .foregroundColor(Color.textSecondary)
                 }
                 .padding(.horizontal, Space.lg)
                 .padding(.top, Space.md)
                 .staggeredEntrance(index: 0, active: hasAppeared)
-                
-                // Library sections - monochrome icons for premium aesthetic
-                VStack(spacing: Space.sm) {
-                    // Routines
-                    Button {
-                        AnalyticsService.shared.librarySectionOpened(section: .routines)
-                    } label: {
-                        NavigationLink(destination: RoutinesListView()) {
-                            LibraryRow(
-                                title: "Routines",
-                                subtitle: "Weekly training programs",
-                                icon: "calendar"
-                            )
-                        }
-                    }
-                    .buttonStyle(PlainButtonStyle())
 
-                    // Templates
-                    Button {
-                        AnalyticsService.shared.librarySectionOpened(section: .templates)
-                    } label: {
-                        NavigationLink(destination: TemplatesListView()) {
-                            LibraryRow(
-                                title: "Templates",
-                                subtitle: "Reusable workout templates",
-                                icon: "doc.on.doc"
-                            )
-                        }
-                    }
-                    .buttonStyle(PlainButtonStyle())
+                // MARK: - Your Program
+                VStack(alignment: .leading, spacing: Space.sm) {
+                    Text("YOUR PROGRAM")
+                        .textStyle(.sectionLabel)
+                        .foregroundColor(Color.textSecondary)
+                        .padding(.horizontal, Space.lg)
 
-                    // Exercises
-                    Button {
-                        AnalyticsService.shared.librarySectionOpened(section: .exercises)
-                    } label: {
-                        NavigationLink(destination: ExercisesListView()) {
-                            LibraryRow(
-                                title: "Exercises",
-                                subtitle: "Exercise catalog and movements",
-                                icon: "figure.strengthtraining.traditional"
-                            )
+                    if let routine = activeRoutine {
+                        NavigationLink(destination: RoutineDetailView(routineId: routine.id, routineName: routine.name)) {
+                            activeRoutineCard(routine)
                         }
+                        .simultaneousGesture(TapGesture().onEnded {
+                            AnalyticsService.shared.librarySectionOpened(section: .routines)
+                        })
+                        .buttonStyle(PlainButtonStyle())
+                        .padding(.horizontal, Space.lg)
+                    } else if !isLoading {
+                        emptyRoutineCard
+                            .padding(.horizontal, Space.lg)
                     }
-                    .buttonStyle(PlainButtonStyle())
                 }
-                .padding(.horizontal, Space.lg)
                 .staggeredEntrance(index: 1, active: hasAppeared)
+
+                // MARK: - Other Routines
+                if !inactiveRoutines.isEmpty {
+                    VStack(alignment: .leading, spacing: Space.sm) {
+                        Text("OTHER ROUTINES")
+                            .textStyle(.sectionLabel)
+                            .foregroundColor(Color.textSecondary)
+                            .padding(.horizontal, Space.lg)
+
+                        VStack(spacing: Space.xs) {
+                            ForEach(inactiveRoutines) { routine in
+                                NavigationLink(destination: RoutineDetailView(routineId: routine.id, routineName: routine.name)) {
+                                    inactiveRoutineRow(routine)
+                                }
+                                .simultaneousGesture(TapGesture().onEnded {
+                                    AnalyticsService.shared.librarySectionOpened(section: .routines)
+                                })
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                        }
+                        .padding(.horizontal, Space.lg)
+                    }
+                    .staggeredEntrance(index: 2, active: hasAppeared)
+                }
+
+                // MARK: - Templates
+                VStack(alignment: .leading, spacing: Space.sm) {
+                    Text("TEMPLATES")
+                        .textStyle(.sectionLabel)
+                        .foregroundColor(Color.textSecondary)
+                        .padding(.horizontal, Space.lg)
+
+                    if templates.isEmpty && !isLoading {
+                        SurfaceCard {
+                            Text("No templates yet \u{2014} create one or ask your coach.")
+                                .textStyle(.secondary)
+                                .foregroundColor(Color.textSecondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(.horizontal, Space.lg)
+                    } else {
+                        VStack(spacing: Space.xs) {
+                            ForEach(templates.prefix(3)) { template in
+                                NavigationLink(destination: TemplateDetailView(templateId: template.id, templateName: template.name)) {
+                                    templateCard(template)
+                                }
+                                .simultaneousGesture(TapGesture().onEnded {
+                                    AnalyticsService.shared.librarySectionOpened(section: .templates)
+                                })
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                        }
+                        .padding(.horizontal, Space.lg)
+
+                        if templates.count > 3 {
+                            NavigationLink(destination: TemplatesListView()) {
+                                Text("See all (\(templates.count))")
+                                    .textStyle(.secondary)
+                                    .foregroundColor(Color.accent)
+                            }
+                            .simultaneousGesture(TapGesture().onEnded {
+                                AnalyticsService.shared.librarySectionOpened(section: .templates)
+                            })
+                            .padding(.horizontal, Space.lg)
+                        }
+                    }
+                }
+                .staggeredEntrance(index: 3, active: hasAppeared)
+
+                // MARK: - Exercises
+                VStack(alignment: .leading, spacing: Space.sm) {
+                    Text("EXERCISES")
+                        .textStyle(.sectionLabel)
+                        .foregroundColor(Color.textSecondary)
+                        .padding(.horizontal, Space.lg)
+
+                    NavigationLink(destination: ExercisesListView()) {
+                        LibraryRow(
+                            title: "Browse all exercises",
+                            subtitle: "Exercise catalog and movements",
+                            icon: "figure.strengthtraining.traditional"
+                        )
+                    }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        AnalyticsService.shared.librarySectionOpened(section: .exercises)
+                    })
+                    .buttonStyle(PlainButtonStyle())
+                    .padding(.horizontal, Space.lg)
+                }
+                .staggeredEntrance(index: 4, active: hasAppeared)
 
                 Spacer(minLength: Space.xxl)
             }
@@ -80,6 +158,104 @@ struct LibraryView: View {
                 withAnimation {
                     hasAppeared = true
                 }
+            }
+        }
+        .task {
+            let service = FocusModeWorkoutService.shared
+            routines = (try? await service.getUserRoutines()) ?? []
+            templates = (try? await service.getUserTemplates()) ?? []
+            nextWorkoutInfo = try? await service.getNextWorkout()
+            isLoading = false
+        }
+    }
+
+    // MARK: - Active Routine Hero Card (Tier 2)
+
+    private func activeRoutineCard(_ routine: FocusModeWorkoutService.RoutineInfo) -> some View {
+        VStack(alignment: .leading, spacing: Space.sm) {
+            HStack {
+                Text(routine.name)
+                    .textStyle(.bodyStrong)
+                    .foregroundColor(Color.textPrimary)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(Color.textTertiary)
+            }
+
+            if routine.workoutCount > 0 {
+                MiniWeekStrip(
+                    totalDays: routine.workoutCount,
+                    completedThisWeek: nextWorkoutInfo?.templateIndex ?? 0,
+                    currentDayIndex: nextWorkoutInfo?.templateIndex ?? 0
+                )
+            }
+
+            if let next = nextWorkoutInfo, let template = next.template {
+                Text("Next: \(template.name)")
+                    .textStyle(.secondary)
+                    .foregroundColor(Color.textSecondary)
+            }
+        }
+        .padding(Space.lg)
+        .background(Color.surfaceElevated)
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusCard, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: CornerRadiusToken.radiusCard, style: .continuous)
+                .stroke(Color.separatorLine, lineWidth: StrokeWidthToken.hairline)
+        )
+        .shadowStyle(ShadowsToken.level1)
+    }
+
+    // MARK: - Empty Routine State
+
+    private var emptyRoutineCard: some View {
+        SurfaceCard {
+            Text("No programs yet \u{2014} want me to design one for you?")
+                .textStyle(.secondary)
+                .foregroundColor(Color.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    // MARK: - Inactive Routine Row (Tier 0)
+
+    private func inactiveRoutineRow(_ routine: FocusModeWorkoutService.RoutineInfo) -> some View {
+        HStack {
+            Text(routine.name)
+                .textStyle(.bodyStrong)
+                .foregroundColor(Color.textPrimary)
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(Color.textTertiary)
+        }
+        .padding(Space.md)
+        .background(Color.surface)
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
+        .overlay(
+            RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl)
+                .stroke(Color.separatorLine, lineWidth: StrokeWidthToken.hairline)
+        )
+    }
+
+    // MARK: - Template Card (Tier 1)
+
+    private func templateCard(_ template: FocusModeWorkoutService.TemplateInfo) -> some View {
+        SurfaceCard {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(template.name)
+                        .textStyle(.bodyStrong)
+                        .foregroundColor(Color.textPrimary)
+                    Text("\(template.exerciseCount) exercises \u{00B7} \(template.setCount) sets")
+                        .textStyle(.secondary)
+                        .foregroundColor(Color.textSecondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(Color.textTertiary)
             }
         }
     }
