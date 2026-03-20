@@ -1,5 +1,4 @@
 import SwiftUI
-import FirebaseFirestore
 
 /// Coach Tab - State-driven agent interface.
 /// Hero section adapts to workout day, rest day, post-workout, inactivity, or new user.
@@ -18,9 +17,7 @@ struct CoachTabView: View {
     @State private var entryContext: String = ""
     @State private var query: String = ""
     @State private var selectedConversationId: String? = nil
-    @State private var recentConversations: [RecentConversation] = []
     @State private var showAllConversations = false
-    @State private var hasLoadedConversations = false
 
     var body: some View {
         ScrollView {
@@ -40,7 +37,7 @@ struct CoachTabView: View {
                 }
 
                 // Recent conversations
-                if hasLoadedConversations && !recentConversations.isEmpty {
+                if viewModel.hasLoadedConversations && !viewModel.recentConversations.isEmpty {
                     recentSection
                         .staggeredEntrance(index: 3, active: hasAppeared)
                 }
@@ -69,7 +66,7 @@ struct CoachTabView: View {
             await viewModel.load()
         }
         .onAppear {
-            loadRecentConversations()
+            viewModel.loadRecentConversations()
             if !hasAppeared {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                     hasAppeared = true
@@ -91,7 +88,7 @@ struct CoachTabView: View {
                 query = ""
                 entryContext = ""
                 selectedConversationId = nil
-                loadRecentConversations()
+                viewModel.loadRecentConversations()
             }
         }
     }
@@ -378,7 +375,7 @@ struct CoachTabView: View {
             Text("Recent")
                 .textStyle(.sectionLabel)
 
-            ForEach(recentConversations.prefix(5)) { conv in
+            ForEach(viewModel.recentConversations.prefix(5)) { conv in
                 Button {
                     selectedConversationId = conv.id
                     entryContext = ""
@@ -406,7 +403,7 @@ struct CoachTabView: View {
                 }
                 .buttonStyle(.plain)
 
-                if conv.id != recentConversations.prefix(5).last?.id {
+                if conv.id != viewModel.recentConversations.prefix(5).last?.id {
                     Divider().foregroundStyle(Color.separatorLine)
                 }
             }
@@ -472,53 +469,6 @@ struct CoachTabView: View {
         return String(format: "%.0f", volume)
     }
 
-    private func loadRecentConversations() {
-        guard let uid = AuthService.shared.currentUser?.uid else { return }
-        let db = Firestore.firestore()
-        db.collection("users").document(uid).collection("conversations")
-            .whereField("status", isEqualTo: "active")
-            .order(by: "updatedAt", descending: true)
-            .limit(to: 5)
-            .getDocuments { snapshot, error in
-                if let error = error {
-                    AppLogger.shared.error(.store, "loadRecentConversations failed", error)
-                }
-                guard let docs = snapshot?.documents, error == nil else {
-                    DispatchQueue.main.async { self.hasLoadedConversations = true }
-                    return
-                }
-                let canvases: [RecentConversation] = docs.compactMap { doc in
-                    let data = doc.data()
-                    let title = data["title"] as? String
-                    let lastMessage = data["lastMessage"] as? String
-                    let updatedAt = (data["updatedAt"] as? Timestamp)?.dateValue()
-                    let createdAt = (data["createdAt"] as? Timestamp)?.dateValue()
-                    // Skip conversations that have never been messaged
-                    guard lastMessage != nil || updatedAt != nil else { return nil }
-                    return RecentConversation(
-                        id: doc.documentID,
-                        title: title,
-                        lastMessage: lastMessage,
-                        updatedAt: updatedAt,
-                        createdAt: createdAt
-                    )
-                }
-                DispatchQueue.main.async {
-                    self.recentConversations = canvases
-                    self.hasLoadedConversations = true
-                }
-            }
-    }
-}
-
-// MARK: - Recent Conversation Model
-
-private struct RecentConversation: Identifiable {
-    let id: String
-    let title: String?
-    let lastMessage: String?
-    let updatedAt: Date?
-    let createdAt: Date?
 }
 
 // MARK: - Relative Date Formatting

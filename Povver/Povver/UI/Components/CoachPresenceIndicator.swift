@@ -48,7 +48,11 @@ struct CoachPresenceIndicator: View {
             }
         }
         .onChange(of: isThinking) { _, newValue in
-            breathePhase = 0
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                breathePhase = 0
+            }
             withAnimation(.easeInOut(duration: newValue ? 2.0 : 8.0).repeatForever(autoreverses: true)) {
                 breathePhase = 1.0
             }

@@ -164,17 +164,27 @@ public enum ShadowsToken {
 
 public enum TypographyToken {
     // MARK: Legacy (backward compatibility)
+    @available(*, deprecated, message: "Use v1.1 TextStyle roles instead")
     public static var display: Font { .system(size: 34, weight: .bold, design: .default) }
+    @available(*, deprecated, message: "Use v1.1 TextStyle roles instead")
     public static var title1: Font { .system(size: 28, weight: .semibold, design: .default) }
+    @available(*, deprecated, message: "Use v1.1 TextStyle roles instead")
     public static var title2: Font { .system(size: 22, weight: .semibold, design: .default) }
+    @available(*, deprecated, message: "Use v1.1 TextStyle roles instead")
     public static var title3: Font { .system(size: 20, weight: .semibold, design: .default) }
+    @available(*, deprecated, message: "Use v1.1 TextStyle roles instead")
     public static var headline: Font { .system(size: 17, weight: .semibold, design: .default) }
     public static var body: Font { .system(size: 17, weight: .regular, design: .default) }
+    @available(*, deprecated, message: "Use v1.1 TextStyle roles instead")
     public static var callout: Font { .system(size: 16, weight: .regular, design: .default) }
+    @available(*, deprecated, message: "Use v1.1 TextStyle roles instead")
     public static var subheadline: Font { .system(size: 15, weight: .regular, design: .default) }
+    @available(*, deprecated, message: "Use v1.1 TextStyle roles instead")
     public static var footnote: Font { .system(size: 13, weight: .regular, design: .default) }
     public static var caption: Font { .system(size: 12, weight: .regular, design: .default) }
+    @available(*, deprecated, message: "Use v1.1 TextStyle roles instead")
     public static var button: Font { .system(size: 17, weight: .semibold, design: .default) }
+    @available(*, deprecated, message: "Use v1.1 TextStyle roles instead")
     public static var monospaceSmall: Font { .system(size: 13, weight: .regular, design: .monospaced) }
     
     // MARK: v1.1 Premium Visual System Roles

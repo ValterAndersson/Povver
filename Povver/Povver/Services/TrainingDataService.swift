@@ -5,7 +5,8 @@ import FirebaseAuth
 /// Reads pre-computed training intelligence from Firestore.
 /// All analytical data (ACWR, PRs, insights) is computed by the Training Analyst backend.
 /// This service is a read/cache layer, not a computation layer.
-class TrainingDataService: ObservableObject {
+@MainActor
+class TrainingDataService {
     static let shared = TrainingDataService()
 
     private let db = Firestore.firestore()
@@ -53,7 +54,9 @@ class TrainingDataService: ObservableObject {
     // MARK: - Weekly Workout Counts (for Consistency Map)
 
     func fetchWeeklyWorkoutCounts(weeks: Int = 12) async throws -> [WeekWorkoutCount] {
-        guard let userId = Auth.auth().currentUser?.uid else { return [] }
+        guard let userId = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "TrainingDataService", code: 401, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"])
+        }
 
         let userRef = db.collection("users").document(userId)
         let rollups = try await fetchRollups(userRef: userRef, weeks: weeks)
@@ -70,7 +73,9 @@ class TrainingDataService: ObservableObject {
     // MARK: - Post-Workout Summary
 
     func fetchPostWorkoutSummary(workoutId: String) async throws -> PostWorkoutSummary? {
-        guard let userId = Auth.auth().currentUser?.uid else { return nil }
+        guard let userId = Auth.auth().currentUser?.uid else {
+            throw NSError(domain: "TrainingDataService", code: 401, userInfo: [NSLocalizedDescriptionKey: "Not authenticated"])
+        }
 
         let userRef = db.collection("users").document(userId)
         let snapshot = try await userRef.collection("analysis_insights")

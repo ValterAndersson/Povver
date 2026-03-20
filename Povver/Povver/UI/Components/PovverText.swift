@@ -6,6 +6,7 @@ public enum PovverTextStyle {
     case headline, body, callout, subheadline, footnote, caption
 }
 
+@available(*, deprecated, message: "Use Text().textStyle() instead")
 public struct PovverText: View {
     private let text: String
     private let style: PovverTextStyle

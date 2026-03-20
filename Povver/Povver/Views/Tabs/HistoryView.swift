@@ -599,7 +599,7 @@ private struct WeeklyWorkoutChart: View {
                     x: .value("Week", item.label),
                     y: .value("Workouts", item.bucket.count)
                 )
-                .foregroundStyle(item.bucket.isCurrent ? Color.accent : Color(light: Color(hex: "CBD5E1"), dark: Color(hex: "475569")))
+                .foregroundStyle(item.bucket.isCurrent ? Color.accent : Color.chartInactive)
                 .cornerRadius(CornerRadiusToken.radiusIcon / 2)
                 .annotation(position: .top, spacing: Space.xs) {
                     if item.bucket.isCurrent && item.bucket.count > 0 {

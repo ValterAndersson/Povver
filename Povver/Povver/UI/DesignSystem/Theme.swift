@@ -1,5 +1,12 @@
 import SwiftUI
 
+// MARK: - Semantic Color Tokens (Theme)
+
+public extension Color {
+    /// Inactive/non-current chart bar fill
+    static let chartInactive = Color(light: Color(hex: "CBD5E1"), dark: Color(hex: "475569"))
+}
+
 /// Povver theme container to allow future theming overrides via Environment.
 public struct PovverTheme: Equatable {
     public var cornerRadiusSmall: CGFloat = CornerRadiusToken.radiusIcon

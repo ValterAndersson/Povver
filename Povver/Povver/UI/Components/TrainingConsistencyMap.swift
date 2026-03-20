@@ -16,7 +16,7 @@ struct TrainingConsistencyMap: View {
         HStack(spacing: cellSpacing) {
             ForEach(Array(paddedWeeks.enumerated()), id: \.0) { weekIndex, week in
                 VStack(spacing: cellSpacing) {
-                    ForEach(0..<routineFrequency, id: \.self) { dayIndex in
+                    ForEach(0..<max(1, routineFrequency), id: \.self) { dayIndex in
                         let isCompleted = dayIndex < week.completedCount
                         let isLatestCell = animateLatest && weekIndex == paddedWeeks.count - 1 && dayIndex == week.completedCount - 1
 
@@ -31,14 +31,13 @@ struct TrainingConsistencyMap: View {
                 }
             }
         }
-        .onAppear {
+        .task {
             if animateLatest {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
-                        latestFilled = true
-                    }
-                    HapticManager.setCompleted()
+                try? await Task.sleep(for: .seconds(0.5))
+                withAnimation(MotionToken.bouncy) {
+                    latestFilled = true
                 }
+                HapticManager.setCompleted()
             }
         }
     }

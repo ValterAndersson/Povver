@@ -20,7 +20,7 @@ struct StaggeredEntrance: ViewModifier {
             .opacity(active ? 1 : 0)
             .offset(y: active ? 0 : offset)
             .animation(
-                .spring(response: 0.5, dampingFraction: 0.8).delay(Double(index) * delay),
+                MotionToken.gentle.delay(min(Double(index) * delay, 0.8)),
                 value: active
             )
     }

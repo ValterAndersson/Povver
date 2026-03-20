@@ -15,6 +15,9 @@ import SwiftUI
 
 struct FocusModeWorkoutScreen: View {
     @StateObject private var service = FocusModeWorkoutService.shared
+    // Initialized with empty ID because the workout doesn't exist yet at view init time.
+    // Safe: WorkoutCoachViewModel.init only stores the ID — no network/Firestore calls.
+    // The real ID is set via syncCoachWorkoutId() → updateWorkout() once the workout starts.
     @StateObject private var coachViewModel = WorkoutCoachViewModel(workoutId: "")
     @Environment(\.dismiss) private var dismiss
     
@@ -827,41 +830,6 @@ struct FocusModeWorkoutScreen: View {
                 } // ScrollViewReader
             }
             .coordinateSpace(name: "workoutScroll")
-            .onPreferenceChange(ScrollOffsetPreferenceKey.self) { scrollY in
-                // Scroll offset based collapse detection:
-                // scrollY = 0 when at top, becomes negative when scrolling up
-                // Hero is at offset 8 (spacer) with height ~280
-                // Hero bottom = 8 + 280 = 288
-                // When scrolled, hero bottom = 288 + scrollY
-                
-                let heroStartY: CGFloat = Space.sm  // 8pt spacer
-                let heroHeight = measuredHeroHeight  // ~280pt
-                let heroBottom = heroStartY + heroHeight + scrollY
-                
-                let collapseThreshold: CGFloat = 100  // Collapse when only 100pt of hero visible
-                let expandThreshold: CGFloat = 150   // Expand when 150pt of hero visible
-                
-                #if DEBUG
-                debugScrollMinY = scrollY
-                // Debug log to understand scroll behavior (throttled - only log on significant change)
-                if abs(scrollY.truncatingRemainder(dividingBy: 50)) < 5 {
-                    print("🔍 [ScrollDebug] scrollY=\(Int(scrollY)) heroBottom=\(Int(heroBottom)) collapsed=\(isHeroCollapsed)")
-                }
-                #endif
-                
-                // Only update if crossing threshold in correct direction (hysteresis)
-                if heroBottom < collapseThreshold && !isHeroCollapsed {
-                    print("🔍 [ScrollDebug] → COLLAPSING (heroBottom \(Int(heroBottom)) < \(Int(collapseThreshold)))")
-                    withAnimation(.easeInOut(duration: 0.15)) { 
-                        isHeroCollapsed = true 
-                    }
-                } else if heroBottom > expandThreshold && isHeroCollapsed {
-                    print("🔍 [ScrollDebug] → EXPANDING (heroBottom \(Int(heroBottom)) > \(Int(expandThreshold)))")
-                    withAnimation(.easeInOut(duration: 0.15)) { 
-                        isHeroCollapsed = false 
-                    }
-                }
-            }
             .scrollDismissesKeyboard(.interactively)
         }
     }
@@ -1175,41 +1143,6 @@ struct FocusModeWorkoutScreen: View {
         .padding(.bottom, safeAreaBottom + Space.lg)
     }
     
-    // MARK: - Empty State CTA Section
-    
-    /// CTA section for empty workout state
-    /// Shows disabled Finish button (no exercises) and enabled Discard button
-    private func emptyStateCTASection(safeAreaBottom: CGFloat) -> some View {
-        VStack(spacing: Space.md) {
-            // Finish Workout - Disabled (no exercises yet)
-            Button {
-                // Does nothing - disabled
-            } label: {
-                Text("Finish Workout")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(Color.textInverse.opacity(0.5))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 52)
-                    .background(Color.accent.opacity(0.4))
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
-            }
-            .buttonStyle(PlainButtonStyle())
-            .disabled(true)
-            
-            // Discard Workout - Enabled
-            Button {
-                showingCancelConfirmation = true
-            } label: {
-                Text("Discard Workout")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(Color.destructive)
-            }
-            .buttonStyle(PlainButtonStyle())
-        }
-        .padding(.top, Space.xl)
-        .padding(.bottom, safeAreaBottom + Space.lg)
-    }
-    
     // MARK: - Timer
     
     /// Sync coach VM with current workout ID so conversation persists across sheet opens.
@@ -1234,13 +1167,16 @@ struct FocusModeWorkoutScreen: View {
         screenMode = .normal
         elapsedTime = Date().timeIntervalSince(workout.startTime)
         
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+        let newTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             Task { @MainActor in
                 if let workout = service.workout {
                     elapsedTime = Date().timeIntervalSince(workout.startTime)
                 }
             }
         }
+        // Keep firing during scroll tracking (default mode pauses during UIScrollView interaction)
+        RunLoop.current.add(newTimer, forMode: .common)
+        timer = newTimer
     }
     
     /// Stop the timer and reset elapsed time.

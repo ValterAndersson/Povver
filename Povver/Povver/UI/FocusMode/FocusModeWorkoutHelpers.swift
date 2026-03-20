@@ -188,12 +188,26 @@ struct WorkoutCompletionSummary: View {
             totalVolume: w.analytics.totalWeight
         )
 
-        // Sequenced reveal: stagger each phase for a polished entrance
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { revealPhase = 1 }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { revealPhase = 2 }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { revealPhase = 3 }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { revealPhase = 4 }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { revealPhase = 5 }
+        // Sequenced reveal: stagger each phase for a polished entrance.
+        // Runs in a Task tied to the .task modifier, so it cancels automatically on disappear.
+        await startRevealSequence()
+    }
+
+    /// Sequenced reveal animation using structured concurrency.
+    /// Automatically cancelled when the parent .task is torn down (view disappears).
+    private func startRevealSequence() async {
+        let phaseDelays: [Duration] = [
+            .milliseconds(100),  // phase 1
+            .milliseconds(200),  // phase 2 (cumulative 0.3s)
+            .milliseconds(200),  // phase 3 (cumulative 0.5s)
+            .milliseconds(200),  // phase 4 (cumulative 0.7s)
+            .milliseconds(300),  // phase 5 (cumulative 1.0s)
+        ]
+        for (index, delay) in phaseDelays.enumerated() {
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            withAnimation { revealPhase = index + 1 }
+        }
     }
 }
 

@@ -12,7 +12,8 @@ struct TrendDelta: View {
         let color: Color = isPositive ? .accent : .textTertiary
 
         Text("\(sign)\(String(format: format, value)) \(unit)")
-            .font(.system(size: 12, weight: .medium))
+            .textStyle(.micro)
+            .fontWeight(.medium)
             .foregroundColor(color)
             .monospacedDigit()
     }
@@ -22,6 +23,7 @@ struct TrendDelta: View {
 struct PRBadge: View {
     var body: some View {
         Text("PR")
+            // 10pt is below the smallest token (micro = 12pt) — intentionally off-token for badge scale
             .font(.system(size: 10, weight: .bold))
             .foregroundColor(.textInverse)
             .padding(.horizontal, 6)

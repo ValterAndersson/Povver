@@ -107,7 +107,7 @@ struct FocusModeSetGrid: View {
             SwipeToDeleteRow(
                 onDelete: {
                     onRemoveSet(set.id)
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    HapticManager.confirmAction()
                 },
                 content: {
                     setRow(set: set, index: displayIndex)
@@ -185,7 +185,7 @@ struct FocusModeSetGrid: View {
                 if let onToggleAllDone {
                     Button {
                         onToggleAllDone()
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        HapticManager.modeToggle()
                     } label: {
                         Text("✓")
                             .frame(width: widths.done, alignment: .center)
@@ -800,7 +800,7 @@ struct FocusModeEditingDock: View {
             ForEach(0...5, id: \.self) { rir in
                 Button {
                     onValueChange("rir", rir)
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    HapticManager.selectionTick()
                 } label: {
                     Text("\(rir)")
                         .font(.system(size: 16, weight: .semibold))
@@ -820,7 +820,7 @@ struct FocusModeEditingDock: View {
     private func stepButton(systemName: String, disabled: Bool, action: @escaping () -> Void) -> some View {
         Button {
             action()
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            HapticManager.selectionTick()
         } label: {
             Image(systemName: systemName)
                 .font(.system(size: 16, weight: .medium))

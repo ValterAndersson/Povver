@@ -275,18 +275,6 @@ struct FinishWorkoutSheet: View {
     }
 }
 
-// MARK: - Scroll Offset PreferenceKey
-
-/// Simple PreferenceKey that continuously reports scroll offset as a CGFloat
-/// This is the preferred way to track scroll position as it updates during scrolling
-struct ScrollOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
 // MARK: - Hero Visibility PreferenceKey (Legacy)
 
 /// PreferenceKey to track hero scroll state with measured values
