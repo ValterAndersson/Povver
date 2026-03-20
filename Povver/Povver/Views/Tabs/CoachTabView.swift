@@ -114,28 +114,62 @@ struct CoachTabView: View {
         }
     }
 
+    // MARK: - Hero Card Wrapper
+
+    private func heroCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(spacing: Space.md) {
+            content()
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Space.lg)
+        .padding(.horizontal, Space.md)
+        .background(Color.surfaceElevated)
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusCard, style: .continuous))
+        .shadowStyle(ShadowsToken.level1)
+    }
+
     // MARK: - New User Hero
 
     private var newUserHero: some View {
-        VStack(spacing: Space.md) {
+        heroCard {
+            Text("YOUR COACH")
+                .textStyle(.sectionLabel)
+
             CoachPresenceIndicator(size: 40)
 
             Text("Let's build your program")
                 .textStyle(.screenTitle)
                 .foregroundStyle(Color.textPrimary)
 
-            Text("Start with a routine, or ask me anything")
+            Text("Tell me about your goals and I'll design a routine for you.")
                 .textStyle(.secondary)
                 .foregroundStyle(Color.textSecondary)
+                .multilineTextAlignment(.center)
+
+            Button {
+                selectedConversationId = nil
+                entryContext = "quick:Create routine"
+                navigateToConversation = true
+            } label: {
+                Text("Create your first program")
+                    .textStyle(.bodyStrong)
+                    .foregroundStyle(Color.textInverse)
+                    .padding(.horizontal, Space.lg)
+                    .padding(.vertical, Space.sm)
+                    .background(Color.accent)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, Space.lg)
     }
 
     // MARK: - Workout Day Hero
 
     private func workoutDayHero(_ ctx: WorkoutDayContext) -> some View {
-        VStack(spacing: Space.md) {
+        heroCard {
+            Text("YOUR COACH")
+                .textStyle(.sectionLabel)
+
             CoachPresenceIndicator(size: 40)
 
             Text(ctx.greeting)
@@ -161,15 +195,24 @@ struct CoachTabView: View {
                     .background(Color.accent.opacity(0.12))
                     .clipShape(Capsule())
             }
+
+            if !viewModel.weeklyWorkoutCounts.isEmpty {
+                TrainingConsistencyMap(
+                    weeks: viewModel.weeklyWorkoutCounts,
+                    routineFrequency: viewModel.routineFrequency
+                )
+                .padding(.top, Space.xs)
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, Space.lg)
     }
 
     // MARK: - Rest Day Hero
 
     private func restDayHero(_ ctx: RestDayContext) -> some View {
-        VStack(spacing: Space.md) {
+        heroCard {
+            Text("YOUR COACH")
+                .textStyle(.sectionLabel)
+
             CoachPresenceIndicator(size: 40)
 
             Text(ctx.greeting)
@@ -197,14 +240,15 @@ struct CoachTabView: View {
                 .padding(.top, Space.xs)
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, Space.lg)
     }
 
     // MARK: - Post-Workout Hero
 
     private func postWorkoutHero(_ ctx: PostWorkoutContext) -> some View {
-        VStack(spacing: Space.md) {
+        heroCard {
+            Text("YOUR COACH")
+                .textStyle(.sectionLabel)
+
             CoachPresenceIndicator(size: 40)
 
             Text("Session Complete")
@@ -222,6 +266,26 @@ struct CoachTabView: View {
                 statItem(value: formatVolume(ctx.totalVolume), label: "kg")
             }
             .padding(.top, Space.xs)
+
+            // PR highlights
+            if let highlights = ctx.summary?.insight.highlights?.filter({ $0.type == "pr" }),
+               !highlights.isEmpty {
+                ForEach(Array(highlights.enumerated()), id: \.offset) { _, highlight in
+                    HStack(spacing: Space.sm) {
+                        Text("PR")
+                            .textStyle(.micro)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Color.accent)
+                            .padding(.horizontal, Space.sm)
+                            .padding(.vertical, Space.xxs)
+                            .background(Color.accent.opacity(0.12))
+                            .clipShape(Capsule())
+                        Text(highlight.message ?? "Personal record")
+                            .textStyle(.secondary)
+                            .foregroundStyle(Color.textSecondary)
+                    }
+                }
+            }
 
             if let summary = ctx.summary, !summary.summary.isEmpty {
                 Text(summary.summary)
@@ -242,14 +306,15 @@ struct CoachTabView: View {
             }
             .buttonStyle(.plain)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, Space.lg)
     }
 
     // MARK: - Inactivity Hero
 
     private func inactivityHero(_ ctx: InactivityContext) -> some View {
-        VStack(spacing: Space.md) {
+        heroCard {
+            Text("YOUR COACH")
+                .textStyle(.sectionLabel)
+
             CoachPresenceIndicator(size: 40)
 
             Text("Welcome back")
@@ -265,9 +330,15 @@ struct CoachTabView: View {
                     .textStyle(.bodyStrong)
                     .foregroundStyle(Color.accent)
             }
+
+            if !viewModel.weeklyWorkoutCounts.isEmpty {
+                TrainingConsistencyMap(
+                    weeks: viewModel.weeklyWorkoutCounts,
+                    routineFrequency: viewModel.routineFrequency
+                )
+                .padding(.top, Space.xs)
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, Space.lg)
     }
 
     // MARK: - Input Bar
