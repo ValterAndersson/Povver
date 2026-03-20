@@ -114,6 +114,7 @@ struct MainTabsView: View {
             if showWorkoutBanner {
                 FloatingWorkoutBanner(
                     workoutName: workoutService.workout?.name ?? "Workout",
+                    currentExerciseName: workoutService.workout?.exercises.first { !$0.isComplete }?.name,
                     elapsedTime: bannerElapsedTime,
                     onTap: { selectedTabRaw = MainTab.train.rawValue }
                 )

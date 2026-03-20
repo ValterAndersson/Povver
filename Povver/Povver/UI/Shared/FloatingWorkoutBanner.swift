@@ -10,6 +10,7 @@ import SwiftUI
 
 struct FloatingWorkoutBanner: View {
     let workoutName: String
+    let currentExerciseName: String?
     let elapsedTime: TimeInterval
     let onTap: () -> Void
 
@@ -21,14 +22,17 @@ struct FloatingWorkoutBanner: View {
                 Image(systemName: "figure.strengthtraining.traditional")
                     .font(.system(size: 14, weight: .medium))
 
-                Text(workoutName)
-                    .font(.system(size: 14, weight: .semibold))
+                Text(currentExerciseName ?? workoutName)
+                    .textStyle(.secondary)
+                    .fontWeight(.semibold)
                     .lineLimit(1)
 
                 Spacer()
 
                 Text(formatDuration(elapsedTime))
-                    .font(.system(size: 14, weight: .medium).monospacedDigit())
+                    .textStyle(.secondary)
+                    .fontWeight(.medium)
+                    .monospacedDigit()
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .semibold))
