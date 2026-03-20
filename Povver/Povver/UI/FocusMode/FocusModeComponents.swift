@@ -934,26 +934,25 @@ struct WorkoutBottomCTA: View {
 }
 
 // MARK: - Exercise Card Container (v1.1 Premium Visual System)
-/// Exercise section container with neutral surface and hairline border.
-/// Active exercise is indicated ONLY by a 3pt leading accent bar, NOT a thick border.
+/// Exercise section container with 3-tier visual hierarchy:
+/// - Tier 2 (Active): surfaceElevated background + level1 shadow + emerald left-edge
+/// - Tier 1 (Completed): surface background + emerald left-edge (earned color)
+/// - Tier 0 (Upcoming): transparent background (no visual weight)
 
 struct ExerciseCardContainer<Content: View>: View {
     let isActive: Bool
+    let isCompleted: Bool
     let content: () -> Content
-    
+
     var body: some View {
         content()
-            .background(Color.surface)
+            .background(isActive ? Color.surfaceElevated : (isCompleted ? Color.surface : Color.clear))
             .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusCard))
-            .overlay(
-                // Always use hairline separator stroke - never thick colored borders
-                RoundedRectangle(cornerRadius: CornerRadiusToken.radiusCard)
-                    .stroke(Color.separatorLine, lineWidth: StrokeWidthToken.hairline)
-            )
+            .shadowStyle(isActive ? ShadowsToken.level1 : ShadowStyle(color: .clear, x: 0, y: 0, blur: 0))
             .overlay(alignment: .leading) {
-                // Left accent bar for active exercise ONLY (2-3pt wide)
-                if isActive {
-                    RoundedRectangle(cornerRadius: 1.5)
+                // Emerald left-edge: active exercise AND completed exercises (earned color)
+                if isActive || isCompleted {
+                    RoundedRectangle(cornerRadius: CornerRadiusToken.radiusIcon)
                         .fill(Color.accent)
                         .frame(width: 3)
                         .padding(.vertical, 2)

@@ -774,8 +774,9 @@ struct FocusModeWorkoutScreen: View {
                         // Exercises - each as a card with full set grid
                         ForEach(workout.exercises) { exercise in
                             let isActive = exercise.instanceId == activeExerciseId
-                            
-                            ExerciseCardContainer(isActive: isActive) {
+                            let isCompleted = exercise.isComplete
+
+                            ExerciseCardContainer(isActive: isActive, isCompleted: isCompleted) {
                                 FocusModeExerciseSectionNew(
                                     exercise: exercise,
                                     isActive: isActive,

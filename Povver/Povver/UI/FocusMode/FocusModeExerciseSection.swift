@@ -48,11 +48,11 @@ struct FocusModeExerciseSection: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(exercise.name)
-                    .font(.system(size: 16, weight: .semibold))
+                    .textStyle(.bodyStrong)
                     .foregroundColor(Color.textPrimary)
 
                 Text("\(exercise.completedSetsCount)/\(exercise.totalWorkingSetsCount) sets")
-                    .font(.system(size: 13))
+                    .textStyle(.caption)
                     .foregroundColor(Color.textSecondary)
             }
 
@@ -243,11 +243,11 @@ struct FocusModeExerciseSectionNew: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(exercise.name)
-                        .font(.system(size: 18, weight: .semibold))
+                        .textStyle(.bodyStrong)
                         .foregroundColor(Color.textPrimary)
 
                     Text("\(exercise.completedSetsCount)/\(exercise.totalWorkingSetsCount) sets")
-                        .font(.system(size: 13).monospacedDigit())
+                        .textStyle(.caption)
                         .foregroundColor(Color.textSecondary)
                 }
 
