@@ -645,7 +645,7 @@ struct ExercisesListView: View {
                     
                     TextField("Search exercises...", text: $searchText)
                         .textFieldStyle(PlainTextFieldStyle())
-                        .font(.system(size: 16))
+                        .textStyle(.secondary)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                     
@@ -674,7 +674,9 @@ struct ExercisesListView: View {
                         if filters.activeCount > 0 {
                             Text("·")
                             Text("\(filters.activeCount)")
-                                .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                                .textStyle(.caption)
+                                .fontWeight(.semibold)
+                                .monospacedDigit()
                         }
                     }
                     .foregroundColor(filters.isEmpty ? Color.textSecondary : Color.textPrimary)
@@ -730,14 +732,14 @@ struct ExercisesListView: View {
                 
                 // Muscle groups
                 ForEach(Array(filters.muscleGroups), id: \.self) { group in
-                    activeFilterPill(label: group, color: Color.accent) {
+                    activeFilterPill(label: group, color: Color.textSecondary) {
                         filters.muscleGroups.remove(group)
                     }
                 }
                 
                 // Equipment
                 ForEach(Array(filters.equipment), id: \.self) { equip in
-                    activeFilterPill(label: equip.capitalized, color: Color.accent) {
+                    activeFilterPill(label: equip.capitalized, color: Color.textSecondary) {
                         filters.equipment.remove(equip)
                     }
                 }
@@ -1002,7 +1004,7 @@ struct TemplateDetailView: View {
                                 .progressViewStyle(.circular)
                                 .scaleEffect(0.7)
                             Text("Syncing")
-                                .font(.system(size: 15))
+                                .textStyle(.secondary)
                                 .foregroundColor(.textSecondary)
                         }
                     } else if state.isFailed {
@@ -1131,7 +1133,8 @@ struct TemplateDetailView: View {
     private func templateStat(value: String, label: String) -> some View {
         VStack(spacing: 2) {
             Text(value)
-                .font(.system(size: 24, weight: .bold))
+                .textStyle(.metricM)
+                .fontWeight(.bold)
                 .foregroundColor(Color.textPrimary)
             Text(label)
                 .textStyle(.caption)
@@ -1457,7 +1460,7 @@ struct RoutineDetailView: View {
                                 .progressViewStyle(.circular)
                                 .scaleEffect(0.7)
                             Text("Syncing")
-                                .font(.system(size: 15))
+                                .textStyle(.secondary)
                                 .foregroundColor(.textSecondary)
                         }
                     } else if state.isFailed {
@@ -1667,7 +1670,8 @@ struct RoutineDetailView: View {
     private func routineStat(value: String, label: String) -> some View {
         VStack(spacing: 2) {
             Text(value)
-                .font(.system(size: 24, weight: .bold))
+                .textStyle(.metricM)
+                .fontWeight(.bold)
                 .foregroundColor(Color.textPrimary)
             Text(label)
                 .textStyle(.caption)

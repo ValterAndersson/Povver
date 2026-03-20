@@ -108,7 +108,7 @@ struct MainTabsView: View {
             .tabItem { Label(MainTab.more.label, systemImage: MainTab.more.iconName) }
             .tag(MainTab.more)
         }
-        .tint(Color.textPrimary)
+        .tint(Color.accent)
         .environment(\.workoutActive, workoutService.workout != nil)
         .overlay(alignment: .bottom) {
             if showWorkoutBanner {
