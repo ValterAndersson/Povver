@@ -152,7 +152,7 @@ export function registerTools(server: McpServer, userId: string) {
     frequency: z.number().optional().describe('Days per week')
   }, async (args) => {
     const routine = await routines.createRoutine(db, userId, args);
-    logMcpChange(userId, 'create_routine', args, routine?.id);
+    logMcpChange(userId, 'create_routine', { name: args.name }, routine?.id);
     return { content: [{ type: 'text' as const, text: JSON.stringify(routine, null, 2) }] };
   });
 
@@ -161,7 +161,7 @@ export function registerTools(server: McpServer, userId: string) {
     updates: z.record(z.string(), z.any()).describe('Fields to update')
   }, async ({ routine_id, updates }) => {
     const routine = await routines.patchRoutine(db, userId, routine_id, updates);
-    logMcpChange(userId, 'update_routine', { routine_id, updates });
+    logMcpChange(userId, 'update_routine', { routine_id, ...updates });
     return { content: [{ type: 'text' as const, text: JSON.stringify(routine, null, 2) }] };
   });
 
@@ -203,7 +203,7 @@ export function registerTools(server: McpServer, userId: string) {
     }).describe('Fields to update'),
   }, async ({ template_id, updates }) => {
     const tmpl = await templates.patchTemplate(db, userId, template_id, updates);
-    logMcpChange(userId, 'update_template', { template_id, updates_keys: Object.keys(updates) });
+    logMcpChange(userId, 'update_template', { template_id, ...updates });
     return { content: [{ type: 'text' as const, text: JSON.stringify(tmpl, null, 2) }] };
   });
 
