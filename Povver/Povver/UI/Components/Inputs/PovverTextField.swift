@@ -79,14 +79,13 @@ public struct PovverTextField: View {
                     .revealEffect(isVisible: true)
             }
         }
-        .onChange(of: validation) { _, newVal in
-            if case .success = newVal {
-                showSuccess = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    withAnimation(.easeOut(duration: 0.3)) {
-                        showSuccess = false
-                    }
-                }
+        .task(id: validation) {
+            guard case .success = validation else { return }
+            showSuccess = true
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.3)) {
+                showSuccess = false
             }
         }
         .accessibilityLabel(title)
@@ -109,24 +108,6 @@ public struct PovverTextField: View {
     }
 }
 
-// MARK: - ValidationState Helpers
-
-private extension ValidationState {
-    var isError: Bool {
-        if case .error = self { return true }
-        return false
-    }
-
-    var isSuccess: Bool {
-        if case .success = self { return true }
-        return false
-    }
-
-    var isNormal: Bool {
-        if case .normal = self { return true }
-        return false
-    }
-}
 
 #if DEBUG
 struct PovverTextField_Previews: PreviewProvider {

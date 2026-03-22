@@ -20,6 +20,21 @@ public enum ValidationState: Equatable {
         case .error(let m): return m
         }
     }
+
+    public var isError: Bool {
+        if case .error = self { return true }
+        return false
+    }
+
+    public var isSuccess: Bool {
+        if case .success = self { return true }
+        return false
+    }
+
+    public var isNormal: Bool {
+        if case .normal = self { return true }
+        return false
+    }
 }
 
 
