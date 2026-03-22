@@ -84,7 +84,7 @@ app.post('/authorize/deny', oauthEndpointLimiter, express.json(), async (req, re
 // MCP endpoint (Bearer auth required)
 const bearerAuth = requireBearerAuth({ verifier: provider });
 
-app.post('/mcp', bearerAuth, express.json(), async (req, res) => {
+app.all('/', bearerAuth, express.json(), async (req, res) => {
   const userId = req.auth?.extra?.userId as string | undefined;
 
   if (!userId) {
