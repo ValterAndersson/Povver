@@ -166,6 +166,21 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // MCP OAuth nonces — server-only (Admin SDK reads/writes)
+    match /mcp_oauth_nonces/{doc} {
+      allow read, write: if false;
+    }
+
+    // MCP OAuth codes — server-only (Admin SDK reads/writes)
+    match /mcp_oauth_codes/{doc} {
+      allow read, write: if false;
+    }
+
+    // MCP OAuth tokens — server-only (Admin SDK reads/writes)
+    match /mcp_tokens/{doc} {
+      allow read, write: if false;
+    }
+
     // Deny-all fallback for unmatched paths
     match /{document=**} {
       allow read, write: if false;
