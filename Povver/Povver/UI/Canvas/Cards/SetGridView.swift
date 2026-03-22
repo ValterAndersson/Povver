@@ -78,7 +78,7 @@ struct SetGridView: View {
                             }
                             .swipeActions(edge: .leading, allowsFullSwipe: false) {
                                 Button {
-                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                    HapticManager.modeToggle()
                                     duplicateSet(at: index)
                                 } label: {
                                     Label("Duplicate", systemImage: "doc.on.doc")
@@ -231,7 +231,7 @@ struct SetGridView: View {
             if !isPlanningMode {
                 Button {
                     sets[index].isCompleted = !(sets[index].isCompleted ?? false)
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    HapticManager.selectionTick()
                 } label: {
                     Image(systemName: set.isCompleted == true ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 20))
@@ -450,7 +450,7 @@ private struct InlineEditingDock: View {
             ForEach(EditScope.allCases, id: \.rawValue) { scope in
                 Button {
                     editScope = scope
-                    UISelectionFeedbackGenerator().selectionChanged()
+                    HapticManager.selectionChanged()
                 } label: {
                     Text(scopeLabel(scope))
                         .font(.system(size: 11, weight: editScope == scope ? .semibold : .regular))
@@ -666,7 +666,7 @@ private struct InlineEditingDock: View {
 
     private func applyChange(_ newValue: Double) {
         guard let idx = currentSetIndex else { return }
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        HapticManager.selectionTick()
 
         // Warmup sets always use thisOnly — scope selector is hidden for them
         let effectiveScope = isWarmupSet ? .thisOnly : editScope

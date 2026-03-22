@@ -130,7 +130,7 @@ struct RoutineGenerationScreen: View {
             if showDayCards.allSatisfy({ $0 }) && !vm.generatedDays.isEmpty {
                 VStack(spacing: Space.md) {
                     PovverButton("Start training", style: .primary) {
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        HapticManager.modeToggle()
                         onStartTraining()
                     }
 
@@ -209,7 +209,7 @@ struct RoutineGenerationScreen: View {
         }
 
         // Fire success haptic
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        HapticManager.confirmAction()
 
         // Staggered reveals
         try? await Task.sleep(nanoseconds: 300_000_000) // 300ms

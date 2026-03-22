@@ -23,7 +23,7 @@ struct EquipmentScreen: View {
                         subtitle: option.subtitle,
                         isSelected: vm.selectedEquipment == option.id
                     ) {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        HapticManager.selectionTick()
                         vm.selectedEquipment = option.id
 
                         // Auto-advance after 400ms

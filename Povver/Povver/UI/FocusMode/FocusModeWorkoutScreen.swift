@@ -555,6 +555,7 @@ struct FocusModeWorkoutScreen: View {
                             PovverButton("Start Session") {
                                 await startFromNextWorkout()
                             }
+                            .buttonHaptic(.medium)
 
                             // Secondary text links
                             VStack(spacing: Space.md) {
@@ -930,7 +931,7 @@ struct FocusModeWorkoutScreen: View {
     private func reorderExercisesNew(from source: IndexSet, to destination: Int) {
         // Apply the reorder to the service
         service.reorderExercises(from: source, to: destination)
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        HapticManager.modeToggle()
     }
     
     // MARK: - Computed Flags for Nav
@@ -1463,7 +1464,7 @@ struct FocusModeWorkoutScreen: View {
 
     private func autofillExercise(_ exerciseId: String) {
         // TODO: Get AI prescription and call autofillExercise
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        HapticManager.modeToggle()
     }
     
     /// Show a transient error banner that auto-dismisses after 4 seconds.

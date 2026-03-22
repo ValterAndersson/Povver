@@ -35,7 +35,7 @@ struct WelcomeScreen: View {
             // CTA group (bottom, padded)
             VStack(spacing: Space.lg) {
                 PovverButton("Get Started", style: .primary) {
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    HapticManager.modeToggle()
                     onGetStarted()
                 }
 

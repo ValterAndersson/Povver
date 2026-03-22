@@ -19,11 +19,12 @@ logger = logging.getLogger(__name__)
 AnyCase = Union[SingleTurnCase, MultiTurnCase]
 
 
-def parse_sse_events(lines: list[str]) -> tuple[str, list[str]]:
-    """Parse SSE lines into (response_text, tools_used)."""
+def parse_sse_events(lines: list[str]) -> tuple[str, list[str], dict]:
+    """Parse SSE lines into (response_text, tools_used, usage)."""
     text_parts: list[str] = []
     tools: list[str] = []
     error_msg: str | None = None
+    usage: dict = {"input_tokens": 0, "output_tokens": 0, "thinking_tokens": 0}
 
     for line in lines:
         if not line.startswith("data: "):
@@ -43,10 +44,13 @@ def parse_sse_events(lines: list[str]) -> tuple[str, list[str]]:
         elif evt_type == "error":
             error_msg = evt.get("message", "Unknown error")
         elif evt_type == "done":
+            done_usage = evt.get("usage")
+            if done_usage:
+                usage = done_usage
             break
 
     text = "".join(text_parts) if text_parts else (error_msg or "")
-    return text, tools
+    return text, tools, usage
 
 
 def _get_identity_token(target_audience: str) -> str:
@@ -112,12 +116,15 @@ class GeminiBackend:
                 async for line in resp.aiter_lines():
                     lines.append(line)
 
-        text, tools = parse_sse_events(lines)
+        text, tools, usage = parse_sse_events(lines)
         duration = int((time.monotonic() - start) * 1000)
         return BackendResponse(
             response_text=text,
             tools_used=tools,
             duration_ms=duration,
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+            thinking_tokens=usage.get("thinking_tokens", 0),
         )
 
     async def _run_multi_turn(self, case: MultiTurnCase, user_id: str) -> BackendResponse:

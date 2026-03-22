@@ -16,6 +16,10 @@ class BackendResponse(BaseModel):
     tools_used: list[str]
     duration_ms: int
     error: Optional[str] = None
+    # Token usage
+    input_tokens: int = 0
+    output_tokens: int = 0
+    thinking_tokens: int = 0
     # For multi-turn: list of per-turn responses
     turn_responses: Optional[list[TurnResponse]] = None
 
@@ -85,3 +89,13 @@ class RunSummary(BaseModel):
     decisive_claude: int
     engineering_helped_count: int
     engineering_hurt_count: int
+    # Speed & cost metrics
+    gemini_avg_latency_ms: int = 0
+    claude_avg_latency_ms: int = 0
+    gemini_avg_input_tokens: int = 0
+    gemini_avg_output_tokens: int = 0
+    gemini_avg_thinking_tokens: int = 0
+    claude_avg_input_tokens: int = 0
+    claude_avg_output_tokens: int = 0
+    gemini_model: str = ""
+    claude_model: str = ""

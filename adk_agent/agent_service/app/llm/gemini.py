@@ -59,6 +59,7 @@ class GeminiClient:
                 usage = {
                     "input_tokens": getattr(meta, "prompt_token_count", 0) or 0,
                     "output_tokens": getattr(meta, "candidates_token_count", 0) or 0,
+                    "thinking_tokens": getattr(meta, "thoughts_token_count", 0) or 0,
                 }
 
             if not response.candidates or not response.candidates[0].content:

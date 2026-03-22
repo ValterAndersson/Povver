@@ -818,7 +818,7 @@ class FocusModeWorkoutService: ObservableObject {
         updateHasTemplateChanges()
 
         // Haptic feedback immediately on tap
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        HapticManager.modeToggle()
 
         print("[addExercise] Optimistically added exercise: \(newInstanceId) with sets: \(defaultSets.map { $0.id })")
 
@@ -1011,7 +1011,7 @@ class FocusModeWorkoutService: ObservableObject {
         self.workout = updatedWorkout
         updateHasTemplateChanges()
 
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        HapticManager.modeToggle()
 
         // 2. Fire analytics event
         AnalyticsService.shared.exerciseSwapped(workoutId: workout.id, source: .menu)

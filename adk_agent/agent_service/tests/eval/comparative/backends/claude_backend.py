@@ -120,6 +120,8 @@ class ClaudeBackend:
         messages.append({"role": "user", "content": query})
 
         tools_used: list[str] = []
+        total_input_tokens = 0
+        total_output_tokens = 0
         start = time.monotonic()
         final_text = ""
 
@@ -131,6 +133,11 @@ class ClaudeBackend:
                 tools=MCP_TOOLS,
                 messages=messages,
             )
+
+            # Track token usage
+            if resp.usage:
+                total_input_tokens += resp.usage.input_tokens
+                total_output_tokens += resp.usage.output_tokens
 
             # Collect text and tool_use blocks
             text_parts = []
@@ -174,6 +181,8 @@ class ClaudeBackend:
             response_text=final_text,
             tools_used=tools_used,
             duration_ms=duration,
+            input_tokens=total_input_tokens,
+            output_tokens=total_output_tokens,
         ), messages
 
     async def _run_multi_turn(self, case: MultiTurnCase, user_id: str) -> BackendResponse:

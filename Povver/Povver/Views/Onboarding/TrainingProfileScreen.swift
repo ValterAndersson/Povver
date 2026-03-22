@@ -111,7 +111,7 @@ struct TrainingProfileScreen: View {
                             title: option.title,
                             isSelected: vm.selectedExperience == option.id
                         ) {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            HapticManager.selectionTick()
                             vm.selectedExperience = option.id
                             checkCompletion()
                         }
@@ -131,7 +131,7 @@ struct TrainingProfileScreen: View {
                             number: day,
                             isSelected: vm.selectedFrequency == day
                         ) {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            HapticManager.selectionTick()
                             vm.selectedFrequency = day
                             checkCompletion()
                         }
@@ -144,7 +144,7 @@ struct TrainingProfileScreen: View {
             // Continue button (slides up when complete)
             if showContinue {
                 PovverButton("Continue", style: .primary) {
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    HapticManager.modeToggle()
                     onContinue()
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))

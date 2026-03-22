@@ -109,6 +109,16 @@ def build_summary(results: list[CaseResult], run_id: str) -> RunSummary:
     eng_helped = sum(1 for r in results if r.comparison.engineering_attribution.get("helped"))
     eng_hurt = sum(1 for r in results if r.comparison.engineering_attribution.get("hurt"))
 
+    # Speed & token metrics
+    n = len(results) or 1
+    g_lat = sum(r.gemini_response.duration_ms for r in results) // n
+    c_lat = sum(r.claude_response.duration_ms for r in results) // n
+    g_in = sum(r.gemini_response.input_tokens for r in results) // n
+    g_out = sum(r.gemini_response.output_tokens for r in results) // n
+    g_think = sum(r.gemini_response.thinking_tokens for r in results) // n
+    c_in = sum(r.claude_response.input_tokens for r in results) // n
+    c_out = sum(r.claude_response.output_tokens for r in results) // n
+
     return RunSummary(
         run_id=run_id,
         cases_total=len(results),
@@ -127,6 +137,13 @@ def build_summary(results: list[CaseResult], run_id: str) -> RunSummary:
         decisive_claude=sum(1 for r in results if r.comparison.winner == "claude" and r.comparison.margin == "decisive"),
         engineering_helped_count=eng_helped,
         engineering_hurt_count=eng_hurt,
+        gemini_avg_latency_ms=g_lat,
+        claude_avg_latency_ms=c_lat,
+        gemini_avg_input_tokens=g_in,
+        gemini_avg_output_tokens=g_out,
+        gemini_avg_thinking_tokens=g_think,
+        claude_avg_input_tokens=c_in,
+        claude_avg_output_tokens=c_out,
     )
 
 
@@ -239,6 +256,14 @@ async def main():
     print(f"Run: {run_id} | Cases: {len(results)} | Samples: {args.samples}")
     print(f"Gemini overall: {summary.gemini_overall} | Claude overall: {summary.claude_overall}")
     print(f"Wins: Gemini {summary.gemini_wins} | Claude {summary.claude_wins} | Ties {summary.ties}")
+    print(f"{'='*60}")
+    print(f"Speed: Gemini avg {summary.gemini_avg_latency_ms}ms | Claude avg {summary.claude_avg_latency_ms}ms")
+    print(f"Gemini tokens: in={summary.gemini_avg_input_tokens} out={summary.gemini_avg_output_tokens} thinking={summary.gemini_avg_thinking_tokens}")
+    print(f"Claude tokens: in={summary.claude_avg_input_tokens} out={summary.claude_avg_output_tokens}")
+    # Cost estimate per request (using list pricing)
+    g_cost = (summary.gemini_avg_input_tokens * 1.25 + summary.gemini_avg_output_tokens * 10.0 + summary.gemini_avg_thinking_tokens * 10.0) / 1_000_000
+    c_cost = (summary.claude_avg_input_tokens * 3.0 + summary.claude_avg_output_tokens * 15.0) / 1_000_000
+    print(f"Est. cost/req: Gemini ${g_cost:.4f} | Claude ${c_cost:.4f}")
     print(f"Results: {run_dir}")
     print(f"{'='*60}\n")
 

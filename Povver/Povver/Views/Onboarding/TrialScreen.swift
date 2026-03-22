@@ -67,7 +67,7 @@ struct TrialScreen: View {
             VStack(spacing: Space.md) {
                 // Start Free Trial button
                 Button {
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    HapticManager.modeToggle()
                     startTrial()
                 } label: {
                     HStack(spacing: Space.sm) {

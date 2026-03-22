@@ -129,6 +129,9 @@ async def run_agent_loop(
 
     messages = _build_messages(instruction, history, message)
     turn = 0
+    total_input_tokens = 0
+    total_output_tokens = 0
+    total_thinking_tokens = 0
 
     try:
         while turn < max_tool_turns:
@@ -157,6 +160,9 @@ async def run_agent_loop(
 
             # Track token usage per LLM turn
             if last_usage:
+                total_input_tokens += last_usage["input_tokens"]
+                total_output_tokens += last_usage["output_tokens"]
+                total_thinking_tokens += last_usage.get("thinking_tokens", 0)
                 log_tokens(model, last_usage["input_tokens"], last_usage["output_tokens"])
                 try:
                     from shared.usage_tracker import track_usage
@@ -175,7 +181,7 @@ async def run_agent_loop(
 
             # No tool calls — model is done
             if not tool_calls:
-                yield sse_event("done", {})
+                yield sse_event("done", {"usage": {"input_tokens": total_input_tokens, "output_tokens": total_output_tokens, "thinking_tokens": total_thinking_tokens}})
                 return
 
             # Execute all tool calls from this turn
@@ -219,10 +225,13 @@ async def run_agent_loop(
                     # One final text-only turn (no tools = can't loop further)
                     async for chunk in llm_client.stream(model, messages, None, config):
                         if chunk.usage:
+                            total_input_tokens += chunk.usage["input_tokens"]
+                            total_output_tokens += chunk.usage["output_tokens"]
+                            total_thinking_tokens += chunk.usage.get("thinking_tokens", 0)
                             log_tokens(model, chunk.usage["input_tokens"], chunk.usage["output_tokens"])
                         if chunk.is_text:
                             yield sse_event("message", chunk.text)
-                    yield sse_event("done", {})
+                    yield sse_event("done", {"usage": {"input_tokens": total_input_tokens, "output_tokens": total_output_tokens, "thinking_tokens": total_thinking_tokens}})
                     return
 
                 # Append tool result to messages for next LLM turn
@@ -238,7 +247,7 @@ async def run_agent_loop(
         # Exceeded max turns
         yield sse_event("message", "I've reached my reasoning limit for this request. "
                                    "Please try rephrasing or breaking your question into parts.")
-        yield sse_event("done", {})
+        yield sse_event("done", {"usage": {"input_tokens": total_input_tokens, "output_tokens": total_output_tokens, "thinking_tokens": total_thinking_tokens}})
 
     except Exception as e:
         logger.exception("Agent loop error")

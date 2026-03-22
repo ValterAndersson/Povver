@@ -116,7 +116,10 @@ struct MainTabsView: View {
                     workoutName: workoutService.workout?.name ?? "Workout",
                     currentExerciseName: workoutService.workout?.exercises.first { !$0.isComplete }?.name,
                     elapsedTime: bannerElapsedTime,
-                    onTap: { selectedTabRaw = MainTab.train.rawValue }
+                    onTap: {
+                        HapticManager.primaryAction()
+                        selectedTabRaw = MainTab.train.rawValue
+                    }
                 )
                 .padding(.horizontal, Space.md)
                 .padding(.bottom, 52) // Above tab bar
