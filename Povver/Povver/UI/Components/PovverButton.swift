@@ -32,6 +32,7 @@ public struct PovverButton: View {
     // Visual sub-states for the loading lifecycle
     @State private var showingIndicator = false
     @State private var showingSuccess = false
+    @State private var loadingTask: Task<Void, Never>?
 
     @Environment(\.povverTheme) private var theme
     @Environment(\.isEnabled) private var isEnabled
@@ -150,6 +151,7 @@ public struct PovverButton: View {
                 endLoadingSequence()
             }
         }
+        .onDisappear { loadingTask?.cancel() }
     }
 
     // MARK: - Colors (moved from MappedButtonStyle)
@@ -210,10 +212,10 @@ public struct PovverButton: View {
     // MARK: - Loading lifecycle
 
     private func startLoadingSequence() {
-        // Wait loadingDelay before showing indicator (prevents flash for fast ops)
-        Task {
+        loadingTask?.cancel()
+        loadingTask = Task {
             try? await Task.sleep(for: InteractionToken.loadingDelay)
-            guard isLoading else { return } // Already finished — skip indicator
+            guard !Task.isCancelled, isLoading else { return }
             withAnimation(.easeInOut(duration: MotionToken.fast)) {
                 showingIndicator = true
             }
@@ -221,9 +223,11 @@ public struct PovverButton: View {
     }
 
     private func endLoadingSequence() {
-        Task {
+        loadingTask?.cancel()
+        loadingTask = Task {
             // Enforce minimum display time once indicator is visible
             try? await Task.sleep(for: InteractionToken.buttonLoadingMinDisplay)
+            guard !Task.isCancelled else { return }
 
             // Show success flash for primary/destructive
             if style == .primary || style == .destructive {
@@ -232,6 +236,7 @@ public struct PovverButton: View {
                 }
                 HapticManager.confirmAction()
                 try? await Task.sleep(for: .milliseconds(600))
+                guard !Task.isCancelled else { return }
             }
 
             withAnimation(.easeInOut(duration: MotionToken.fast)) {
