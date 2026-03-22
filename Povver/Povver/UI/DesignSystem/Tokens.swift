@@ -138,6 +138,21 @@ public enum MotionToken {
     public static let bouncy = Animation.spring(response: 0.4, dampingFraction: 0.6)
 }
 
+public enum InteractionToken {
+    /// Universal disabled opacity (spec: 40%)
+    public static let disabledOpacity: Double = 0.4
+    /// Press scale factor
+    public static let pressScale: CGFloat = 0.97
+    /// Press brightness factor (~90%)
+    public static let pressBrightness: Double = -0.08
+    /// Loading indicator delay before showing
+    public static let loadingDelay: Duration = .milliseconds(300)
+    /// Minimum loading indicator display time
+    public static let loadingMinDisplay: Duration = .milliseconds(600)
+    /// Minimum display for any loading indicator (prevents flash-of-spinner)
+    public static let minimumLoadingDisplay: Duration = .milliseconds(400)
+}
+
 public struct ShadowStyle: Equatable {
     public let color: Color
     public let x: CGFloat
