@@ -1,5 +1,4 @@
 import SwiftUI
-import Charts
 
 /// History Tab - Review what happened
 /// Chronological list of completed sessions with infinite scroll
@@ -90,7 +89,7 @@ struct HistoryView: View {
 
                 // Weekly frequency chart
                 if !allWorkouts.isEmpty {
-                    WeeklyWorkoutChart(workouts: allWorkouts)
+                    WeeklyFrequencyChart(workouts: allWorkouts)
                         .padding(.horizontal, Space.lg)
                         .staggeredEntrance(index: 1, active: hasAppeared)
 
@@ -531,124 +530,6 @@ struct WorkoutDetailView: View {
     }
 }
 
-// MARK: - Weekly Workout Chart
-
-/// Compact bar chart showing workouts per week for the last 8 weeks.
-/// Gives users a quick snapshot of their training frequency over time.
-private struct WeeklyWorkoutChart: View {
-    let workouts: [Workout]
-
-    private let weekCount = 8
-
-    private static func buildWeeklyData(from workouts: [Workout], weekCount: Int) -> [WeekBucket] {
-        let calendar = Calendar.current
-        let today = Date()
-
-        // Find the Monday of the current week
-        let currentWeekday = calendar.component(.weekday, from: today)
-        // .weekday: 1=Sun, 2=Mon, ... 7=Sat → offset to Monday
-        let daysFromMonday = (currentWeekday + 5) % 7
-        let currentMonday = calendar.date(byAdding: .day, value: -daysFromMonday, to: calendar.startOfDay(for: today))!
-
-        var buckets: [WeekBucket] = []
-        for i in (0..<weekCount).reversed() {
-            let monday = calendar.date(byAdding: .day, value: -7 * i, to: currentMonday)!
-            let weekEnd = calendar.date(byAdding: .day, value: 7, to: monday)!
-            let count = workouts.filter { $0.endTime >= monday && $0.endTime < weekEnd }.count
-            buckets.append(WeekBucket(weekStart: monday, count: count, isCurrent: i == 0))
-        }
-        return buckets
-    }
-
-    var body: some View {
-        let data = Self.buildWeeklyData(from: workouts, weekCount: weekCount)
-        let total = data.map(\.count).reduce(0, +)
-        let average = Double(total) / Double(data.count)
-        let maxCount = data.map(\.count).max() ?? 1
-
-        VStack(alignment: .leading, spacing: Space.md) {
-            // Section label + average
-            HStack(alignment: .firstTextBaseline) {
-                Text("Weekly frequency")
-                    .font(TypographyToken.footnote)
-                    .fontWeight(.medium)
-                    .foregroundColor(Color.textSecondary)
-                Spacer()
-                Text("avg \(String(format: "%.1f", average))/wk")
-                    .font(TypographyToken.footnote)
-                    .foregroundColor(Color.textTertiary)
-            }
-
-            Chart(data) { bucket in
-                BarMark(
-                    x: .value("Week", bucket.weekStart, unit: .weekOfYear),
-                    y: .value("Workouts", bucket.count)
-                )
-                .foregroundStyle(bucket.isCurrent ? Color.accent : Color.chartInactive)
-                .cornerRadius(CornerRadiusToken.radiusIcon / 2)
-                .annotation(position: .top, spacing: Space.xs) {
-                    if bucket.count > 0 {
-                        Text("\(bucket.count)")
-                            .font(TypographyToken.caption)
-                            .fontWeight(.semibold)
-                            .foregroundColor(bucket.isCurrent ? Color.textPrimary : Color.textTertiary)
-                    }
-                }
-            }
-            .chartYScale(domain: 0 ... max(maxCount + 1, 2))
-            .chartYAxis {
-                AxisMarks(values: .automatic(desiredCount: 3)) { value in
-                    AxisGridLine(stroke: StrokeStyle(lineWidth: StrokeWidthToken.hairline))
-                        .foregroundStyle(Color.separatorLine)
-                    AxisValueLabel {
-                        if let intVal = value.as(Int.self) {
-                            Text("\(intVal)")
-                                .font(TypographyToken.caption)
-                                .foregroundStyle(Color.textTertiary)
-                        }
-                    }
-                }
-            }
-            .chartXAxis {
-                AxisMarks(values: .stride(by: .weekOfYear)) { value in
-                    AxisValueLabel {
-                        if let date = value.as(Date.self) {
-                            let cal = Calendar.current
-                            let day = cal.component(.day, from: date)
-                            // Show month name when day is <= 7 (first week of the month)
-                            if day <= 7 {
-                                Text(date, format: .dateTime.month(.abbreviated).day())
-                                    .font(TypographyToken.caption)
-                                    .foregroundStyle(Color.textSecondary)
-                            } else {
-                                Text("\(day)")
-                                    .font(TypographyToken.caption)
-                                    .foregroundStyle(Color.textSecondary)
-                            }
-                        }
-                    }
-                }
-            }
-            .frame(height: 140)
-        }
-        .padding(.horizontal, Space.lg)
-        .padding(.vertical, Space.md)
-        .background(Color.surface)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous)
-                .stroke(Color.separatorLine, lineWidth: StrokeWidthToken.hairline)
-        )
-    }
-}
-
-/// A single week bucket for the frequency chart.
-private struct WeekBucket: Identifiable {
-    let weekStart: Date
-    let count: Int
-    let isCurrent: Bool
-    var id: Date { weekStart }
-}
 
 #if DEBUG
 struct HistoryView_Previews: PreviewProvider {
