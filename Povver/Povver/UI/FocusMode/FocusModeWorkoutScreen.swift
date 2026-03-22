@@ -1134,14 +1134,17 @@ struct FocusModeWorkoutScreen: View {
         Task {
             do {
                 let archivedId = try await service.completeWorkout()
-                print("✅ Workout completed and archived with ID: \(archivedId)")
+                // Held beat of stillness before transition
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled else { return }
+                HapticManager.workoutCompleted()
                 await MainActor.run {
                     completedWorkout = CompletedWorkoutRef(id: archivedId)
                 }
             } catch {
-                print("❌ Failed to complete workout: \(error)")
+                print("Failed to complete workout: \(error)")
                 await MainActor.run {
-                    dismiss()
+                    showError("Couldn't save workout — try again")
                 }
             }
         }

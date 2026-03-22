@@ -57,9 +57,7 @@ struct WorkoutCompletionSummary: View {
                         VStack(spacing: Space.xl) {
                             // Phase 0: Coach presence indicator
                             CoachPresenceIndicator(size: 48)
-                                .opacity(revealPhase >= 0 ? 1 : 0)
-                                .offset(y: revealPhase >= 0 ? 0 : 8)
-                                .animation(MotionToken.gentle, value: revealPhase)
+                                .revealEffect(isVisible: revealPhase >= 0)
                                 .padding(.top, Space.xl)
 
                             // Phase 1: Headline + workout name
@@ -71,9 +69,7 @@ struct WorkoutCompletionSummary: View {
                                     .textStyle(.secondary)
                                     .foregroundColor(Color.textSecondary)
                             }
-                            .opacity(revealPhase >= 1 ? 1 : 0)
-                            .offset(y: revealPhase >= 1 ? 0 : 8)
-                            .animation(MotionToken.gentle, value: revealPhase)
+                            .revealEffect(isVisible: revealPhase >= 1)
 
                             // Phase 2: Core metrics row
                             HStack(spacing: 0) {
@@ -91,17 +87,13 @@ struct WorkoutCompletionSummary: View {
                                 )
                             }
                             .padding(.horizontal, Space.lg)
-                            .opacity(revealPhase >= 2 ? 1 : 0)
-                            .offset(y: revealPhase >= 2 ? 0 : 8)
-                            .animation(MotionToken.gentle, value: revealPhase)
+                            .revealEffect(isVisible: revealPhase >= 2)
 
                             // Phase 3: Exercise count summary
                             Text("\(workout.exercises.count) exercise\(workout.exercises.count == 1 ? "" : "s") completed")
                                 .textStyle(.secondary)
                                 .foregroundColor(Color.textSecondary)
-                                .opacity(revealPhase >= 3 ? 1 : 0)
-                                .offset(y: revealPhase >= 3 ? 0 : 8)
-                                .animation(MotionToken.gentle, value: revealPhase)
+                                .revealEffect(isVisible: revealPhase >= 3)
 
                             // Phase 4: Consistency Map with animated fill
                             if !weeklyWorkoutCounts.isEmpty {
@@ -110,16 +102,12 @@ struct WorkoutCompletionSummary: View {
                                     routineFrequency: routineFrequency
                                 )
                                 .padding(.horizontal, Space.lg)
-                                .opacity(revealPhase >= 4 ? 1 : 0)
-                                .offset(y: revealPhase >= 4 ? 0 : 8)
-                                .animation(MotionToken.bouncy, value: revealPhase)
+                                .revealEffect(isVisible: revealPhase >= 4)
                             }
 
                             // Phase 5: Full workout detail (reuse existing component)
                             WorkoutSummaryContent(workout: workout)
-                                .opacity(revealPhase >= 5 ? 1 : 0)
-                                .offset(y: revealPhase >= 5 ? 0 : 8)
-                                .animation(MotionToken.gentle, value: revealPhase)
+                                .revealEffect(isVisible: revealPhase >= 5)
 
                             // Coach reflection (if available)
                             if let reflection = coachReflection, !reflection.isEmpty {
@@ -132,9 +120,7 @@ struct WorkoutCompletionSummary: View {
                                         .padding(.horizontal, Space.lg)
                                 }
                                 .padding(.top, Space.md)
-                                .opacity(revealPhase >= 6 ? 1 : 0)
-                                .offset(y: revealPhase >= 6 ? 0 : 8)
-                                .animation(MotionToken.gentle, value: revealPhase)
+                                .revealEffect(isVisible: revealPhase >= 6)
                             }
                         }
                     }
@@ -207,9 +193,6 @@ struct WorkoutCompletionSummary: View {
 
         guard let w = workout else { return }
 
-        // Haptic feedback for workout completion
-        HapticManager.workoutCompleted()
-
         // Set post-workout flag so Coach tab shows post-workout state
         CoachTabViewModel.setPostWorkoutFlag(
             workoutId: w.id,
@@ -237,12 +220,12 @@ struct WorkoutCompletionSummary: View {
     /// Automatically cancelled when the parent .task is torn down (view disappears).
     private func startRevealSequence() async {
         let phaseDelays: [Duration] = [
-            .milliseconds(100),  // phase 1
-            .milliseconds(200),  // phase 2 (cumulative 0.3s)
-            .milliseconds(200),  // phase 3 (cumulative 0.5s)
-            .milliseconds(200),  // phase 4 (cumulative 0.7s)
-            .milliseconds(300),  // phase 5 (cumulative 1.0s)
-            .milliseconds(200),  // phase 6 (cumulative 1.2s)
+            .milliseconds(200),  // phase 1: headline (0.2s)
+            .milliseconds(200),  // phase 2: core metrics (0.4s)
+            .milliseconds(200),  // phase 3: exercise count (0.6s)
+            .milliseconds(200),  // phase 4: consistency map (0.8s)
+            .milliseconds(200),  // phase 5: full detail (1.0s)
+            .milliseconds(200),  // phase 6: coach reflection (1.2s)
         ]
         for (index, delay) in phaseDelays.enumerated() {
             try? await Task.sleep(for: delay)
