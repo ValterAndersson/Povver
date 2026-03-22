@@ -147,6 +147,7 @@ const {
 const { processWorkoutCompletionTask } = require('./triggers/workout-completion-task');
 const { workoutCompletionWatchdog } = require('./triggers/workout-completion-watchdog');
 const { onAnalysisInsightCreated, onWeeklyReviewCreated, expireStaleRecommendations } = require('./triggers/process-recommendations');
+const { cleanupMcpTokens } = require('./triggers/cleanup-mcp-tokens');
 
 // Export all functions as Firebase HTTPS functions
 exports.health = functions.https.onRequest(health);
@@ -275,6 +276,7 @@ exports.onWeeklyReviewCreated = onWeeklyReviewCreated;
 exports.expireStaleRecommendations = expireStaleRecommendations;
 exports.weeklyStatsRecalculation = weeklyStatsRecalculation;
 exports.analyticsCompactionScheduled = analyticsCompactionScheduled;
+exports.cleanupMcpTokens = cleanupMcpTokens;
 
 // Callable Functions
 exports.manualWeeklyStatsRecalculation = manualWeeklyStatsRecalculation;
