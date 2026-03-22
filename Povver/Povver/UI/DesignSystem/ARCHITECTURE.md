@@ -63,8 +63,15 @@ Everything else uses neutrals: `textPrimary`, `textSecondary`, `textTertiary`, `
 - **CoachPresenceIndicator** — Breathing emerald glow (8s normal, 2s thinking). Represents AI coach presence.
 - **TrainingConsistencyMap** — 12-week grid of workout completion. Emerald fills for completed sessions.
 - **StaggeredEntrance** — `.staggeredEntrance(index: N, active: hasAppeared)` for sequential fade+slide reveals.
-- **HapticManager** — Centralized haptic feedback for set completion, PRs, milestones.
+- **HapticManager** — `@MainActor enum`. Centralized haptic feedback for set completion, PRs, milestones. All methods are main-actor-isolated. Includes rapid succession guard (200ms per category) and scroll suppression.
+
+## Task Lifecycle
+
+All view-launched async work must be stored in `@State` properties and cancelled in `.onDisappear`. Use `Task.sleep(for:)` with `Task.isCancelled` guards instead of `DispatchQueue.main.asyncAfter` — GCD closures are not cancellable and can modify state on deallocated views.
+
+Key components following this pattern: `PovverButton` (actionTask, loadingTask), `SetCompletionCircle` (animationTask), `SetCompletionRowFlash` (flashTask), `UndoToast` (dismissTask).
 
 ## Environment Values
 
 - `workoutActive: Bool` — Injected by `MainTabsView`, read by child views to adapt behavior (e.g., snappier animations, deeper background).
+- `buttonHapticStyle: ButtonHapticStyle?` — Override default haptic style for descendant `PovverButton`s.

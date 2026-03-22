@@ -526,12 +526,14 @@ Five named animation intents, each with Reduce Motion fallbacks:
 
 ### Haptic Policy (`UI/DesignSystem/HapticPolicy.swift`, `Services/HapticManager.swift`)
 
+- `HapticManager` is `@MainActor enum` — all methods are main-actor-isolated since UIKit haptic generators require main thread
 - `ButtonHapticStyle` enum: `.light`, `.medium`, `.none`
 - Default per button style: `.light` (primary), `.medium` (destructive), `.none` (secondary/ghost)
 - `.buttonHaptic(_:)` view modifier overrides default for descendants
-- **Rapid succession guard**: 200ms suppression window per category
+- **Rapid succession guard**: 200ms suppression window per category via `guardedFire(category:action:)`
 - **Scroll suppression**: haptics suppressed during active scrolling via `.suppressHapticsWhileScrolling()`
 - All haptic calls go through `HapticManager` — no raw `UIImpactFeedbackGenerator` usage
+- `Chip` fires its own `selectionChanged()` haptic — `ChipGroup` does not add redundant calls
 
 ### Error Communication
 
@@ -541,6 +543,31 @@ Five named animation intents, each with Reduce Motion fallbacks:
 | Data loading | `DataLoadingErrorView` | Content-area replacement, retry button, coach escalation |
 | Sync errors | `SyncIndicator` | Per-row indicator (syncing/failed), bottom toast after 3+ retries |
 | Destructive failure | System alert | "Try Again" / "Cancel" |
+
+### Task Lifecycle Management
+
+SwiftUI views that launch async work must track Tasks for cancellation on disappear. Key patterns:
+
+- **PovverButton**: Stores `actionTask` (async action) and `loadingTask` (loading indicator delay). Both cancelled in `.onDisappear`. The `onChange(of: isLoading)` handler always cancels `loadingTask` when loading ends — even if the indicator hasn't appeared yet — to prevent stale state.
+- **FocusModeWorkoutScreen**: Tracks `errorDismissTask` (auto-dismiss error banner), `finishTask` (workout completion), and `pendingSheetTask` (delayed sheet presentation after mode exit). All cancelled in `.onDisappear`.
+- **SetCompletionCircle**: Stores `animationTask` for choreographed completion animation. Cancelled in `animateReset()` and `.onDisappear`.
+- **SetCompletionRowFlash**: Stores `flashTask` for delayed flash reset. Cancelled in `.onDisappear`.
+- **UndoToast**: Stores `dismissTask` for auto-dismiss timer. Uses `Task { @MainActor in }` to ensure `onDismiss()` runs on the main actor.
+
+**Rule**: Never use `DispatchQueue.main.asyncAfter` for delays that modify `@State` — use `Task.sleep(for:)` with `Task.isCancelled` guards. Store the Task in a `@State` property and cancel in `.onDisappear`.
+
+### Deferred Sync for Undo Operations
+
+Destructive actions (remove exercise, remove set) use a deferred sync pattern to support undo:
+
+1. Action applies optimistically to local state immediately
+2. Backend sync closure stored in `deferredSync` (not executed)
+3. If user taps Undo within 5s: `performUndo()` restores local state and nils `deferredSync`
+4. If undo window expires: `clearUndo()` fires the deferred sync
+5. If view disappears during window: `.onDisappear` calls `service.clearUndo()` to flush
+6. If a second destructive action occurs during the window: `flushDeferredSync()` executes the previous sync before storing the new one
+
+This prevents the bug where an optimistic removal never reaches the backend.
 
 ### Environment Values
 

@@ -132,7 +132,7 @@ Ghost values provide contextual pre-fills in the set grid. Resolution priority:
 
 Ghost values display at 40% opacity. When the user taps "done" on a set with ghost values, the ghost values are accepted as the actual values. User-entered values always take priority over ghosts.
 
-`FocusModeWorkoutService.fetchLastSessionData()` populates `lastSessionData: [String: LastSessionExerciseData]` from Firestore on workout start.
+`FocusModeWorkoutService.fetchLastSessionData()` populates `lastSessionData: [String: LastSessionExerciseData]` from Firestore on workout start. Sets are sorted by `set_index` from Firestore to ensure correct positional matching — the query orders by `workout_date` (not `set_index`), so explicit sorting is required. `LastSessionSetData` includes an optional `setIndex` field for this purpose.
 
 ### Auto-Advance Focus Progression (AutoAdvance enum)
 
@@ -145,17 +145,20 @@ After logging a set, focus automatically advances to the next undone set:
 
 ### Set Completion Signature (SetCompletionEffect.swift)
 
-Choreographed completion animation (~0.5s total):
-1. Radial fill (accent circle expands)
-2. Pulse (`.bouncy` spring scale)
-3. Haptic feedback
-4. Checkmark appearance
-5. Row flash (subtle highlight)
+Choreographed completion animation (~0.5s total), driven by a single cancellable `animationTask: Task<Void, Never>?`:
+1. Radial fill (accent circle expands) — immediate `withAnimation`
+2. Pulse (`.bouncy` spring scale) — immediate `withAnimation`
+3. Haptic feedback — at 150ms via `Task.sleep`
+4. Checkmark appearance — at 150ms via `Task.sleep`
+5. Scale return — at 200ms via `Task.sleep`
+6. Row flash (subtle highlight) — separate `flashTask` in `SetCompletionRowFlash`
+
+All delays use `Task.sleep(for:)` with `Task.isCancelled` guards (no `DispatchQueue.main.asyncAfter`). `animationTask` is cancelled in `animateReset()` and `.onDisappear`. `fireHaptics()` is `async` and supports cancellation between haptic events.
 
 **Progressive intensity** via `CompletionLevel`:
 - `.standard` — light haptic
-- `.exerciseFinal` — medium haptic (last set in exercise)
-- `.workoutFinal` — success notification haptic (last set in workout)
+- `.exerciseFinal` — + medium haptic at 300ms
+- `.workoutFinal` — + medium at 300ms + success notification at 700ms
 
 ### Contextual Density (ExerciseDensity enum)
 
@@ -167,7 +170,7 @@ Exercise sections adapt their visual density based on workout state:
 ### Destructive Action Tiers
 
 Three tiers based on reversibility:
-- **Tier 1** (reversible: remove set/exercise) — immediate action + undo toast (5s window)
+- **Tier 1** (reversible: remove set/exercise) — immediate optimistic removal + undo toast (5s window). Backend sync is **deferred** until the undo window expires (see `deferredSync` in `FocusModeWorkoutService`). If user taps undo, local state is restored and the backend call never fires. If a second destructive action occurs during the window, the previous deferred sync is flushed first via `flushDeferredSync()`. `FocusModeWorkoutScreen.onDisappear` calls `service.clearUndo()` to ensure deferred syncs are not lost on navigation.
 - **Tier 2** (significant: swipe thresholds) — >150pt full swipe or >60pt with release
 - **Tier 3** (irreversible: finish/discard workout, delete template) — standardized confirmation dialog
 
