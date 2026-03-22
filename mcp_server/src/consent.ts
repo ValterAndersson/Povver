@@ -114,9 +114,9 @@ export function renderConsentPage(nonce: string): string {
     <div id="step-signin" class="step active">
       <h1>Sign in to connect your training data to Claude</h1>
       <p class="subtitle">Use the same account you use in the Povver app</p>
-      <button class="btn" id="btn-apple">🍎 Apple</button>
-      <button class="btn" id="btn-google">🔍 Google</button>
-      <button class="btn" id="btn-email">✉️ Email</button>
+      <button class="btn" id="btn-apple">Continue with Apple</button>
+      <button class="btn" id="btn-google">Continue with Google</button>
+      <button class="btn" id="btn-email">Continue with Email</button>
       <div id="email-form" class="email-form" style="display:none;">
         <input type="email" id="email" placeholder="Email" autocomplete="email">
         <input type="password" id="password" placeholder="Password" autocomplete="current-password">
