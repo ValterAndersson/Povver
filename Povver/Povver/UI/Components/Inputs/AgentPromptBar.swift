@@ -25,6 +25,7 @@ public struct AgentPromptBar: View {
                             .foregroundColor(Color.textSecondary)
                         VoiceLevels()
                     }
+                    .transition(.opacity)
                 } else {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 14, weight: .semibold))
@@ -32,10 +33,18 @@ public struct AgentPromptBar: View {
                         .padding(InsetsToken.all(Space.sm))
                         .background(Color.textPrimary)
                         .clipShape(Circle())
-                        .onTapGesture { onSubmit() }
+                        .onTapGesture {
+                            HapticManager.primaryAction()
+                            onSubmit()
+                        }
+                        .transition(.asymmetric(
+                            insertion: .scale(scale: 0.8).combined(with: .opacity),
+                            removal: .opacity
+                        ))
                 }
             }
             .frame(width: 44, height: 32, alignment: .center)
+            .animation(.easeInOut(duration: MotionToken.medium), value: text.isEmpty)
         }
         .padding(InsetsToken.symmetric(vertical: Space.md, horizontal: Space.lg))
         .background(Color.surface)
