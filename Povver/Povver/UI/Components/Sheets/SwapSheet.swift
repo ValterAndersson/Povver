@@ -29,7 +29,10 @@ public struct SwapSheet: View {
                     Text("Custom").tag("custom")
                 }
                 .pickerStyle(.segmented)
-                
+                .onChange(of: choice) { _, _ in
+                    HapticManager.selectionChanged()
+                }
+
                 TextField("Optional details", text: $details)
                     .textInputAutocapitalization(.sentences)
                     .padding(InsetsToken.symmetric(vertical: Space.sm, horizontal: Space.md))

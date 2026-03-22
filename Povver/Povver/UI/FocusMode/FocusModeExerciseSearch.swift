@@ -547,7 +547,7 @@ struct ExerciseFilterSheet: View {
         } else {
             set.insert(value)
         }
-        UISelectionFeedbackGenerator().selectionChanged()
+        HapticManager.selectionChanged()
     }
 }
 

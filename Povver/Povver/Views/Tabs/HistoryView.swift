@@ -560,30 +560,11 @@ private struct WeeklyWorkoutChart: View {
         return buckets
     }
 
-    /// Short label: show "d" normally, "MMM d" when the month changes from the previous bucket.
-    private static func weekLabel(for bucket: WeekBucket, previous: WeekBucket?) -> String {
-        let cal = Calendar.current
-        let day = cal.component(.day, from: bucket.weekStart)
-        let showMonth = previous == nil
-            || cal.component(.month, from: bucket.weekStart) != cal.component(.month, from: previous!.weekStart)
-
-        if showMonth {
-            let f = DateFormatter()
-            f.dateFormat = "MMM d"
-            return f.string(from: bucket.weekStart)
-        }
-        return "\(day)"
-    }
-
     var body: some View {
         let data = Self.buildWeeklyData(from: workouts, weekCount: weekCount)
         let total = data.map(\.count).reduce(0, +)
         let average = Double(total) / Double(data.count)
-
-        // Pre-compute labels so the chart gets stable categorical strings
-        let labeled: [(bucket: WeekBucket, label: String)] = data.enumerated().map { i, bucket in
-            (bucket, Self.weekLabel(for: bucket, previous: i > 0 ? data[i - 1] : nil))
-        }
+        let maxCount = data.map(\.count).max() ?? 1
 
         VStack(alignment: .leading, spacing: Space.md) {
             // Section label + average
@@ -598,22 +579,23 @@ private struct WeeklyWorkoutChart: View {
                     .foregroundColor(Color.textTertiary)
             }
 
-            Chart(labeled, id: \.bucket.id) { item in
+            Chart(data) { bucket in
                 BarMark(
-                    x: .value("Week", item.label),
-                    y: .value("Workouts", item.bucket.count)
+                    x: .value("Week", bucket.weekStart, unit: .weekOfYear),
+                    y: .value("Workouts", bucket.count)
                 )
-                .foregroundStyle(item.bucket.isCurrent ? Color.accent : Color.chartInactive)
+                .foregroundStyle(bucket.isCurrent ? Color.accent : Color.chartInactive)
                 .cornerRadius(CornerRadiusToken.radiusIcon / 2)
                 .annotation(position: .top, spacing: Space.xs) {
-                    if item.bucket.isCurrent && item.bucket.count > 0 {
-                        Text("\(item.bucket.count)")
+                    if bucket.count > 0 {
+                        Text("\(bucket.count)")
                             .font(TypographyToken.caption)
                             .fontWeight(.semibold)
-                            .foregroundColor(Color.textPrimary)
+                            .foregroundColor(bucket.isCurrent ? Color.textPrimary : Color.textTertiary)
                     }
                 }
             }
+            .chartYScale(domain: 0 ... max(maxCount + 1, 2))
             .chartYAxis {
                 AxisMarks(values: .automatic(desiredCount: 3)) { value in
                     AxisGridLine(stroke: StrokeStyle(lineWidth: StrokeWidthToken.hairline))
@@ -628,10 +610,23 @@ private struct WeeklyWorkoutChart: View {
                 }
             }
             .chartXAxis {
-                AxisMarks(values: .automatic) { _ in
-                    AxisValueLabel()
-                        .font(TypographyToken.caption)
-                        .foregroundStyle(Color.textSecondary)
+                AxisMarks(values: .stride(by: .weekOfYear)) { value in
+                    AxisValueLabel {
+                        if let date = value.as(Date.self) {
+                            let cal = Calendar.current
+                            let day = cal.component(.day, from: date)
+                            // Show month name when day is <= 7 (first week of the month)
+                            if day <= 7 {
+                                Text(date, format: .dateTime.month(.abbreviated).day())
+                                    .font(TypographyToken.caption)
+                                    .foregroundStyle(Color.textSecondary)
+                            } else {
+                                Text("\(day)")
+                                    .font(TypographyToken.caption)
+                                    .foregroundStyle(Color.textSecondary)
+                            }
+                        }
+                    }
                 }
             }
             .frame(height: 140)

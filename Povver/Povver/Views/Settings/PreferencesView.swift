@@ -75,6 +75,7 @@ struct PreferencesView: View {
                         .disabled(isUpdatingWeightUnit)
                         .onChange(of: selectedWeightUnit) { _, newValue in
                             guard !isInitializing else { return }
+                            HapticManager.selectionChanged()
                             Task { await updateWeightUnit(newValue) }
                         }
                     }
@@ -104,6 +105,7 @@ struct PreferencesView: View {
                         .disabled(isUpdatingHeightUnit)
                         .onChange(of: selectedHeightUnit) { _, newValue in
                             guard !isInitializing else { return }
+                            HapticManager.selectionChanged()
                             Task { await updateHeightUnit(newValue) }
                         }
                     }

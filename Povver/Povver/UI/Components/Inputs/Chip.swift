@@ -91,6 +91,9 @@ public struct ChipGroup<T: Hashable & Identifiable>: View {
                         item[keyPath: labelKeyPath],
                         isSelected: selection.contains(item)
                     ) {
+                        HapticManager.guardedFire(category: "chip") {
+                            HapticManager.selectionChanged()
+                        }
                         if allowsMultiple {
                             if selection.contains(item) {
                                 selection.remove(item)

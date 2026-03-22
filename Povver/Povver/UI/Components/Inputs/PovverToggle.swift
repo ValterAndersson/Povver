@@ -20,6 +20,9 @@ public struct PovverToggle: View {
         }
         .toggleStyle(SwitchToggleStyle(tint: Color.accent))
         .padding(.vertical, Space.xs)
+        .onChange(of: isOn) { _, _ in
+            HapticManager.selectionChanged()
+        }
     }
 }
 

@@ -71,6 +71,9 @@ struct ProfileRowToggle: View {
                 .labelsHidden()
         }
         .padding(Space.md)
+        .onChange(of: isOn) { _, _ in
+            HapticManager.selectionChanged()
+        }
     }
 }
 

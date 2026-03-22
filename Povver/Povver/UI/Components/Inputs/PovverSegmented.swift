@@ -20,6 +20,9 @@ public struct PovverSegmented<Option: Hashable & CustomStringConvertible>: View 
                 }
             }
             .pickerStyle(.segmented)
+            .onChange(of: selection) { _, _ in
+                HapticManager.selectionChanged()
+            }
         }
     }
 }

@@ -39,6 +39,9 @@ public struct ExerciseSwapSheet: View {
                 .pickerStyle(.segmented)
                 .padding(.horizontal, Space.lg)
                 .padding(.bottom, Space.md)
+                .onChange(of: selectedTab) { _, _ in
+                    HapticManager.selectionChanged()
+                }
                 
                 // Content
                 switch selectedTab {

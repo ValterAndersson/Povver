@@ -1046,7 +1046,7 @@ struct ScopeSegmentedControl: View {
             withAnimation(.easeInOut(duration: 0.15)) {
                 selectedScope = scope
             }
-            UISelectionFeedbackGenerator().selectionChanged()
+            HapticManager.selectionChanged()
         } label: {
             HStack(spacing: 2) {
                 Text(label)
