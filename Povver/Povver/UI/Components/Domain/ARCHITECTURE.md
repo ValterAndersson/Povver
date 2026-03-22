@@ -8,8 +8,8 @@ Reusable UI components specific to the fitness domain. These render workout data
 |------|---------|
 | `ExerciseSection.swift` | Unified exercise block container with mode-specific density (readOnly/planning/execution) |
 | `ExerciseSectionModel.swift` | Model and factory methods for ExerciseSection |
-| `SetTable.swift` | Set grid for displaying workout sets across all modes |
-| `SetCellModel.swift` | Render model for individual set cells, plus `toSetCellModels()` extensions for `WorkoutExerciseSet`, `PlanSet`, `FocusModeSet`, and `WorkoutTemplateSet` |
+| `SetTable.swift` | Set grid for displaying workout sets across all modes. In readOnly mode, shows e1RM column instead of done checkmark. |
+| `SetCellModel.swift` | Render model for individual set cells, plus `toSetCellModels()` extensions for `WorkoutExerciseSet`, `PlanSet`, `FocusModeSet`, and `WorkoutTemplateSet`. Includes `e1rm` field — computed client-side via Epley formula in the `WorkoutExerciseSet` mapper (reps ≤ 12 only), nil for all other mappers. |
 | `WorkoutRow.swift` | Canonical workout row for listing across all surfaces (history, routines, templates) |
 | `WorkoutSummaryContent.swift` | Workout analytics summary: stats, muscle group distribution, intensity, exercise list |
 
