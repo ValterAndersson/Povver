@@ -158,15 +158,26 @@ class FocusModeWorkoutService: ObservableObject {
     /// The most recent undoable action. Cleared on undo, new workout actions, or timeout.
     @Published private(set) var pendingUndo: UndoableAction?
 
+    /// Deferred backend operation — executed when undo window expires without user tapping undo.
+    private var deferredSync: (() async throws -> Void)?
+
     /// Clear the pending undo without restoring (used by auto-dismiss timer).
     func clearUndo() {
+        let sync = deferredSync
         pendingUndo = nil
+        deferredSync = nil
+        if let sync {
+            Task {
+                try? await sync()
+            }
+        }
     }
 
     /// Restores the most recent undoable action. Called from UndoToast tap.
     func performUndo() {
         guard let action = pendingUndo else { return }
         pendingUndo = nil
+        deferredSync = nil // Cancel the deferred backend operation
 
         switch action {
         case .exerciseRemoved(let exercise, let index, let previousTotals):
@@ -895,9 +906,14 @@ class FocusModeWorkoutService: ObservableObject {
             aiScope: nil
         )
         
-        return try await syncPatch(request)
+        // Defer backend sync until undo window expires
+        deferredSync = { [weak self] in
+            let _ = try await self?.syncPatch(request)
+        }
+        // Return optimistic totals from local state
+        return self.workout?.totals ?? workout.totals
     }
-    
+
     /// Remove an exercise from the workout
     func removeExercise(exerciseInstanceId: String) async throws {
         guard let workout = workout else {
@@ -959,22 +975,16 @@ class FocusModeWorkoutService: ObservableObject {
             aiScope: nil
         )
 
-        do {
-            let _ = try await syncPatch(request)
-            print("[removeExercise] Synced to backend")
-        } catch {
-            print("[removeExercise] Sync failed: \(error) — rolling back")
-            // Rollback: re-insert exercise at original position and restore totals
-            var rollbackWorkout = self.workout ?? updatedWorkout
-            let insertionIndex = min(removedIndex, rollbackWorkout.exercises.count)
-            rollbackWorkout.exercises.insert(removedExercise, at: insertionIndex)
-            for i in rollbackWorkout.exercises.indices {
-                rollbackWorkout.exercises[i].position = i
+        // Defer backend sync until undo window expires
+        deferredSync = { [weak self] in
+            do {
+                let _ = try await self?.syncPatch(request)
+                print("[removeExercise] Synced to backend")
+            } catch {
+                print("[removeExercise] Deferred sync failed: \(error)")
+                // At this point undo window has passed, so we can't rollback.
+                // The local state is already committed. Error will be caught by next full sync.
             }
-            rollbackWorkout.totals = previousTotals
-            self.workout = rollbackWorkout
-            self.error = "Failed to remove exercise"
-            // Don't re-throw — exercise is restored, user sees error toast and can retry
         }
     }
     
@@ -1979,15 +1989,17 @@ class FocusModeWorkoutService: ObservableObject {
                             if firstWorkoutId == nil { firstWorkoutId = workoutId }
                             guard workoutId == firstWorkoutId else { break }
 
+                            let setIndex = data["set_index"] as? Int
                             let weight = data["weight_kg"] as? Double
                             let reps = data["reps"] as? Int
                             let rir = data["rir"] as? Int
-                            sets.append(LastSessionSetData(weight: weight, reps: reps, rir: rir))
+                            sets.append(LastSessionSetData(setIndex: setIndex, weight: weight, reps: reps, rir: rir))
                         }
 
                         // Sort by set_index to ensure correct ordering
                         // (Firestore query is ordered by workout_date, not set_index)
-                        return (exerciseId, sets.isEmpty ? nil : LastSessionExerciseData(sets: sets))
+                        let sortedSets = sets.sorted { ($0.setIndex ?? Int.max) < ($1.setIndex ?? Int.max) }
+                        return (exerciseId, sortedSets.isEmpty ? nil : LastSessionExerciseData(sets: sortedSets))
                     } catch {
                         Self.ghostLogger.warning("Failed to fetch last session for exercise \(exerciseId): \(error.localizedDescription)")
                         return (exerciseId, nil)
@@ -1998,6 +2010,10 @@ class FocusModeWorkoutService: ObservableObject {
             for await (exerciseId, data) in group {
                 if let data { result[exerciseId] = data }
             }
+        }
+
+        if result.isEmpty && !exerciseIds.isEmpty {
+            Self.ghostLogger.error("Failed to fetch last session data for all exercises")
         }
 
         self.lastSessionData = result

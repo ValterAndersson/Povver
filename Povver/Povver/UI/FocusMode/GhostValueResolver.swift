@@ -38,6 +38,7 @@ struct LastSessionExerciseData {
 
 /// Per-set data from a previous session, used as ghost value source.
 struct LastSessionSetData {
+    let setIndex: Int?
     let weight: Double?
     let reps: Int?
     let rir: Int?

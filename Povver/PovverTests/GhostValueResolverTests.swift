@@ -31,8 +31,8 @@ final class GhostValueResolverTests: XCTestCase {
     func testLastSessionTakesPriority() {
         let exercise = makeExercise(sets: [makeUndoneSet(id: "s1"), makeUndoneSet(id: "s2")])
         let lastSession = LastSessionExerciseData(sets: [
-            LastSessionSetData(weight: 80, reps: 8, rir: 2),
-            LastSessionSetData(weight: 82.5, reps: 7, rir: 1),
+            LastSessionSetData(setIndex: nil, weight: 80, reps: 8, rir: 2),
+            LastSessionSetData(setIndex: nil, weight: 82.5, reps: 7, rir: 1),
         ])
         let result = GhostValueResolver.resolve(exercise: exercise, lastSession: lastSession)
         XCTAssertEqual(result["s1"]?.weight, 80)
@@ -62,7 +62,7 @@ final class GhostValueResolverTests: XCTestCase {
     func testSetsWithUserValuesAreSkipped() {
         let exercise = makeExercise(sets: [makeUndoneSet(id: "s1", weight: 70, reps: 5)])
         let lastSession = LastSessionExerciseData(sets: [
-            LastSessionSetData(weight: 80, reps: 8, rir: 2),
+            LastSessionSetData(setIndex: nil, weight: 80, reps: 8, rir: 2),
         ])
         let result = GhostValueResolver.resolve(exercise: exercise, lastSession: lastSession)
         XCTAssertEqual(result["s1"], .empty)
@@ -75,8 +75,8 @@ final class GhostValueResolverTests: XCTestCase {
             makeUndoneSet(id: "s3", targetWeight: 65, targetReps: 12),
         ])
         let lastSession = LastSessionExerciseData(sets: [
-            LastSessionSetData(weight: 80, reps: 8, rir: 2),
-            LastSessionSetData(weight: 82.5, reps: 7, rir: 1),
+            LastSessionSetData(setIndex: nil, weight: 80, reps: 8, rir: 2),
+            LastSessionSetData(setIndex: nil, weight: 82.5, reps: 7, rir: 1),
         ])
         let result = GhostValueResolver.resolve(exercise: exercise, lastSession: lastSession)
         XCTAssertEqual(result["s1"]?.weight, 80)
@@ -88,8 +88,8 @@ final class GhostValueResolverTests: XCTestCase {
     func testDoneSetsAreIgnored() {
         let exercise = makeExercise(sets: [makeDoneSet(id: "s1"), makeUndoneSet(id: "s2")])
         let lastSession = LastSessionExerciseData(sets: [
-            LastSessionSetData(weight: 80, reps: 8, rir: 2),
-            LastSessionSetData(weight: 82.5, reps: 7, rir: 1),
+            LastSessionSetData(setIndex: nil, weight: 80, reps: 8, rir: 2),
+            LastSessionSetData(setIndex: nil, weight: 82.5, reps: 7, rir: 1),
         ])
         let result = GhostValueResolver.resolve(exercise: exercise, lastSession: lastSession)
         XCTAssertNil(result["s1"])
