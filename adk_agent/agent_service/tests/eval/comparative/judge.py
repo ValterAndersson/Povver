@@ -189,6 +189,9 @@ def parse_judge_response(
         text = re.sub(r"^```(?:json)?\s*", "", text)
         text = re.sub(r"\s*```\s*$", "", text)
 
+    # Strip trailing commas before } or ] (common LLM JSON error)
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+
     # Try direct parse, then extract JSON object
     try:
         data = json.loads(text)

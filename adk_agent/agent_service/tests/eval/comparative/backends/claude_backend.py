@@ -45,10 +45,24 @@ async def execute_mcp_tool(
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
             },
         )
         resp.raise_for_status()
-        data = resp.json()
+
+        # MCP StreamableHTTP returns SSE — parse "data:" lines for JSON-RPC response
+        raw = resp.text
+        data = None
+        for line in raw.splitlines():
+            if line.startswith("data: "):
+                try:
+                    data = json.loads(line[6:])
+                    break
+                except json.JSONDecodeError:
+                    continue
+        if data is None:
+            # Fallback: try parsing entire response as JSON
+            data = resp.json()
 
     if "error" in data:
         return json.dumps({"error": data["error"].get("message", "Tool error")})
@@ -67,7 +81,7 @@ class ClaudeBackend:
         self,
         mcp_url: str,
         mcp_api_key: str,
-        model: str = "claude-sonnet-4-6-20250514",
+        model: str = "claude-sonnet-4-6",
         temperature: float = 0.3,
     ):
         self.client = AsyncAnthropicVertex(

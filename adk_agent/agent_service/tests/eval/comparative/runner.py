@@ -200,11 +200,19 @@ async def main():
 
     async def run_with_limit(case):
         async with sem:
-            return await run_case_with_samples(
-                case, gemini, claude, args.user_id, args.samples
-            )
+            try:
+                return await run_case_with_samples(
+                    case, gemini, claude, args.user_id, args.samples
+                )
+            except Exception as e:
+                logger.error("Case %s failed: %s", case.id, e)
+                return None
 
-    results = await asyncio.gather(*[run_with_limit(c) for c in cases])
+    raw_results = await asyncio.gather(*[run_with_limit(c) for c in cases])
+    results = [r for r in raw_results if r is not None]
+    failed = len(raw_results) - len(results)
+    if failed:
+        logger.warning("%d case(s) failed and were skipped", failed)
 
     # Save results
     run_id = datetime.now().strftime("%Y-%m-%d-%H-%M")
