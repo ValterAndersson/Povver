@@ -17,6 +17,22 @@ const planningContext = require('../shared/planning-context');
 
 const db = admin.firestore();
 
+/** Log a write operation for training analyst visibility. Fire-and-forget. */
+function logMcpChange(
+  userId: string,
+  tool: string,
+  args: Record<string, any>,
+  resultId?: string,
+): void {
+  db.collection(`users/${userId}/mcp_change_log`).add({
+    tool,
+    args,
+    result_id: resultId || null,
+    source: 'mcp',
+    created_at: admin.firestore.FieldValue.serverTimestamp(),
+  }).catch(() => {}); // fire-and-forget
+}
+
 export function registerTools(server: McpServer, userId: string) {
   // Read tools
   server.tool('get_training_snapshot', 'Get compact overview: user profile, active routine, next workout, recent workouts (summary), strength records', {},
@@ -136,6 +152,7 @@ export function registerTools(server: McpServer, userId: string) {
     frequency: z.number().optional().describe('Days per week')
   }, async (args) => {
     const routine = await routines.createRoutine(db, userId, args);
+    logMcpChange(userId, 'create_routine', args, routine?.id);
     return { content: [{ type: 'text' as const, text: JSON.stringify(routine, null, 2) }] };
   });
 
@@ -144,6 +161,7 @@ export function registerTools(server: McpServer, userId: string) {
     updates: z.record(z.string(), z.any()).describe('Fields to update')
   }, async ({ routine_id, updates }) => {
     const routine = await routines.patchRoutine(db, userId, routine_id, updates);
+    logMcpChange(userId, 'update_routine', { routine_id, updates });
     return { content: [{ type: 'text' as const, text: JSON.stringify(routine, null, 2) }] };
   });
 
@@ -162,6 +180,7 @@ export function registerTools(server: McpServer, userId: string) {
     })).describe('Exercises with set prescriptions'),
   }, async (args) => {
     const tmpl = await templates.createTemplate(db, userId, args);
+    logMcpChange(userId, 'create_template', { name: args.name, exercise_count: args.exercises?.length }, tmpl?.id);
     return { content: [{ type: 'text' as const, text: JSON.stringify(tmpl, null, 2) }] };
   });
 
@@ -184,6 +203,7 @@ export function registerTools(server: McpServer, userId: string) {
     }).describe('Fields to update'),
   }, async ({ template_id, updates }) => {
     const tmpl = await templates.patchTemplate(db, userId, template_id, updates);
+    logMcpChange(userId, 'update_template', { template_id, updates_keys: Object.keys(updates) });
     return { content: [{ type: 'text' as const, text: JSON.stringify(tmpl, null, 2) }] };
   });
 

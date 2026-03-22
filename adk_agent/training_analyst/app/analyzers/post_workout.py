@@ -70,6 +70,9 @@ class PostWorkoutAnalyzer(BaseAnalyzer):
             db, user_id, weeks=4
         )
 
+        # 6b2. Read recent MCP agent changes (external modifications)
+        mcp_changes = self._read_mcp_changes(db, user_id, days=7)
+
         # 6c. Compute progression candidates from workout exercises
         progression_candidates = self._compute_progression_candidates(
             workout, series
@@ -91,6 +94,8 @@ class PostWorkoutAnalyzer(BaseAnalyzer):
             llm_input_data["fatigue_metrics"] = fatigue_metrics
         if recommendation_history:
             llm_input_data["recommendation_history"] = recommendation_history
+        if mcp_changes:
+            llm_input_data["recent_external_changes"] = mcp_changes
 
         llm_input = json.dumps(llm_input_data, indent=2, default=str)
 
@@ -499,6 +504,46 @@ class PostWorkoutAnalyzer(BaseAnalyzer):
         except Exception as e:
             logging.getLogger(__name__).warning(
                 "Failed to read recommendation history for user %s: %s",
+                user_id, e,
+            )
+            return []
+
+    def _read_mcp_changes(
+        self, db, user_id: str, days: int = 7
+    ) -> List[Dict[str, Any]]:
+        """Read recent external agent changes (MCP tool calls that modified data).
+
+        Provides context so the analyzer knows templates/routines may have been
+        modified by an external agent (e.g., Claude Desktop) rather than the user.
+        """
+        try:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+            docs = (
+                db.collection("users").document(user_id)
+                .collection("mcp_change_log")
+                .where("created_at", ">=", cutoff)
+                .order_by("created_at", direction="DESCENDING")
+                .limit(20)
+                .stream()
+            )
+
+            changes = []
+            for doc in docs:
+                data = doc.to_dict()
+                changes.append({
+                    "tool": data.get("tool"),
+                    "args": data.get("args"),
+                    "created_at": (
+                        data["created_at"].isoformat()
+                        if hasattr(data.get("created_at"), "isoformat")
+                        else str(data.get("created_at", ""))
+                    ),
+                })
+
+            return changes
+        except Exception as e:
+            logging.getLogger(__name__).warning(
+                "Failed to read MCP changes for user %s: %s",
                 user_id, e,
             )
             return []

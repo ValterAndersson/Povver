@@ -109,6 +109,12 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // MCP change log: owner can read, server-only writes
+      match /mcp_change_log/{logId} {
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow write: if false;
+      }
+
       // All other user subcollections: owner read/write
       // (workouts, templates, routines, set_facts, weekly_stats, etc.)
       match /{collection}/{document=**} {
@@ -120,6 +126,7 @@ service cloud.firestore {
           && collection != "agent_recommendations"
           && collection != "subscription_events"
           && collection != "agent_memory"
+          && collection != "mcp_change_log"
           && collection != "analysis_insights"
           && collection != "weekly_reviews";
       }
