@@ -216,12 +216,17 @@ struct FocusModeWorkoutScreen: View {
                     completedWorkout = nil
                 }
             }
-            .overlay(alignment: .top) {
+            .overlay(alignment: .bottom) {
                 if let msg = errorBanner {
-                    Banner(title: "Sync Issue", message: msg, kind: .warning)
-                        .padding(.horizontal, Space.md)
-                        .padding(.top, Space.sm)
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                    Text(msg)
+                        .textStyle(.caption)
+                        .foregroundStyle(Color.textInverse)
+                        .padding(.horizontal, Space.lg)
+                        .padding(.vertical, Space.sm)
+                        .background(Color.textPrimary.opacity(0.9))
+                        .clipShape(Capsule())
+                        .padding(.bottom, Space.xl)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                         .onTapGesture { withAnimation(.easeOut(duration: MotionToken.fast)) { errorBanner = nil } }
                 }
             }
@@ -1335,7 +1340,7 @@ struct FocusModeWorkoutScreen: View {
                 try await service.addExercise(exercise: exercise)
             } catch {
                 print("Add exercise failed: \(error)")
-                showError("Failed to add exercise")
+                showError("Couldn't add that exercise — try again")
             }
         }
     }
@@ -1388,7 +1393,7 @@ struct FocusModeWorkoutScreen: View {
                 // Haptic fires immediately in doneCell on tap — no duplicate here
             } catch {
                 print("Log set failed: \(error)")
-                showError("Set sync pending - you can continue")
+                showError("Couldn't save — will retry automatically")
             }
         }
     }
@@ -1404,7 +1409,7 @@ struct FocusModeWorkoutScreen: View {
                 )
             } catch {
                 print("Patch failed: \(error)")
-                showError("Edit sync pending")
+                showError("Couldn't save — will retry automatically")
             }
         }
     }
@@ -1413,10 +1418,10 @@ struct FocusModeWorkoutScreen: View {
         Task {
             do {
                 _ = try await service.addSet(exerciseInstanceId: exerciseId, weight: weight, reps: reps, rir: rir)
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                HapticManager.selectionTick()
             } catch {
                 print("Add set failed: \(error)")
-                showError("Failed to add set")
+                showError("Couldn't add the set — try again")
             }
         }
     }
@@ -1427,7 +1432,7 @@ struct FocusModeWorkoutScreen: View {
                 _ = try await service.removeSet(exerciseInstanceId: exerciseId, setId: setId)
             } catch {
                 print("Remove set failed: \(error)")
-                showError("Failed to remove set")
+                showError("Couldn't remove — try again")
             }
         }
     }
@@ -1438,7 +1443,7 @@ struct FocusModeWorkoutScreen: View {
                 try await service.removeExercise(exerciseInstanceId: exerciseId)
             } catch {
                 print("Remove exercise failed: \(error)")
-                showError("Failed to remove exercise")
+                showError("Couldn't remove — try again")
             }
         }
     }
@@ -1458,7 +1463,7 @@ struct FocusModeWorkoutScreen: View {
     private func showError(_ message: String) {
         withAnimation(.easeOut(duration: MotionToken.fast)) { errorBanner = message }
         Task {
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            try? await Task.sleep(for: .seconds(4))
             withAnimation(.easeOut(duration: MotionToken.fast)) { if errorBanner == message { errorBanner = nil } }
         }
     }

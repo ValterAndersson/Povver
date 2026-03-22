@@ -299,7 +299,7 @@ public struct ExerciseSwapSheet: View {
                 }
             } catch {
                 await MainActor.run {
-                    errorMessage = "Search failed: \(error.localizedDescription)"
+                    errorMessage = "Search didn't work — try again"
                     isSearching = false
                 }
             }

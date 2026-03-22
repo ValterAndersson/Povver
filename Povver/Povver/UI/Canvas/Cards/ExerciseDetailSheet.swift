@@ -385,7 +385,7 @@ public struct ExerciseDetailSheet: View {
             }
         } catch {
             print("[ExerciseDetailSheet] Error: \(error)")
-            self.error = error.localizedDescription
+            self.error = "Couldn't load exercise details"
         }
         
         isLoading = false
