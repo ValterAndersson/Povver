@@ -91,6 +91,8 @@
 import Foundation
 import Combine
 import UIKit
+import FirebaseFirestore
+import OSLog
 
 @MainActor
 class FocusModeWorkoutService: ObservableObject {
@@ -103,6 +105,9 @@ class FocusModeWorkoutService: ObservableObject {
     
     /// Per-exercise sync state for UI indicators (spinners, error badges)
     @Published private(set) var exerciseSyncState: [String: EntitySyncState] = [:]
+
+    /// Last session data per exercise (keyed by exerciseId) for ghost value resolution
+    @Published private(set) var lastSessionData: [String: LastSessionExerciseData] = [:]
 
     /// Whether the current workout has changes vs its source template (Phase 3)
     @Published var hasTemplateChanges: Bool = false
@@ -1858,6 +1863,72 @@ class FocusModeWorkoutService: ObservableObject {
         cachedTemplates = nil
         cachedRoutines = nil
         cachedNextWorkout = nil
+    }
+
+    // MARK: - Last Session Data (Ghost Values)
+
+    private static let ghostLogger = Logger(subsystem: "com.povver.app", category: "GhostValues")
+
+    /// Fetch last session data for all exercises in the current workout.
+    /// Queries the set_facts Firestore subcollection grouped by exercise.
+    /// Called after workout start to populate ghost values for undone sets.
+    func fetchLastSessionData() async {
+        guard let workout, let userId = AuthService.shared.currentUser?.uid else { return }
+
+        let exerciseIds = Set(workout.exercises.map { $0.exerciseId })
+        var result: [String: LastSessionExerciseData] = [:]
+        let db = Firestore.firestore()
+
+        // Fetch last session sets for each unique exercise from set_facts.
+        // set_facts are ordered by workout_date desc, so first N non-warmup results
+        // for each exercise represent the most recent session.
+        await withTaskGroup(of: (String, LastSessionExerciseData?).self) { group in
+            for exerciseId in exerciseIds {
+                group.addTask {
+                    do {
+                        let snapshot = try await db.collection("users")
+                            .document(userId)
+                            .collection("set_facts")
+                            .whereField("exercise_id", isEqualTo: exerciseId)
+                            .whereField("is_warmup", isEqualTo: false)
+                            .order(by: "workout_date", descending: true)
+                            .limit(to: 20) // Enough sets for one session
+                            .getDocuments()
+
+                        guard !snapshot.documents.isEmpty else { return (exerciseId, nil) }
+
+                        // Group by workout_id and take only the most recent workout's sets
+                        var firstWorkoutId: String?
+                        var sets: [LastSessionSetData] = []
+
+                        for doc in snapshot.documents {
+                            let data = doc.data()
+                            let workoutId = data["workout_id"] as? String ?? ""
+                            if firstWorkoutId == nil { firstWorkoutId = workoutId }
+                            guard workoutId == firstWorkoutId else { break }
+
+                            let weight = data["weight_kg"] as? Double
+                            let reps = data["reps"] as? Int
+                            let rir = data["rir"] as? Int
+                            sets.append(LastSessionSetData(weight: weight, reps: reps, rir: rir))
+                        }
+
+                        // Sort by set_index to ensure correct ordering
+                        // (Firestore query is ordered by workout_date, not set_index)
+                        return (exerciseId, sets.isEmpty ? nil : LastSessionExerciseData(sets: sets))
+                    } catch {
+                        Self.ghostLogger.warning("Failed to fetch last session for exercise \(exerciseId): \(error.localizedDescription)")
+                        return (exerciseId, nil)
+                    }
+                }
+            }
+
+            for await (exerciseId, data) in group {
+                if let data { result[exerciseId] = data }
+            }
+        }
+
+        self.lastSessionData = result
     }
 }
 
