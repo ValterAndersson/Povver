@@ -175,7 +175,10 @@ struct ExitEffect: ViewModifier {
     func body(content: Content) -> some View {
         content
             .opacity(isExiting ? 0 : 1)
-            .offset(y: reduceMotion ? 0 : exitOffset)
+            .offset(
+                x: reduceMotion ? 0 : exitOffsetX,
+                y: reduceMotion ? 0 : exitOffsetY
+            )
             .animation(
                 reduceMotion
                     ? .easeInOut(duration: 0.2)
@@ -184,19 +187,29 @@ struct ExitEffect: ViewModifier {
             )
     }
 
-    private var exitOffset: CGFloat {
+    /// Vertical offset — slides toward the edge the element exits toward
+    private var exitOffsetY: CGFloat {
         guard isExiting else { return 0 }
         switch edge {
         case .top: return -8
         case .bottom: return 8
-        case .leading: return 0
-        case .trailing: return 0
+        case .leading, .trailing: return 0
+        }
+    }
+
+    /// Horizontal offset — slides toward origin (leading/trailing)
+    private var exitOffsetX: CGFloat {
+        guard isExiting else { return 0 }
+        switch edge {
+        case .leading: return -8
+        case .trailing: return 8
+        case .top, .bottom: return 0
         }
     }
 }
 
 // MARK: - Reflow Intent
-// Position-only ease-in-out. Never bouncy. Reduce Motion: instant.
+// Position-only ease-in-out. Never bouncy. Reduce Motion: gentle 0.2s to avoid jarring layout shifts.
 
 struct ReflowEffect: ViewModifier {
     let trigger: Bool
@@ -205,7 +218,9 @@ struct ReflowEffect: ViewModifier {
     func body(content: Content) -> some View {
         content
             .animation(
-                reduceMotion ? nil : .easeInOut(duration: MotionToken.medium),
+                reduceMotion
+                    ? .easeInOut(duration: 0.2) // Gentle position shift, not jarring instant
+                    : .easeInOut(duration: MotionToken.medium),
                 value: trigger
             )
     }
@@ -949,9 +964,11 @@ Button {
 
 The 200ms rapid succession window in `guardedFire` handles the "first tap only within 200ms" spec requirement.
 
-- [ ] **Step 5: Verify stepper haptics in FocusModeSetGrid**
+- [ ] **Step 5: Add stepper haptics in FocusModeSetGrid (if not present)**
 
-Read the stepper +/- buttons in `FocusModeSetGrid.swift`. They should already use `HapticManager.selectionTick()`. If they support hold-to-repeat, add logic for "haptic on first tick and every 5th":
+Read the stepper +/- buttons in `FocusModeSetGrid.swift`. Add `HapticManager.selectionTick()` on each tap if not already present. If they support hold-to-repeat, add logic for "haptic on first tick and every 5th":
+
+**Note:** Navigation list rows must remain silent — do NOT add haptics to list rows.
 
 ```swift
 // In hold-to-repeat handler:
@@ -1389,6 +1406,8 @@ struct SetCompletionCircle: View {
     }
 
     private func handleTap() { onTap() }
+    // IMPORTANT: Parent MUST update `isComplete` synchronously after onTap() fires.
+    // Async delay will cause animation to lag or not trigger.
 
     private func playCompletionAnimation() {
         guard !reduceMotion else {
@@ -1687,7 +1706,7 @@ if let next = AutoAdvance.findNextUndoneSet(
     // Cross-exercise scroll
     if next.exerciseId != exerciseId {
         withAnimation(.easeInOut(duration: MotionToken.medium)) {
-            scrollProxy?.scrollTo(next.exerciseId, anchor: .top)
+            scrollProxy?.scrollTo(next.exerciseId, anchor: .center) // Active exercise stays centered
         }
     }
 }
@@ -1737,7 +1756,7 @@ Read the `ExerciseCardContainer` struct to understand current visual hierarchy t
 
 ```swift
 enum ExerciseDensity {
-    case active      // Full set grid, 48pt touch targets, ~60% of screen
+    case active      // Full set grid, 48pt touch targets, ~60% of screen, set values large enough to read at arm's length (use .title3 or equivalent token)
     case completed   // Compressed: name + set count + emerald left-edge. Tappable to expand.
     case upcoming    // Minimal: name + set count, subdued opacity
 }
@@ -1826,7 +1845,15 @@ func undoLastRemoval() { /* restore from buffer */ }
 In `FocusModeWorkoutScreen`:
 - Remove exercise: immediate removal + UndoToast, no dialog, **no haptic on initial delete**
 - Remove set: immediate removal + UndoToast, no dialog, **no haptic on initial delete**
+- Clear filter(s): immediate, no toast needed (filter UI updates instantly), no haptic
+- Dismiss notification: immediate, no toast needed, no haptic
 - If user taps Undo: restore content with **Reveal animation** (opacity 0→1 + 8pt shift) + light impact haptic
+
+Search for filter clear and notification dismiss interactions across the app. Ensure none use confirmation dialogs:
+
+```bash
+grep -rn "confirmationDialog\|\.alert" Povver/Povver/ --include="*.swift" | grep -i "filter\|notif\|clear\|dismiss" | head -20
+```
 
 Add UndoToast overlay with 5s auto-dismiss. Add light impact haptic on undo tap.
 
@@ -1836,12 +1863,12 @@ Read `Povver/Povver/UI/Components/Feedback/UndoToast.swift`. Add:
 - 5-second auto-dismiss timer
 - `HapticManager.primaryAction()` on undo tap
 
-- [ ] **Step 5: Verify Tier 2 swipe thresholds in SwipeToDeleteRow**
+- [ ] **Step 5: Verify and adjust Tier 2 swipe thresholds in SwipeToDeleteRow**
 
-Read `SwipeToDeleteRow` in `FocusModeComponents.swift`. Verify:
-- Full swipe >150pt triggers confirm + warning haptic
-- Partial >60pt reveals delete button
-- If thresholds don't match, adjust them
+Read `SwipeToDeleteRow` in `FocusModeComponents.swift`. Check current threshold values and adjust to match spec:
+- Full swipe >150pt: trigger delete + `HapticManager.destructiveAction()` (warning notification)
+- Partial swipe >60pt: reveal delete button
+- If thresholds differ from spec values, update them. If warning haptic is missing on full swipe, add it.
 
 - [ ] **Step 6: Standardize Tier 3 dialogs across app**
 
@@ -1870,7 +1897,17 @@ For each Tier 3 action, apply spec copy rules (title = what happens, message = w
 
 Add `HapticManager.destructiveAction()` after each destructive confirm.
 
-**Rule:** Audit all `.confirmationDialog` and `.alert` modifiers with destructive actions. Never disable a destructive button — hide it if irrelevant.
+**Rule:** Never disable a destructive button — if the action is irrelevant, hide the button entirely. Disabled states are for fixable conditions only ("fill in email first"), not for hiding irrelevant actions.
+
+Audit for disabled destructive buttons:
+
+```bash
+grep -rn "\.disabled\|isEnabled" Povver/Povver/ --include="*.swift" | grep -i "delete\|destructive\|discard\|remove\|sign.out" | head -20
+```
+
+If any destructive buttons are conditionally disabled, change to conditionally hidden (use `if` to show/hide, not `.disabled()`).
+
+Also audit all `.confirmationDialog` and `.alert` modifiers with destructive actions to ensure standardized copy.
 
 - [ ] **Step 7: Add deliberate exit fade for Tier 3 destroyed content**
 
@@ -2050,18 +2087,28 @@ if isLoading {
 
 When error resolves: error Exits (fade out), content Reveals (opacity + shift in). Apply this pattern everywhere `DataLoadingErrorView` is used.
 
-- [ ] **Step 6: Replace workout error banner with inline sync indicators**
+- [ ] **Step 6: Audit existing error displays for technical language**
+
+Search for places where raw error text might be shown to users:
+
+```bash
+grep -rn "\.localizedDescription\|error\.message\|\\\(error\)" Povver/Povver/Views/ Povver/Povver/UI/ --include="*.swift" | head -20
+```
+
+Replace any technical error text with user-friendly copy. Spec rule: never show status codes, error class names, or technical identifiers to users.
+
+- [ ] **Step 7: Replace workout error banner with inline sync indicators**
 
 In `FocusModeWorkoutScreen`, change from auto-dismiss banner to:
 - Per-row sync indicators using `exerciseSyncState` from `FocusModeWorkoutService`
-- Transient toast only for persistent sync failures (3+ retries), copy: "Couldn't save — will retry automatically."
+- Transient toast when EITHER 3+ retries have failed OR 30 seconds have elapsed since first failure (whichever comes first). Copy: "Couldn't save — will retry automatically." Toast slides up from bottom, auto-dismisses.
 
-- [ ] **Step 7: Build and verify**
+- [ ] **Step 8: Build and verify**
 
 Run: `cd /Users/valterandersson/Documents/Povver/Povver && xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add Povver/Povver/UI/Components/Feedback/InlineError.swift Povver/Povver/UI/Components/Feedback/DataLoadingErrorView.swift Povver/Povver/UI/FocusMode/FocusModeWorkoutScreen.swift
@@ -2069,8 +2116,9 @@ git commit -m "feat(errors): implement all 4 error communication patterns
 
 Form submissions: InlineError with progressive copy + coach escalation.
 Data loading: DataLoadingErrorView as content-area error state + cross-fade transitions.
-Sync errors: per-row SyncIndicator, toast after 3+ retries.
+Sync errors: per-row SyncIndicator, toast after 3+/30s threshold.
 Destructive failures: system alert with retry/cancel.
+Technical error text audited and replaced with user-friendly copy.
 Error resolve: Exit animation, content Reveals."
 ```
 
@@ -2081,6 +2129,8 @@ Error resolve: Exit animation, content Reveals."
 ### Task 13: Workout Completion Arc
 
 Add held beat before transition, align staggered reveal timing to spec, ensure haptic sequence.
+
+**Constraint (spec Section 6):** Do NOT add confetti, particle effects, sound effects, congratulatory text ("Great job!"), or gamification metrics (streaks, points, XP). The completion arc relies on rhythm and restraint.
 
 **Files:**
 - Modify: `Povver/Povver/UI/FocusMode/FocusModeWorkoutHelpers.swift`
@@ -2097,8 +2147,9 @@ Read completely. Focus on `revealPhase` staggering and haptic calls.
 In `FocusModeWorkoutScreen`, after `completeWorkout()` succeeds:
 
 ```swift
-HapticManager.workoutCompleted()
+// Spec order: final exercise signature → held beat → success haptic → transition
 try? await Task.sleep(for: .milliseconds(500)) // Held beat of stillness
+HapticManager.workoutCompleted() // Success notification haptic AFTER the beat
 completedWorkout = CompletedWorkoutRef(id: archivedId)
 ```
 
