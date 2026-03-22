@@ -332,13 +332,15 @@ struct RoutinesListView: View {
     }
     
     private var loadingView: some View {
-        VStack {
+        VStack(spacing: Space.md) {
             ProgressView()
-                .progressViewStyle(.circular)
+            Text("Loading...")
+                .textStyle(.caption)
+                .foregroundStyle(Color.textTertiary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-    
+
     private var emptyStateView: some View {
         VStack(spacing: Space.lg) {
             CoachPresenceIndicator(size: 32)
@@ -441,9 +443,11 @@ struct TemplatesListView: View {
     }
     
     private var loadingView: some View {
-        VStack {
+        VStack(spacing: Space.md) {
             ProgressView()
-                .progressViewStyle(.circular)
+            Text("Loading...")
+                .textStyle(.caption)
+                .foregroundStyle(Color.textTertiary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -838,12 +842,12 @@ struct ExercisesListView: View {
     private var loadingView: some View {
         VStack {
             Spacer()
-            ProgressView()
-                .scaleEffect(1.2)
-            Text("Loading exercises...")
-                .textStyle(.secondary)
-                .foregroundColor(Color.textSecondary)
-                .padding(.top, Space.md)
+            VStack(spacing: Space.md) {
+                ProgressView()
+                Text("Loading exercises...")
+                    .textStyle(.caption)
+                    .foregroundStyle(Color.textTertiary)
+            }
             Spacer()
         }
     }

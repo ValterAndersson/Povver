@@ -99,8 +99,13 @@ struct CoachTabView: View {
     private var heroSection: some View {
         switch viewModel.state {
         case .loading:
-            HStack { Spacer(); ProgressView(); Spacer() }
-                .frame(minHeight: 120)
+            VStack(spacing: Space.md) {
+                ProgressView()
+                Text("Loading...")
+                    .textStyle(.caption)
+                    .foregroundStyle(Color.textTertiary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 120)
         case .newUser:
             newUserHero
         case .workoutDay(let ctx):

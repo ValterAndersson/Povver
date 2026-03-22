@@ -492,7 +492,7 @@ struct FocusModeWorkoutScreen: View {
             screenMode = screenMode.isReordering ? .normal : .reordering
         }
 
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        HapticManager.modeToggle()
 
         // Re-enable after transition
         DispatchQueue.main.asyncAfter(deadline: .now() + MotionToken.fast) {
@@ -517,8 +517,13 @@ struct FocusModeWorkoutScreen: View {
                     .foregroundColor(Color.textPrimary)
 
                 if isLoadingStartData {
-                    ProgressView()
-                        .padding(.vertical, Space.lg)
+                    VStack(spacing: Space.md) {
+                        ProgressView()
+                        Text("Loading workout data...")
+                            .textStyle(.caption)
+                            .foregroundStyle(Color.textTertiary)
+                    }
+                    .padding(.vertical, Space.lg)
                 } else {
                     VStack(spacing: Space.lg) {
                         // Tier 2 hero card + primary CTA when a scheduled workout exists
@@ -548,7 +553,7 @@ struct FocusModeWorkoutScreen: View {
 
                             // Full-width emerald CTA
                             PovverButton("Start Session") {
-                                Task { await startFromNextWorkout() }
+                                await startFromNextWorkout()
                             }
 
                             // Secondary text links
@@ -1155,10 +1160,9 @@ struct FocusModeWorkoutScreen: View {
     private var loadingView: some View {
         VStack(spacing: Space.lg) {
             ProgressView()
-                .scaleEffect(1.2)
-            Text("Starting workout...")
-                .textStyle(.secondary)
-                .foregroundColor(Color.textSecondary)
+            Text("Preparing workout...")
+                .textStyle(.caption)
+                .foregroundStyle(Color.textTertiary)
         }
     }
     
