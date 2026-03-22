@@ -28,13 +28,17 @@ logger = logging.getLogger(__name__)
 
 RESULTS_DIR = Path(__file__).parent / "results"
 
+# Deployed service URLs
+AGENT_SERVICE_URL = "https://agent-service-jt35xlatqq-uc.a.run.app"
+MCP_SERVER_URL = "https://mcp-server-jt35xlatqq-uc.a.run.app"
+DEFAULT_USER_ID = "xLRyVOI0XKSFsTXSFbGSvui8FJf2"
+
 
 async def run_single_case(
     case,
     gemini: GeminiBackend,
     claude: ClaudeBackend,
     user_id: str,
-    anthropic_api_key: str,
 ) -> CaseResult:
     """Run one case against both backends and judge."""
     logger.info("Running case %s: %s", case.id, case.query[:50])
@@ -64,7 +68,6 @@ async def run_single_case(
         gemini_tools=gemini_resp.tools_used,
         claude_response=claude_resp.response_text,
         claude_tools=claude_resp.tools_used,
-        anthropic_api_key=anthropic_api_key,
         gemini_turns=gemini_turns or None,
         claude_turns=claude_turns or None,
     )
@@ -153,13 +156,13 @@ async def run_with_retry(coro_fn, max_retries=3):
 
 
 async def run_case_with_samples(
-    case, gemini, claude, user_id, anthropic_key, samples: int
+    case, gemini, claude, user_id, samples: int
 ) -> CaseResult:
     """Run a case N times and keep the best result (optimistic sampling)."""
     best: CaseResult | None = None
     for s in range(samples):
         result = await run_with_retry(
-            lambda: run_single_case(case, gemini, claude, user_id, anthropic_key)
+            lambda: run_single_case(case, gemini, claude, user_id)
         )
         if best is None or (result.gemini.overall + result.claude.overall) > (best.gemini.overall + best.claude.overall):
             best = result
@@ -173,19 +176,21 @@ async def main():
     parser.add_argument("--parallel", type=int, default=3, help="Max parallel cases (capped at 5)")
     parser.add_argument("--samples", type=int, default=1, help="Samples per case (2 for optimistic sampling)")
     parser.add_argument("--no-insights", action="store_true", help="Skip Opus insights generation")
-    parser.add_argument("--gemini-url", default=os.getenv("EVAL_GEMINI_URL"), help="Agent service URL")
-    parser.add_argument("--mcp-url", default=os.getenv("EVAL_MCP_URL"), help="MCP server URL")
-    parser.add_argument("--user-id", default=os.getenv("EVAL_USER_ID"), help="Test user ID")
+    parser.add_argument("--gemini-url", default=os.getenv("EVAL_GEMINI_URL", AGENT_SERVICE_URL), help="Agent service URL")
+    parser.add_argument("--mcp-url", default=os.getenv("EVAL_MCP_URL", MCP_SERVER_URL), help="MCP server URL")
+    parser.add_argument("--user-id", default=os.getenv("EVAL_USER_ID", DEFAULT_USER_ID), help="Test user ID")
     args = parser.parse_args()
     args.parallel = min(args.parallel, 5)  # Cap per spec
 
-    # Load config from env
-    anthropic_key = os.environ["ANTHROPIC_API_KEY"]
-    gemini_token = os.getenv("EVAL_GEMINI_TOKEN")  # Optional for non-IAM
+    # MCP API key for tool execution (test user's key)
     mcp_api_key = os.environ["EVAL_MCP_API_KEY"]
 
-    gemini = GeminiBackend(args.gemini_url, gemini_token)
-    claude = ClaudeBackend(anthropic_key, args.mcp_url, mcp_api_key)
+    # GCP_SA_KEY is required for Cloud Run IAM auth (Gemini backend)
+    if not os.environ.get("GCP_SA_KEY"):
+        raise RuntimeError("GCP_SA_KEY env var must point to the GCP service account key file")
+
+    gemini = GeminiBackend(args.gemini_url)
+    claude = ClaudeBackend(args.mcp_url, mcp_api_key)
 
     cases = get_cases(category=args.category, case_id=args.id)
     logger.info("Running %d cases (%d samples each)", len(cases), args.samples)
@@ -196,7 +201,7 @@ async def main():
     async def run_with_limit(case):
         async with sem:
             return await run_case_with_samples(
-                case, gemini, claude, args.user_id, anthropic_key, args.samples
+                case, gemini, claude, args.user_id, args.samples
             )
 
     results = await asyncio.gather(*[run_with_limit(c) for c in cases])
@@ -218,7 +223,7 @@ async def main():
     # Generate insights (optional — costs an Opus call)
     if not args.no_insights:
         logger.info("Generating insights with Opus...")
-        insights = await generate_insights(run_dir, anthropic_key)
+        insights = await generate_insights(run_dir)
         (run_dir / "insights.md").write_text(insights)
 
     # Print summary

@@ -6,12 +6,16 @@ import logging
 import re
 from typing import Optional, Union
 
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropicVertex
 
 from comparative.models import ComparisonVerdict, DimensionScore
 from comparative.test_cases import MultiTurnCase, SingleTurnCase
 
 logger = logging.getLogger(__name__)
+
+# Vertex AI config — uses ADC for auth (no API key needed)
+VERTEX_PROJECT_ID = "sm-team-engineering"
+VERTEX_REGION = "us-east5"
 
 JUDGE_MODEL = "claude-opus-4-6"
 
@@ -227,7 +231,6 @@ async def judge_case(
     gemini_tools: list[str],
     claude_response: str,
     claude_tools: list[str],
-    anthropic_api_key: str,
     gemini_turns: list | None = None,
     claude_turns: list | None = None,
 ) -> tuple[dict[str, DimensionScore], dict[str, DimensionScore], ComparisonVerdict, dict | None]:
@@ -238,7 +241,10 @@ async def judge_case(
         gemini_turns, claude_turns,
     )
 
-    client = AsyncAnthropic(api_key=anthropic_api_key)
+    client = AsyncAnthropicVertex(
+        project_id=VERTEX_PROJECT_ID,
+        region=VERTEX_REGION,
+    )
     resp = await client.messages.create(
         model=JUDGE_MODEL,
         max_tokens=4096,

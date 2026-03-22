@@ -9,7 +9,7 @@ import uuid
 from typing import Union
 
 import httpx
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropicVertex
 
 from comparative.backends.tool_definitions import MCP_TOOLS
 from comparative.models import BackendResponse, TurnResponse
@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 
 AnyCase = Union[SingleTurnCase, MultiTurnCase]
 MAX_TOOL_ROUNDS = 12
+
+# Vertex AI config — uses ADC for auth (no API key needed)
+VERTEX_PROJECT_ID = "sm-team-engineering"
+VERTEX_REGION = "us-east5"
 
 
 async def execute_mcp_tool(
@@ -57,17 +61,19 @@ async def execute_mcp_tool(
 
 
 class ClaudeBackend:
-    """Eval backend for Claude Sonnet via Anthropic API + MCP tools."""
+    """Eval backend for Claude Sonnet via Vertex AI + MCP tools."""
 
     def __init__(
         self,
-        anthropic_api_key: str,
         mcp_url: str,
         mcp_api_key: str,
         model: str = "claude-sonnet-4-6-20250514",
         temperature: float = 0.3,
     ):
-        self.client = AsyncAnthropic(api_key=anthropic_api_key)
+        self.client = AsyncAnthropicVertex(
+            project_id=VERTEX_PROJECT_ID,
+            region=VERTEX_REGION,
+        )
         self.mcp_url = mcp_url
         self.mcp_api_key = mcp_api_key
         self.model = model

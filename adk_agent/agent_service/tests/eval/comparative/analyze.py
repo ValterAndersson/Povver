@@ -8,9 +8,13 @@ import json
 import logging
 from pathlib import Path
 
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropicVertex
 
 logger = logging.getLogger(__name__)
+
+# Vertex AI config — uses ADC for auth (no API key needed)
+VERTEX_PROJECT_ID = "sm-team-engineering"
+VERTEX_REGION = "us-east5"
 
 SYNTHESIS_PROMPT = """You are analyzing the results of a comparative evaluation between two AI fitness coaching systems:
 
@@ -45,7 +49,7 @@ Be honest and direct. The goal is to make the in-platform agent clearly better t
 """
 
 
-async def generate_insights(run_dir: Path, anthropic_api_key: str) -> str:
+async def generate_insights(run_dir: Path) -> str:
     """Generate insights.md from raw results."""
     summary = json.loads((run_dir / "summary.json").read_text())
 
@@ -71,7 +75,10 @@ async def generate_insights(run_dir: Path, anthropic_api_key: str) -> str:
         case_details=case_details,
     )
 
-    client = AsyncAnthropic(api_key=anthropic_api_key)
+    client = AsyncAnthropicVertex(
+        project_id=VERTEX_PROJECT_ID,
+        region=VERTEX_REGION,
+    )
     resp = await client.messages.create(
         model="claude-opus-4-6",
         max_tokens=4096,
@@ -87,11 +94,9 @@ async def main():
     parser.add_argument("run_dir", help="Path to eval run directory")
     args = parser.parse_args()
 
-    import os
-    api_key = os.environ["ANTHROPIC_API_KEY"]
     run_dir = Path(args.run_dir)
 
-    insights = await generate_insights(run_dir, api_key)
+    insights = await generate_insights(run_dir)
     output = run_dir / "insights.md"
     output.write_text(insights)
     print(f"Insights written to {output}")

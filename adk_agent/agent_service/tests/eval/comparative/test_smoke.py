@@ -56,13 +56,13 @@ async def test_full_pipeline_mocked():
         },
     })
 
-    with patch("comparative.judge.AsyncAnthropic") as mock_anthropic:
+    with patch("comparative.judge.AsyncAnthropicVertex") as mock_anthropic:
         mock_msg = MagicMock()
         mock_msg.content = [MagicMock(text=mock_judge_response)]
         mock_anthropic.return_value.messages.create = AsyncMock(return_value=mock_msg)
 
         result = await run_single_case(
-            case, mock_gemini, mock_claude, "test-user", "fake-key"
+            case, mock_gemini, mock_claude, "test-user"
         )
 
     assert result.case_id == "cur_001"
