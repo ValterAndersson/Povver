@@ -1,5 +1,13 @@
 import SwiftUI
 
+/// Styled text field with 5 interaction states per spec Section 4.2.
+///
+/// States:
+/// - Idle: hairline border, Color.separatorLine
+/// - Focused: accent border, elevated background
+/// - Validation error: destructive border, error message below with Reveal
+/// - Validation success: success border, fades to idle after 1s
+/// - Disabled: 40% opacity, not focusable
 public struct PovverTextField: View {
     private let title: String
     @Binding private var text: String
@@ -8,9 +16,22 @@ public struct PovverTextField: View {
     private let keyboard: UIKeyboardType
     private let autocapitalization: TextInputAutocapitalization
     private let isSecure: Bool
-    @FocusState private var focused: Bool
+    private let textContentType: UITextContentType?
 
-    public init(_ title: String, text: Binding<String>, placeholder: String = "", validation: ValidationState = .normal, keyboard: UIKeyboardType = .default, autocapitalization: TextInputAutocapitalization = .sentences, isSecure: Bool = false) {
+    @FocusState private var focused: Bool
+    @State private var showSuccess = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    public init(
+        _ title: String,
+        text: Binding<String>,
+        placeholder: String = "",
+        validation: ValidationState = .normal,
+        keyboard: UIKeyboardType = .default,
+        autocapitalization: TextInputAutocapitalization = .sentences,
+        isSecure: Bool = false,
+        textContentType: UITextContentType? = nil
+    ) {
         self.title = title
         self._text = text
         self.placeholder = placeholder
@@ -18,45 +39,92 @@ public struct PovverTextField: View {
         self.keyboard = keyboard
         self.autocapitalization = autocapitalization
         self.isSecure = isSecure
+        self.textContentType = textContentType
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: Space.xs) {
-            Text(title).textStyle(.secondary).foregroundStyle(Color.textSecondary)
-            HStack(spacing: Space.sm) {
+            Text(title)
+                .textStyle(.secondary)
+                .foregroundStyle(Color.textSecondary)
+
+            Group {
                 if isSecure {
                     SecureField(placeholder, text: $text)
-                        .textInputAutocapitalization(autocapitalization)
-                        .keyboardType(keyboard)
-                        .focused($focused)
+                        .textContentType(textContentType)
                 } else {
                     TextField(placeholder, text: $text)
-                        .textInputAutocapitalization(autocapitalization)
-                        .keyboardType(keyboard)
-                        .focused($focused)
+                        .textContentType(textContentType)
                 }
             }
+            .textInputAutocapitalization(autocapitalization)
+            .keyboardType(keyboard)
+            .textStyle(.body)
+            .focused($focused)
             .padding(.vertical, Space.sm)
             .padding(.horizontal, Space.md)
-            .background(Color.surfaceElevated)
+            .background(fieldBackground)
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous)
-                    .stroke(validationBorderColor(), lineWidth: StrokeWidthToken.thick)
+                    .strokeBorder(borderColor, lineWidth: borderWidth)
             )
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous))
+            .opacity(isEnabled ? 1 : InteractionToken.disabledOpacity)
 
-            if let message = validation.message {
-                Text(message).textStyle(.caption).foregroundStyle(validation.color)
+            // Validation error message with Reveal animation
+            if let message = validation.message, validation.isError {
+                Text(message)
+                    .textStyle(.caption)
+                    .foregroundStyle(Color.destructive)
+                    .revealEffect(isVisible: true)
             }
         }
+        .onChange(of: validation) { _, newVal in
+            if case .success = newVal {
+                showSuccess = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        showSuccess = false
+                    }
+                }
+            }
+        }
+        .accessibilityLabel(title)
     }
 
-    private func validationBorderColor() -> Color {
-        switch validation {
-        case .normal: return focused ? Color.accent.opacity(0.6) : Color.separatorLine
-        case .success: return Color.success
-        case .error: return Color.destructive
-        }
+    private var fieldBackground: Color {
+        focused ? Color.surfaceElevated : Color.surface
+    }
+
+    private var borderColor: Color {
+        if validation.isError { return .destructive }
+        if showSuccess || validation.isSuccess { return .success }
+        if focused { return .accent }
+        return .separatorLine
+    }
+
+    private var borderWidth: CGFloat {
+        if focused || !validation.isNormal { return StrokeWidthToken.thin }
+        return StrokeWidthToken.hairline
+    }
+}
+
+// MARK: - ValidationState Helpers
+
+private extension ValidationState {
+    var isError: Bool {
+        if case .error = self { return true }
+        return false
+    }
+
+    var isSuccess: Bool {
+        if case .success = self { return true }
+        return false
+    }
+
+    var isNormal: Bool {
+        if case .normal = self { return true }
+        return false
     }
 }
 
@@ -67,6 +135,9 @@ struct PovverTextField_Previews: PreviewProvider {
             VStack(alignment: .leading, spacing: Space.lg) {
                 PovverTextField("Email", text: binding, placeholder: "you@example.com")
                 PovverTextField("Password", text: binding, placeholder: "••••••••", validation: .error(message: "Invalid password"), isSecure: true)
+                PovverTextField("Name", text: binding, placeholder: "Jane Doe", validation: .success(message: "Looks good"))
+                PovverTextField("Disabled", text: binding, placeholder: "Not editable")
+                    .disabled(true)
             }
             .padding(InsetsToken.screen)
         }
@@ -84,5 +155,3 @@ struct StatefulPreviewWrapper<Value, Content: View>: View {
     var body: some View { content($value) }
 }
 #endif
-
-
