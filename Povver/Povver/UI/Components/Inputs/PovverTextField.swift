@@ -80,10 +80,16 @@ public struct PovverTextField: View {
             }
         }
         .task(id: validation) {
-            guard case .success = validation else { return }
+            guard case .success = validation else {
+                showSuccess = false
+                return
+            }
             showSuccess = true
             try? await Task.sleep(for: .seconds(1))
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                showSuccess = false
+                return
+            }
             withAnimation(.easeOut(duration: 0.3)) {
                 showSuccess = false
             }

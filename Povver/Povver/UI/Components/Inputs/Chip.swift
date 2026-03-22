@@ -29,7 +29,10 @@ public struct Chip: View {
     }
     
     public var body: some View {
-        Button(action: action) {
+        Button {
+            HapticManager.selectionChanged()
+            action()
+        } label: {
             HStack(spacing: Space.xs) {
                 if let icon {
                     icon

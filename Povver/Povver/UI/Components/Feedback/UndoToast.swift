@@ -38,10 +38,10 @@ public struct UndoToast: View {
         .clipShape(Capsule())
         .shadowStyle(ShadowsToken.level2)
         .onAppear {
-            dismissTask = Task {
+            dismissTask = Task { @MainActor in
                 try? await Task.sleep(for: .seconds(5))
                 guard !Task.isCancelled else { return }
-                await MainActor.run { onDismiss() }
+                onDismiss()
             }
         }
         .onDisappear {

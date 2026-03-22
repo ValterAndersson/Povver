@@ -52,6 +52,7 @@ struct InlineError: View {
                         .foregroundStyle(Color.accent)
                 }
             }
+            .id(failureCount)
             .revealEffect(isVisible: isVisible)
             .onAppear { isVisible = true }
         }
