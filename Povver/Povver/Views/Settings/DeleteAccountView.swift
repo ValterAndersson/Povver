@@ -79,15 +79,16 @@ struct DeleteAccountView: View {
             )
         }
         .confirmationDialog(
-            "Delete Everything?",
+            "Delete your account?",
             isPresented: $showingFinalConfirmation
         ) {
-            Button("Delete Everything", role: .destructive) {
+            Button("Delete Account", role: .destructive) {
+                HapticManager.destructiveAction()
                 Task { await performDeletion() }
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This will permanently delete your account and all data. This cannot be undone.")
+            Text("All your data will be permanently removed. This cannot be undone.")
         }
     }
 

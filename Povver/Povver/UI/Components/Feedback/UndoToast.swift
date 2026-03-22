@@ -3,20 +3,49 @@ import SwiftUI
 public struct UndoToast: View {
     private let text: String
     private let onUndo: () -> Void
-    public init(_ text: String, onUndo: @escaping () -> Void) {
+    private let onDismiss: () -> Void
+
+    /// Auto-dismiss timer handle — cancelled when user taps Undo or view disappears
+    @State private var dismissTask: Task<Void, Never>?
+
+    public init(_ text: String, onUndo: @escaping () -> Void, onDismiss: @escaping () -> Void = {}) {
         self.text = text
         self.onUndo = onUndo
+        self.onDismiss = onDismiss
     }
+
     public var body: some View {
         HStack(spacing: Space.md) {
             Text(text).textStyle(.body).foregroundStyle(Color.textInverse)
-            PovverButton("Undo", style: .secondary) { onUndo() }
-                .tint(.textInverse)
+            Button {
+                dismissTask?.cancel()
+                HapticManager.primaryAction()
+                onUndo()
+            } label: {
+                Text("Undo")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(Color.textInverse)
+                    .padding(.horizontal, Space.sm)
+                    .padding(.vertical, Space.xxs)
+                    .background(Color.white.opacity(0.2))
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(PlainButtonStyle())
         }
         .padding(InsetsToken.symmetric(vertical: Space.sm, horizontal: Space.md))
         .background(Color.accent)
         .clipShape(Capsule())
         .shadowStyle(ShadowsToken.level2)
+        .onAppear {
+            dismissTask = Task {
+                try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled else { return }
+                await MainActor.run { onDismiss() }
+            }
+        }
+        .onDisappear {
+            dismissTask?.cancel()
+        }
     }
 }
 

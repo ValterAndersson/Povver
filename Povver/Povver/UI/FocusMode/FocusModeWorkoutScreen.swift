@@ -226,6 +226,22 @@ struct FocusModeWorkoutScreen: View {
                 }
             }
             .animation(.easeInOut(duration: MotionToken.fast), value: errorBanner)
+            .overlay(alignment: .bottom) {
+                if service.pendingUndo != nil {
+                    UndoToast(undoLabel(for: service.pendingUndo), onUndo: {
+                        withAnimation(MotionToken.snappy) {
+                            service.performUndo()
+                        }
+                    }, onDismiss: {
+                        withAnimation(.easeOut(duration: MotionToken.fast)) {
+                            service.clearUndo()
+                        }
+                    })
+                    .padding(.bottom, Space.xl)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.easeInOut(duration: MotionToken.fast), value: service.pendingUndo != nil)
             .onChange(of: service.workout != nil) { _, isActive in
                 UIApplication.shared.isIdleTimerDisabled = isActive
             }
@@ -1444,6 +1460,18 @@ struct FocusModeWorkoutScreen: View {
         Task {
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             withAnimation(.easeOut(duration: MotionToken.fast)) { if errorBanner == message { errorBanner = nil } }
+        }
+    }
+
+    // MARK: - Undo Label
+
+    private func undoLabel(for action: FocusModeWorkoutService.UndoableAction?) -> String {
+        guard let action = action else { return "Removed" }
+        switch action {
+        case .exerciseRemoved(let exercise, _, _):
+            return "\(exercise.name) removed"
+        case .setRemoved:
+            return "Set removed"
         }
     }
 

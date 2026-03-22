@@ -76,13 +76,14 @@ struct MoreView: View {
                 }
             }
         }
-        .confirmationDialog("Sign Out", isPresented: $showingLogoutConfirmation) {
+        .confirmationDialog("Sign out?", isPresented: $showingLogoutConfirmation) {
             Button("Sign Out", role: .destructive) {
+                HapticManager.destructiveAction()
                 logout()
             }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("Are you sure you want to sign out?")
+            Text("You'll need to sign in again to access your data.")
         }
     }
 

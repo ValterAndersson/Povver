@@ -248,13 +248,14 @@ struct FinishWorkoutSheet: View {
                     .disabled(isLoading)
                 }
             }
-            .confirmationDialog("Discard Workout?", isPresented: $showDiscardConfirmation) {
+            .confirmationDialog("Discard this workout?", isPresented: $showDiscardConfirmation) {
                 Button("Discard", role: .destructive) {
+                    HapticManager.destructiveAction()
                     onDiscard()
                 }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("Your progress will not be saved.")
+                Text("Your sets and progress from this session won't be saved.")
             }
         }
         .presentationDetents([.medium])
@@ -1204,7 +1205,8 @@ struct SwipeToDeleteRow<Content: View>: View {
                                 if baseOffset == 0 {
                                     // From closed state
                                     if translation.width < -fullSwipeThreshold {
-                                        // Full swipe triggers delete
+                                        // Full swipe triggers delete + destructive haptic
+                                        HapticManager.destructiveAction()
                                         baseOffset = -UIScreen.main.bounds.width
                                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                                             onDelete()

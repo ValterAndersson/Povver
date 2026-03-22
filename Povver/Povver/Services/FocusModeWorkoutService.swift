@@ -146,7 +146,50 @@ class FocusModeWorkoutService: ObservableObject {
     private let apiClient = ApiClient.shared
     private let idempotencyHelper = IdempotencyKeyHelper.shared
     private let sessionLog = WorkoutSessionLogger.shared
-    
+
+    // MARK: - Undo Buffer (Tier 1 destructive actions)
+
+    /// Represents a destructive action that can be undone within a 5-second window.
+    enum UndoableAction {
+        case exerciseRemoved(exercise: FocusModeExercise, index: Int, previousTotals: WorkoutTotals)
+        case setRemoved(exerciseId: String, set: FocusModeSet, index: Int)
+    }
+
+    /// The most recent undoable action. Cleared on undo, new workout actions, or timeout.
+    @Published private(set) var pendingUndo: UndoableAction?
+
+    /// Clear the pending undo without restoring (used by auto-dismiss timer).
+    func clearUndo() {
+        pendingUndo = nil
+    }
+
+    /// Restores the most recent undoable action. Called from UndoToast tap.
+    func performUndo() {
+        guard let action = pendingUndo else { return }
+        pendingUndo = nil
+
+        switch action {
+        case .exerciseRemoved(let exercise, let index, let previousTotals):
+            guard var w = workout else { return }
+            let insertionIndex = min(index, w.exercises.count)
+            w.exercises.insert(exercise, at: insertionIndex)
+            for i in w.exercises.indices { w.exercises[i].position = i }
+            w.totals = previousTotals
+            workout = w
+            updateHasTemplateChanges()
+
+        case .setRemoved(let exerciseId, let set, let index):
+            guard var w = workout,
+                  let exIdx = w.exercises.firstIndex(where: { $0.instanceId == exerciseId }) else { return }
+            let insertionIndex = min(index, w.exercises[exIdx].sets.count)
+            w.exercises[exIdx].sets.insert(set, at: insertionIndex)
+            if set.status == .done {
+                w.totals = recalculateTotals(for: w)
+            }
+            workout = w
+        }
+    }
+
     // MARK: - Mutation Coordinator
     
     /// Serial mutation queue for sync ordering + dependency satisfaction
@@ -822,6 +865,13 @@ class FocusModeWorkoutService: ObservableObject {
             "setId": setId
         ])
 
+        // 0. Capture undo state before removal
+        if let exIdx = workout.exercises.firstIndex(where: { $0.instanceId == exerciseInstanceId }),
+           let setIdx = workout.exercises[exIdx].sets.firstIndex(where: { $0.id == setId }) {
+            let removedSet = workout.exercises[exIdx].sets[setIdx]
+            pendingUndo = .setRemoved(exerciseId: exerciseInstanceId, set: removedSet, index: setIdx)
+        }
+
         // 1. Apply optimistically
         removeSetLocally(exerciseInstanceId: exerciseInstanceId, setId: setId)
         
@@ -881,8 +931,8 @@ class FocusModeWorkoutService: ObservableObject {
         self.workout = updatedWorkout
         updateHasTemplateChanges()
 
-        // Haptic feedback
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        // Store undo state (Tier 1: immediate removal + undo toast, no haptic)
+        pendingUndo = .exerciseRemoved(exercise: removedExercise, index: removedIndex, previousTotals: previousTotals)
 
         print("[removeExercise] Optimistically removed exercise: \(exerciseInstanceId)")
 
@@ -1795,6 +1845,28 @@ class FocusModeWorkoutService: ObservableObject {
         invalidateLibraryCache()
     }
 
+    /// Delete a template by ID
+    func deleteTemplate(templateId: String) async throws {
+        let request = DeleteTemplateRequest(templateId: templateId)
+        let response: DeleteEntityResponse = try await apiClient.postJSON("deleteTemplate", body: request)
+
+        guard response.success else {
+            throw FocusModeError.syncFailed(response.error ?? "Failed to delete template")
+        }
+        invalidateLibraryCache()
+    }
+
+    /// Delete a routine by ID
+    func deleteRoutine(routineId: String) async throws {
+        let request = DeleteRoutineRequest(routineId: routineId)
+        let response: DeleteEntityResponse = try await apiClient.postJSON("deleteRoutine", body: request)
+
+        guard response.success else {
+            throw FocusModeError.syncFailed(response.error ?? "Failed to delete routine")
+        }
+        invalidateLibraryCache()
+    }
+
     /// Upsert a completed workout (create or update)
     /// Backend recomputes all analytics, set_facts, and series inline
     func upsertWorkout(_ request: UpsertWorkoutRequest) async throws -> String {
@@ -2137,6 +2209,31 @@ private struct PatchRoutineRequest: Encodable {
 }
 
 private struct PatchRoutineResponse: Decodable {
+    let success: Bool
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case success, data, error
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? true
+        self.error = try container.decodeIfPresent(String.self, forKey: .error)
+    }
+}
+
+// MARK: - Delete DTOs
+
+private struct DeleteTemplateRequest: Encodable {
+    let templateId: String
+}
+
+private struct DeleteRoutineRequest: Encodable {
+    let routineId: String
+}
+
+private struct DeleteEntityResponse: Decodable {
     let success: Bool
     let error: String?
 

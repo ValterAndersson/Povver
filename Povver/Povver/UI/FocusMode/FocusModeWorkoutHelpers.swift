@@ -268,24 +268,35 @@ struct WorkoutAlertsModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .confirmationDialog("Finish Workout?", isPresented: $showingCompleteConfirmation) {
-                Button("Complete Workout") { onFinish() }
-                Button("Keep Logging", role: .cancel) { }
+            .confirmationDialog("Finish this workout?", isPresented: $showingCompleteConfirmation) {
+                Button("Finish") {
+                    HapticManager.destructiveAction()
+                    onFinish()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Your workout will be saved and you'll see a summary.")
             }
             .alert("Workout Name", isPresented: $showingNameEditor) {
                 TextField("Name", text: $editingName)
                 Button("Save") { onUpdateName(editingName) }
                 Button("Cancel", role: .cancel) { }
             }
-            .alert("Discard Workout?", isPresented: $showingCancelConfirmation) {
-                Button("Keep Logging", role: .cancel) { }
-                Button("Discard", role: .destructive) { onDiscard() }
+            .confirmationDialog("Discard this workout?", isPresented: $showingCancelConfirmation) {
+                Button("Discard", role: .destructive) {
+                    HapticManager.destructiveAction()
+                    onDiscard()
+                }
+                Button("Cancel", role: .cancel) { }
             } message: {
-                Text("Your progress will not be saved.")
+                Text("Your sets and progress from this session won't be saved.")
             }
             .alert("Active Workout Found", isPresented: $showingResumeGate) {
                 Button("Resume Workout") { onResume() }
-                Button("Discard and Start New", role: .destructive) { onDiscardAndStartNew() }
+                Button("Discard and Start New", role: .destructive) {
+                    HapticManager.destructiveAction()
+                    onDiscardAndStartNew()
+                }
             } message: {
                 Text("You have an active workout in progress. Would you like to resume or start fresh?")
             }

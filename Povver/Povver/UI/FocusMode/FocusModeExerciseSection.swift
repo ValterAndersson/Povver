@@ -147,8 +147,6 @@ struct FocusModeExerciseSectionNew: View {
     /// Whether this is the last exercise in the workout (for progressive haptic intensity)
     var isLastExercise: Bool = false
 
-    @State private var showRemoveConfirmation = false
-
     /// Manual expansion override for completed exercises (tappable to expand)
     @State private var isExpandedOverride = false
 
@@ -373,7 +371,8 @@ struct FocusModeExerciseSectionNew: View {
                         }
                     }
                     Button(role: .destructive) {
-                        showRemoveConfirmation = true
+                        // Tier 1: immediate removal, undo via toast (no confirmation dialog)
+                        onRemoveExercise()
                     } label: {
                         Label("Remove Exercise", systemImage: "trash")
                     }
@@ -405,14 +404,6 @@ struct FocusModeExerciseSectionNew: View {
                 }
                 .buttonStyle(PlainButtonStyle())
             }
-        }
-        .confirmationDialog("Remove \(exercise.name)?", isPresented: $showRemoveConfirmation) {
-            Button("Remove", role: .destructive) {
-                onRemoveExercise()
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This will remove the exercise and all its sets from this workout.")
         }
     }
 }

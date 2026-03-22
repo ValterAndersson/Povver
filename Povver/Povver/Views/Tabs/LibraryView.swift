@@ -961,6 +961,11 @@ struct TemplateDetailView: View {
     @State private var showAddExercise = false
     @State private var originalPlanExercises: [PlanExercise] = []
 
+    // Delete state
+    @State private var showingDeleteConfirmation = false
+    @State private var isDeleting = false
+    @Environment(\.dismiss) private var dismiss
+
     private var syncState: FocusModeSyncState? {
         saveService.state(for: templateId)
     }
@@ -1014,11 +1019,31 @@ struct TemplateDetailView: View {
                         .foregroundColor(.warning)
                     }
                 } else {
-                    Button("Edit") {
-                        startEditing()
+                    Menu {
+                        Button { startEditing() } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                        Button(role: .destructive) {
+                            showingDeleteConfirmation = true
+                        } label: {
+                            Label("Delete Template", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 18))
+                            .foregroundColor(Color.textSecondary)
                     }
                 }
             }
+        }
+        .confirmationDialog("Delete this template?", isPresented: $showingDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                HapticManager.destructiveAction()
+                deleteTemplate()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This template will be permanently removed.")
         }
         .onChange(of: syncState) { oldState, newState in
             if oldState != nil && newState == nil {
@@ -1260,6 +1285,19 @@ struct TemplateDetailView: View {
         }
     }
 
+    private func deleteTemplate() {
+        isDeleting = true
+        Task {
+            do {
+                try await FocusModeWorkoutService.shared.deleteTemplate(templateId: templateId)
+                await MainActor.run { dismiss() }
+            } catch {
+                print("[TemplateDetailView] Failed to delete template: \(error)")
+                isDeleting = false
+            }
+        }
+    }
+
     private func startEditing() {
         originalPlanExercises = planExercises
         editingName = template?.name ?? templateName
@@ -1428,6 +1466,11 @@ struct RoutineDetailView: View {
     @State private var editingFrequency: Int = 3
     @State private var showTemplatePicker = false
 
+    // Delete state
+    @State private var showingDeleteConfirmation = false
+    @State private var isDeleting = false
+    @Environment(\.dismiss) private var dismiss
+
     private var syncState: FocusModeSyncState? {
         saveService.state(for: routineId)
     }
@@ -1470,11 +1513,31 @@ struct RoutineDetailView: View {
                         .foregroundColor(.warning)
                     }
                 } else if !isLoading {
-                    Button("Edit") {
-                        startEditing()
+                    Menu {
+                        Button { startEditing() } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                        Button(role: .destructive) {
+                            showingDeleteConfirmation = true
+                        } label: {
+                            Label("Delete Routine", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 18))
+                            .foregroundColor(Color.textSecondary)
                     }
                 }
             }
+        }
+        .confirmationDialog("Delete this routine?", isPresented: $showingDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                HapticManager.destructiveAction()
+                deleteRoutine()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This routine and its schedule will be permanently removed.")
         }
         .task {
             await loadRoutineTemplates()
@@ -1676,6 +1739,21 @@ struct RoutineDetailView: View {
             Text(label)
                 .textStyle(.caption)
                 .foregroundColor(Color.textSecondary)
+        }
+    }
+
+    // MARK: - Delete
+
+    private func deleteRoutine() {
+        isDeleting = true
+        Task {
+            do {
+                try await FocusModeWorkoutService.shared.deleteRoutine(routineId: routineId)
+                await MainActor.run { dismiss() }
+            } catch {
+                print("[RoutineDetailView] Failed to delete routine: \(error)")
+                isDeleting = false
+            }
         }
     }
 
