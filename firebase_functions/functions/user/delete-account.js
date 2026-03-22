@@ -132,6 +132,22 @@ async function deleteAccountHandler(req, res) {
       totalDeleted += 1;
     }
 
+    // Clean up MCP OAuth tokens and codes (root collections, keyed by user_id)
+    for (const collection of ['mcp_tokens', 'mcp_oauth_codes']) {
+      let hasMore = true;
+      while (hasMore) {
+        const snap = await db.collection(collection)
+          .where('user_id', '==', userId)
+          .limit(500)
+          .get();
+        if (snap.empty) { hasMore = false; break; }
+        const batch = db.batch();
+        snap.docs.forEach((doc) => batch.delete(doc.ref));
+        await batch.commit();
+        if (snap.docs.length < 500) hasMore = false;
+      }
+    }
+
     // Delete the user document itself
     await userRef.delete();
     totalDeleted += 1;
