@@ -155,7 +155,7 @@ struct FocusModeSetGrid: View {
                         let reps = set.displayReps ?? ghost?.reps ?? 10
                         let rir = set.displayRir ?? ghost?.rir
                         onLogSet(exercise.instanceId, set.id, weight, reps, rir)
-                        selectedCell = nil
+                        // Auto-advance in logSet handles screenMode transition
                     },
                     onDismiss: {
                         withAnimation(.easeOut(duration: 0.15)) {

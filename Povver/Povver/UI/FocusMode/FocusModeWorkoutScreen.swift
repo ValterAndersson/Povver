@@ -13,6 +13,46 @@
 
 import SwiftUI
 
+// MARK: - Auto-Advance Logic
+
+/// Pure logic for auto-advance after set completion.
+/// Extracted at file scope for testability — no SwiftUI dependencies.
+enum AutoAdvance {
+    struct Target {
+        let exerciseIndex: Int
+        let exerciseId: String
+        let setId: String
+    }
+
+    /// Find the next undone set after the given exercise/set.
+    /// Searches remaining sets in the same exercise first, then subsequent exercises.
+    static func findNextUndoneSet(
+        exercises: [FocusModeExercise],
+        afterExercise exerciseId: String,
+        afterSet setId: String
+    ) -> Target? {
+        guard let currentExerciseIndex = exercises.firstIndex(where: { $0.id == exerciseId }) else { return nil }
+        let currentExercise = exercises[currentExerciseIndex]
+
+        // Same exercise: next undone set after current
+        if let currentSetIndex = currentExercise.sets.firstIndex(where: { $0.id == setId }) {
+            let remaining = currentExercise.sets[(currentSetIndex + 1)...]
+            if let next = remaining.first(where: { !$0.isDone }) {
+                return Target(exerciseIndex: currentExerciseIndex, exerciseId: exerciseId, setId: next.id)
+            }
+        }
+
+        // Next exercises
+        for i in (currentExerciseIndex + 1)..<exercises.count {
+            let ex = exercises[i]
+            if let first = ex.sets.first(where: { !$0.isDone }) {
+                return Target(exerciseIndex: i, exerciseId: ex.id, setId: first.id)
+            }
+        }
+        return nil
+    }
+}
+
 struct FocusModeWorkoutScreen: View {
     @StateObject private var service = FocusModeWorkoutService.shared
     // Initialized with empty ID because the workout doesn't exist yet at view init time.
@@ -76,6 +116,9 @@ struct FocusModeWorkoutScreen: View {
 
     // Ghost values: last-session data fetched once per workout start
     @State private var hasFetchedLastSession = false
+
+    // ScrollViewReader proxy — stored so logSet can trigger cross-exercise scroll
+    @State private var scrollProxy: ScrollViewProxy? = nil
     
     // Template and routine data for start view
     @State private var templates: [FocusModeWorkoutService.TemplateInfo] = []
@@ -799,6 +842,7 @@ struct FocusModeWorkoutScreen: View {
                     }
                 }
                 .padding(.horizontal, Space.md)
+                .onAppear { self.scrollProxy = scrollProxy }
                 .onChange(of: screenMode) { _, newMode in
                     // Scroll to editing dock when editing starts
                     if case .editingSet(let exerciseId, let setId, let cellType) = newMode {
@@ -1266,6 +1310,41 @@ struct FocusModeWorkoutScreen: View {
     }
     
     private func logSet(exerciseId: String, setId: String, weight: Double?, reps: Int, rir: Int?) {
+        // Auto-advance: find next undone set immediately (before async call mutates state)
+        let exercises = service.workout?.exercises ?? []
+        let nextTarget = AutoAdvance.findNextUndoneSet(
+            exercises: exercises,
+            afterExercise: exerciseId,
+            afterSet: setId
+        )
+
+        // Apply auto-advance focus synchronously for responsive feel
+        if let next = nextTarget {
+            let hasGhosts = ghostValues(for: exercises[next.exerciseIndex])[next.setId]?.hasValues ?? false
+
+            withAnimation(MotionToken.snappy) {
+                if hasGhosts {
+                    // Ghost values present — highlight done button (user can tap to confirm)
+                    screenMode = .normal
+                } else {
+                    // No ghosts — enter weight editing so user can type immediately
+                    screenMode = .editingSet(exerciseId: next.exerciseId, setId: next.setId, cellType: .weight)
+                }
+            }
+
+            // Cross-exercise scroll
+            if next.exerciseId != exerciseId {
+                withAnimation(.easeInOut(duration: MotionToken.medium)) {
+                    scrollProxy?.scrollTo(next.exerciseId, anchor: .center)
+                }
+            }
+        } else {
+            // All sets done — return to normal mode
+            withAnimation(MotionToken.snappy) {
+                screenMode = .normal
+            }
+        }
+
         Task {
             do {
                 _ = try await service.logSet(
