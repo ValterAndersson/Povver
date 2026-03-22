@@ -17,9 +17,15 @@ struct ConnectedAppsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.lg) {
+                ClaudeConnectionSection()
+
                 if !subscriptionService.isPremium {
                     premiumGate
                 } else {
+                    Divider()
+                        .background(Color.textTertiary.opacity(0.3))
+                        .padding(.vertical, Space.sm)
+
                     instructionsSection
                     keysSection
                 }
