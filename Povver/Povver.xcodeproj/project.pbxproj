@@ -43,7 +43,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		0A64B80C2F40BEBB00A1F819 /* Exceptions for "Povver" folder in "Povver" target */ = {
+		0A64B80C2F40BEBB00A1F819 = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -53,24 +53,9 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		0AF8B48D2DF6E7000037B0F1 /* Povver */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				0A64B80C2F40BEBB00A1F819 /* Exceptions for "Povver" folder in "Povver" target */,
-			);
-			path = Povver;
-			sourceTree = "<group>";
-		};
-		0AF8B49B2DF6E7020037B0F1 /* PovverTests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = PovverTests;
-			sourceTree = "<group>";
-		};
-		0AF8B4A52DF6E7020037B0F1 /* PovverUITests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = PovverUITests;
-			sourceTree = "<group>";
-		};
+		0AF8B48D2DF6E7000037B0F1 /* Povver */ = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (0A64B80C2F40BEBB00A1F819, ); path = Povver; sourceTree = "<group>"; };
+		0AF8B49B2DF6E7020037B0F1 /* PovverTests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = PovverTests; sourceTree = "<group>"; };
+		0AF8B4A52DF6E7020037B0F1 /* PovverUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = PovverUITests; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */

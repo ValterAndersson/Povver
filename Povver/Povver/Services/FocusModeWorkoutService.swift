@@ -1964,7 +1964,7 @@ class FocusModeWorkoutService: ObservableObject {
 
     // MARK: - Last Session Data (Ghost Values)
 
-    private static let ghostLogger = Logger(subsystem: "com.povver.app", category: "GhostValues")
+    private nonisolated static let ghostLogger = Logger(subsystem: "com.povver.app", category: "GhostValues")
 
     /// Fetch last session data for all exercises in the current workout.
     /// Queries the set_facts Firestore subcollection grouped by exercise.
