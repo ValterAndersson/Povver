@@ -35,7 +35,7 @@ deploy: build
 		--platform managed \
 		--allow-unauthenticated \
 		--service-account ai-agents@$(PROJECT_ID).iam.gserviceaccount.com \
-		--set-env-vars "GOOGLE_CLOUD_PROJECT=$(PROJECT_ID)" \
+		--set-env-vars "GOOGLE_CLOUD_PROJECT=$(PROJECT_ID),MCP_ISSUER_URL=https://mcp.povver.ai" \
 		--memory 256Mi \
 		--cpu 1 \
 		--min-instances 0 \
