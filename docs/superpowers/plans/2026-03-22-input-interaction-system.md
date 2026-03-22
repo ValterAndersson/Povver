@@ -30,6 +30,13 @@
 | `UI/Components/Feedback/InlineError.swift` | Reusable inline error with progressive copy and coach escalation |
 | `UI/Components/Feedback/DataLoadingErrorView.swift` | Content-area error state with retry button and coach escalation |
 
+### Test Files
+
+| File | Responsibility |
+|------|----------------|
+| `PovverTests/GhostValueResolverTests.swift` | Unit tests for ghost value resolution priority (last session > template > blank) |
+| `PovverTests/AutoAdvanceTests.swift` | Unit tests for auto-advance set/exercise ordering logic |
+
 ### Modified Files
 
 | File | Changes |
@@ -275,7 +282,8 @@ Add to `HapticManager`:
 
 /// Tracks last fire time per category to suppress rapid identical haptics.
 /// Spec: "fire haptic on first event only within rapid succession window"
-private static var lastFireTime: [String: Date] = [:]
+/// @MainActor ensures thread safety — all haptic calls originate from main thread.
+@MainActor private static var lastFireTime: [String: Date] = [:]
 private static let suppressionWindow: TimeInterval = 0.2 // 200ms
 
 /// Fire a haptic only if the same category hasn't fired within the suppression window.
@@ -298,7 +306,7 @@ static func resetSuppression() {
 /// Set to true while user is actively scrolling at high velocity.
 /// Components check this before firing haptics.
 /// Set by scroll views via .onScrollPhaseChange or gesture velocity tracking.
-static var isScrollingSuppressed = false
+@MainActor static var isScrollingSuppressed = false
 
 /// Check if haptics should be suppressed due to active scrolling.
 /// Components call this before firing haptics inside scroll views.
@@ -1027,11 +1035,117 @@ enum GhostValueResolver {
 
 **Note:** Exact field names (`prescribedWeight`, `isDone`, etc.) must match the actual `FocusModeSet` model. Read models first and adjust.
 
-- [ ] **Step 3: Read FocusModeWorkoutService.swift and WorkoutRepository.swift**
+- [ ] **Step 3: Create GhostValueResolver unit tests**
+
+Create `Povver/PovverTests/GhostValueResolverTests.swift`:
+
+```swift
+import XCTest
+@testable import Povver
+
+final class GhostValueResolverTests: XCTestCase {
+
+    // MARK: - Helpers
+
+    private func makeExercise(sets: [FocusModeSet], exerciseId: String = "ex1") -> FocusModeExercise {
+        // Construct a FocusModeExercise with the given sets.
+        // Adjust initializer to match actual model.
+        FocusModeExercise(id: "section1", exerciseId: exerciseId, name: "Bench Press", sets: sets)
+    }
+
+    private func makeUndoneSet(id: String, weight: Double? = nil, reps: Int = 0, prescribedWeight: Double? = nil, prescribedReps: Int? = nil, prescribedRir: Int? = nil) -> FocusModeSet {
+        // Adjust fields to match actual FocusModeSet model
+        FocusModeSet(id: id, isDone: false, weight: weight, reps: reps, prescribedWeight: prescribedWeight, prescribedReps: prescribedReps, prescribedRir: prescribedRir)
+    }
+
+    private func makeDoneSet(id: String) -> FocusModeSet {
+        FocusModeSet(id: id, isDone: true, weight: 80, reps: 8)
+    }
+
+    // MARK: - Tests
+
+    func testLastSessionTakesPriority() {
+        let exercise = makeExercise(sets: [makeUndoneSet(id: "s1"), makeUndoneSet(id: "s2")])
+        let lastSession = LastSessionExerciseData(sets: [
+            LastSessionSetData(weight: 80, reps: 8, rir: 2),
+            LastSessionSetData(weight: 82.5, reps: 7, rir: 1),
+        ])
+        let result = GhostValueResolver.resolve(exercise: exercise, lastSession: lastSession)
+        XCTAssertEqual(result["s1"]?.weight, 80)
+        XCTAssertEqual(result["s1"]?.reps, 8)
+        XCTAssertEqual(result["s2"]?.weight, 82.5)
+    }
+
+    func testTemplatePrescriptionFallback() {
+        let exercise = makeExercise(sets: [
+            makeUndoneSet(id: "s1", prescribedWeight: 60, prescribedReps: 10, prescribedRir: 3)
+        ])
+        let result = GhostValueResolver.resolve(exercise: exercise, lastSession: nil)
+        XCTAssertEqual(result["s1"]?.weight, 60)
+        XCTAssertEqual(result["s1"]?.reps, 10)
+        XCTAssertEqual(result["s1"]?.rir, 3)
+    }
+
+    func testBlankFallbackWhenNoPrescription() {
+        let exercise = makeExercise(sets: [makeUndoneSet(id: "s1")])
+        let result = GhostValueResolver.resolve(exercise: exercise, lastSession: nil)
+        XCTAssertEqual(result["s1"], .empty)
+    }
+
+    func testSetsWithUserValuesAreSkipped() {
+        let exercise = makeExercise(sets: [makeUndoneSet(id: "s1", weight: 70, reps: 5)])
+        let lastSession = LastSessionExerciseData(sets: [
+            LastSessionSetData(weight: 80, reps: 8, rir: 2),
+        ])
+        let result = GhostValueResolver.resolve(exercise: exercise, lastSession: lastSession)
+        XCTAssertEqual(result["s1"], .empty)
+    }
+
+    func testIndexMismatchFallsToTemplate() {
+        // 3 sets in current workout but only 2 in last session
+        let exercise = makeExercise(sets: [
+            makeUndoneSet(id: "s1"),
+            makeUndoneSet(id: "s2"),
+            makeUndoneSet(id: "s3", prescribedWeight: 65, prescribedReps: 12),
+        ])
+        let lastSession = LastSessionExerciseData(sets: [
+            LastSessionSetData(weight: 80, reps: 8, rir: 2),
+            LastSessionSetData(weight: 82.5, reps: 7, rir: 1),
+        ])
+        let result = GhostValueResolver.resolve(exercise: exercise, lastSession: lastSession)
+        // First two use last session
+        XCTAssertEqual(result["s1"]?.weight, 80)
+        XCTAssertEqual(result["s2"]?.weight, 82.5)
+        // Third falls to template prescription
+        XCTAssertEqual(result["s3"]?.weight, 65)
+        XCTAssertEqual(result["s3"]?.reps, 12)
+    }
+
+    func testDoneSetsAreIgnored() {
+        let exercise = makeExercise(sets: [makeDoneSet(id: "s1"), makeUndoneSet(id: "s2")])
+        let lastSession = LastSessionExerciseData(sets: [
+            LastSessionSetData(weight: 80, reps: 8, rir: 2),
+            LastSessionSetData(weight: 82.5, reps: 7, rir: 1),
+        ])
+        let result = GhostValueResolver.resolve(exercise: exercise, lastSession: lastSession)
+        XCTAssertNil(result["s1"]) // Done set not in results
+        XCTAssertEqual(result["s2"]?.weight, 82.5) // Index 1 from last session
+    }
+}
+```
+
+**Note:** Adjust `FocusModeExercise` and `FocusModeSet` constructors to match actual model initializers. The test structure is correct — the field names may need adaptation.
+
+- [ ] **Step 4: Run tests to verify they fail (TDD red phase)**
+
+Run: `cd /Users/valterandersson/Documents/Povver/Povver && xcodebuild test -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' -only-testing:PovverTests/GhostValueResolverTests 2>&1 | tail -10`
+Expected: FAIL (GhostValueResolver not yet importable or tests fail against stub)
+
+- [ ] **Step 5: Read FocusModeWorkoutService.swift and WorkoutRepository.swift**
 
 Read `Povver/Povver/Services/FocusModeWorkoutService.swift` (focus on `startWorkout`, `logSet`) and `Povver/Povver/Repositories/WorkoutRepository.swift` to understand workout data flow and available query methods.
 
-- [ ] **Step 4: Add last session fetch to FocusModeWorkoutService**
+- [ ] **Step 6: Add last session fetch to FocusModeWorkoutService**
 
 Add a `@Published` property and fetch method. If `WorkoutRepository` doesn't have `getLastWorkoutWithExercise`, add it:
 
@@ -1066,20 +1180,26 @@ func fetchLastSessionData() async {
 }
 ```
 
-- [ ] **Step 5: Build and verify**
+- [ ] **Step 7: Build and verify**
 
 Run: `cd /Users/valterandersson/Documents/Povver/Povver && xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Run GhostValueResolver tests (TDD green phase)**
+
+Run: `cd /Users/valterandersson/Documents/Povver/Povver && xcodebuild test -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' -only-testing:PovverTests/GhostValueResolverTests 2>&1 | tail -10`
+Expected: All 6 tests PASS
+
+- [ ] **Step 9: Commit**
 
 ```bash
-git add Povver/Povver/UI/FocusMode/GhostValueResolver.swift Povver/Povver/Services/FocusModeWorkoutService.swift Povver/Povver/Repositories/WorkoutRepository.swift
+git add Povver/Povver/UI/FocusMode/GhostValueResolver.swift Povver/Povver/Services/FocusModeWorkoutService.swift Povver/Povver/Repositories/WorkoutRepository.swift Povver/PovverTests/GhostValueResolverTests.swift
 git commit -m "feat(workout): add ghost value resolver and last session fetch
 
 GhostValueResolver resolves undone set values from last session >
 template prescription > blank. FocusModeWorkoutService fetches last
-session data for all exercises on workout start."
+session data for all exercises on workout start.
+Includes unit tests for all resolution paths."
 ```
 
 ---
@@ -1395,46 +1515,137 @@ After set completion, automatically move focus to the next undone set. If next s
 
 Read `FocusModeWorkoutScreen.swift` focusing on `selectedCell`, `ScrollViewReader`, editing dock presentation.
 
-- [ ] **Step 2: Add auto-advance logic after set completion**
+- [ ] **Step 2: Create testable AutoAdvance helper**
 
-After `service.logSet(...)` completes:
+Extract `findNextUndoneSet` as a static function on a new enum so it can be unit tested. Place it in `Povver/Povver/UI/FocusMode/FocusModeWorkoutScreen.swift` (at file scope or as a nested enum):
 
 ```swift
-private func findNextUndoneSet(afterExercise exerciseId: String, afterSet setId: String) -> (exerciseIndex: Int, exerciseId: String, setId: String)? {
-    guard let workout = service.workout else { return nil }
-    guard let currentExerciseIndex = workout.exercises.firstIndex(where: { $0.id == exerciseId }) else { return nil }
-
-    let currentExercise = workout.exercises[currentExerciseIndex]
-
-    // Same exercise: next undone set
-    if let currentSetIndex = currentExercise.sets.firstIndex(where: { $0.id == setId }) {
-        let remaining = currentExercise.sets[(currentSetIndex + 1)...]
-        if let next = remaining.first(where: { !$0.isDone }) {
-            return (currentExerciseIndex, exerciseId, next.id)
-        }
+/// Pure logic for auto-advance — extracted for testability.
+enum AutoAdvance {
+    struct Target {
+        let exerciseIndex: Int
+        let exerciseId: String
+        let setId: String
     }
 
-    // Next exercises
-    for i in (currentExerciseIndex + 1)..<workout.exercises.count {
-        let ex = workout.exercises[i]
-        if let first = ex.sets.first(where: { !$0.isDone }) {
-            return (i, ex.id, first.id)
+    static func findNextUndoneSet(
+        exercises: [FocusModeExercise],
+        afterExercise exerciseId: String,
+        afterSet setId: String
+    ) -> Target? {
+        guard let currentExerciseIndex = exercises.firstIndex(where: { $0.id == exerciseId }) else { return nil }
+
+        let currentExercise = exercises[currentExerciseIndex]
+
+        // Same exercise: next undone set
+        if let currentSetIndex = currentExercise.sets.firstIndex(where: { $0.id == setId }) {
+            let remaining = currentExercise.sets[(currentSetIndex + 1)...]
+            if let next = remaining.first(where: { !$0.isDone }) {
+                return Target(exerciseIndex: currentExerciseIndex, exerciseId: exerciseId, setId: next.id)
+            }
         }
+
+        // Next exercises
+        for i in (currentExerciseIndex + 1)..<exercises.count {
+            let ex = exercises[i]
+            if let first = ex.sets.first(where: { !$0.isDone }) {
+                return Target(exerciseIndex: i, exerciseId: ex.id, setId: first.id)
+            }
+        }
+        return nil
     }
-    return nil
 }
 ```
 
-- [ ] **Step 3: Wire auto-advance into logSet completion**
+- [ ] **Step 3: Create AutoAdvance unit tests**
 
-After `logSet` succeeds, call `findNextUndoneSet` and:
+Create `Povver/PovverTests/AutoAdvanceTests.swift`:
+
+```swift
+import XCTest
+@testable import Povver
+
+final class AutoAdvanceTests: XCTestCase {
+
+    // MARK: - Helpers (adjust constructors to match actual models)
+
+    private func makeExercise(id: String, sets: [FocusModeSet]) -> FocusModeExercise {
+        FocusModeExercise(id: id, exerciseId: "eid-\(id)", name: "Ex \(id)", sets: sets)
+    }
+
+    private func undoneSet(_ id: String) -> FocusModeSet {
+        FocusModeSet(id: id, isDone: false)
+    }
+
+    private func doneSet(_ id: String) -> FocusModeSet {
+        FocusModeSet(id: id, isDone: true, weight: 80, reps: 8)
+    }
+
+    // MARK: - Tests
+
+    func testAdvancesToNextSetInSameExercise() {
+        let exercises = [makeExercise(id: "e1", sets: [doneSet("s1"), undoneSet("s2"), undoneSet("s3")])]
+        let target = AutoAdvance.findNextUndoneSet(exercises: exercises, afterExercise: "e1", afterSet: "s1")
+        XCTAssertEqual(target?.setId, "s2")
+        XCTAssertEqual(target?.exerciseId, "e1")
+    }
+
+    func testAdvancesToNextExercise() {
+        let exercises = [
+            makeExercise(id: "e1", sets: [doneSet("s1"), doneSet("s2")]),
+            makeExercise(id: "e2", sets: [undoneSet("s3"), undoneSet("s4")]),
+        ]
+        let target = AutoAdvance.findNextUndoneSet(exercises: exercises, afterExercise: "e1", afterSet: "s2")
+        XCTAssertEqual(target?.exerciseId, "e2")
+        XCTAssertEqual(target?.setId, "s3")
+    }
+
+    func testReturnsNilWhenAllDone() {
+        let exercises = [makeExercise(id: "e1", sets: [doneSet("s1"), doneSet("s2")])]
+        let target = AutoAdvance.findNextUndoneSet(exercises: exercises, afterExercise: "e1", afterSet: "s2")
+        XCTAssertNil(target)
+    }
+
+    func testSkipsDoneSetsBetweenUndone() {
+        let exercises = [makeExercise(id: "e1", sets: [doneSet("s1"), doneSet("s2"), undoneSet("s3")])]
+        let target = AutoAdvance.findNextUndoneSet(exercises: exercises, afterExercise: "e1", afterSet: "s1")
+        XCTAssertEqual(target?.setId, "s3")
+    }
+
+    func testSkipsFullyDoneExercises() {
+        let exercises = [
+            makeExercise(id: "e1", sets: [doneSet("s1")]),
+            makeExercise(id: "e2", sets: [doneSet("s2")]),
+            makeExercise(id: "e3", sets: [undoneSet("s3")]),
+        ]
+        let target = AutoAdvance.findNextUndoneSet(exercises: exercises, afterExercise: "e1", afterSet: "s1")
+        XCTAssertEqual(target?.exerciseId, "e3")
+        XCTAssertEqual(target?.setId, "s3")
+    }
+}
+```
+
+**Note:** Adjust model constructors to match actual initializers.
+
+- [ ] **Step 4: Run tests (red phase)**
+
+Run: `cd /Users/valterandersson/Documents/Povver/Povver && xcodebuild test -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' -only-testing:PovverTests/AutoAdvanceTests 2>&1 | tail -10`
+Expected: FAIL (AutoAdvance not yet defined)
+
+- [ ] **Step 5: Wire auto-advance into logSet completion**
+
+After `logSet` succeeds, call `AutoAdvance.findNextUndoneSet` and:
 
 1. If next set has ghost values → set `selectedCell` to the done cell (highlight done as primary target)
 2. If next set has no ghost values → set `selectedCell` to the weight cell (enter editing)
 3. If cross-exercise → scroll to next exercise with Reflow animation
 
 ```swift
-if let next = findNextUndoneSet(afterExercise: exerciseId, afterSet: setId) {
+if let next = AutoAdvance.findNextUndoneSet(
+    exercises: service.workout?.exercises ?? [],
+    afterExercise: exerciseId,
+    afterSet: setId
+) {
     let ghostValues = GhostValueResolver.resolve(
         exercise: service.workout!.exercises[next.exerciseIndex],
         lastSession: service.lastSessionData[service.workout!.exercises[next.exerciseIndex].exerciseId]
@@ -1458,19 +1669,22 @@ if let next = findNextUndoneSet(afterExercise: exerciseId, afterSet: setId) {
 }
 ```
 
-- [ ] **Step 4: Build and verify**
+- [ ] **Step 6: Build and run tests (green phase)**
 
-Run: `cd /Users/valterandersson/Documents/Povver/Povver && xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build 2>&1 | tail -5`
+Run build: `cd /Users/valterandersson/Documents/Povver/Povver && xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
-- [ ] **Step 5: Manual test**
+Run tests: `cd /Users/valterandersson/Documents/Povver/Povver && xcodebuild test -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' -only-testing:PovverTests/AutoAdvanceTests 2>&1 | tail -10`
+Expected: All 5 tests PASS
+
+- [ ] **Step 7: Manual test**
 
 In simulator: start workout, complete sets. Verify auto-advance and cross-exercise scrolling.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add Povver/Povver/UI/FocusMode/FocusModeWorkoutScreen.swift Povver/Povver/UI/FocusMode/FocusModeSetGrid.swift
+git add Povver/Povver/UI/FocusMode/FocusModeWorkoutScreen.swift Povver/Povver/UI/FocusMode/FocusModeSetGrid.swift Povver/PovverTests/AutoAdvanceTests.swift
 git commit -m "feat(workout): auto-advance focus after set completion
 
 Ghost values present: done button highlighted as primary target.
