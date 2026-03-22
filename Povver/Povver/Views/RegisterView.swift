@@ -7,7 +7,6 @@ struct RegisterView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var errorMessage: String?
-    @State private var isLoading = false
     @State private var registerFailureCount = 0
     @State private var showingNewAccountConfirmation = false
     @State private var pendingSSOResult: AuthService.SSOSignInResult?
@@ -183,7 +182,6 @@ struct RegisterView: View {
 
     private func confirmSSOAccount() {
         guard case .newUser(let userId, let email, let name) = pendingSSOResult else { return }
-        isLoading = true
         Task {
             do {
                 try await authService.confirmSSOAccountCreation(
@@ -196,8 +194,8 @@ struct RegisterView: View {
                 onRegister?(userId)
             } catch {
                 errorMessage = AuthService.friendlyAuthError(error)
+                registerFailureCount += 1
             }
-            isLoading = false
         }
     }
 }
