@@ -194,6 +194,7 @@ private struct SetCompletionPressStyle: ButtonStyle {
 struct SetCompletionRowFlash: ViewModifier {
     let trigger: Bool
     @State private var flash = false
+    @State private var flashTask: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
@@ -201,9 +202,15 @@ struct SetCompletionRowFlash: ViewModifier {
             .background(Color.accent.opacity(flash ? 0.08 : 0).animation(.easeOut(duration: 0.3), value: flash))
             .onChange(of: trigger) { _, newValue in
                 guard newValue, !reduceMotion else { return }
+                flashTask?.cancel()
                 flash = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { flash = false }
+                flashTask = Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(300))
+                    guard !Task.isCancelled else { return }
+                    flash = false
+                }
             }
+            .onDisappear { flashTask?.cancel() }
     }
 }
 

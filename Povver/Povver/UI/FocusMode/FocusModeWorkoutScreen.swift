@@ -257,6 +257,7 @@ struct FocusModeWorkoutScreen: View {
                 stopTimer()
                 errorDismissTask?.cancel()
                 finishTask?.cancel()
+                pendingSheetTask?.cancel()
             }
             .task {
                 await startWorkoutIfNeeded()
@@ -455,23 +456,16 @@ struct FocusModeWorkoutScreen: View {
         // Cancel any pending presentation
         pendingSheetTask?.cancel()
 
-        if screenMode.isReordering {
-            // Exit reorder mode first, then present on next run loop
+        if screenMode.isReordering || screenMode.isEditing {
+            // Exit current mode first, then present after animation
             withAnimation(.easeOut(duration: MotionToken.fast)) {
                 screenMode = .normal
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + MotionToken.fast) {
-                guard self.screenMode == .normal, self.activeSheet == nil else { return }
-                self.activeSheet = sheet
-            }
-        } else if screenMode.isEditing {
-            // Close editor first, then present
-            withAnimation(.easeOut(duration: MotionToken.fast)) {
-                screenMode = .normal
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + MotionToken.fast) {
-                guard self.screenMode == .normal, self.activeSheet == nil else { return }
-                self.activeSheet = sheet
+            pendingSheetTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(MotionToken.fast))
+                guard !Task.isCancelled else { return }
+                guard screenMode == .normal, activeSheet == nil else { return }
+                activeSheet = sheet
             }
         } else {
             activeSheet = sheet
@@ -499,7 +493,9 @@ struct FocusModeWorkoutScreen: View {
         HapticManager.modeToggle()
 
         // Re-enable after transition
-        DispatchQueue.main.asyncAfter(deadline: .now() + MotionToken.fast) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(MotionToken.fast))
+            guard !Task.isCancelled else { return }
             isReorderTransitioning = false
         }
     }

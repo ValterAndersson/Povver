@@ -161,6 +161,13 @@ class FocusModeWorkoutService: ObservableObject {
     /// Deferred backend operation — executed when undo window expires without user tapping undo.
     private var deferredSync: (() async throws -> Void)?
 
+    /// Execute and clear any pending deferred sync (used before overwriting with a new one).
+    private func flushDeferredSync() async {
+        guard let sync = deferredSync else { return }
+        deferredSync = nil
+        try? await sync()
+    }
+
     /// Clear the pending undo without restoring (used by auto-dismiss timer).
     func clearUndo() {
         let sync = deferredSync
@@ -906,6 +913,9 @@ class FocusModeWorkoutService: ObservableObject {
             aiScope: nil
         )
         
+        // Execute any pending deferred sync before overwriting
+        await flushDeferredSync()
+
         // Defer backend sync until undo window expires
         deferredSync = { [weak self] in
             let _ = try await self?.syncPatch(request)
@@ -975,6 +985,9 @@ class FocusModeWorkoutService: ObservableObject {
             aiScope: nil
         )
 
+        // Execute any pending deferred sync before overwriting
+        await flushDeferredSync()
+
         // Defer backend sync until undo window expires
         deferredSync = { [weak self] in
             do {
@@ -982,8 +995,6 @@ class FocusModeWorkoutService: ObservableObject {
                 print("[removeExercise] Synced to backend")
             } catch {
                 print("[removeExercise] Deferred sync failed: \(error)")
-                // At this point undo window has passed, so we can't rollback.
-                // The local state is already committed. Error will be caught by next full sync.
             }
         }
     }
