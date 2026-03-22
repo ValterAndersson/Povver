@@ -44,10 +44,14 @@ struct SetTable: View {
     
     private var showDoneColumn: Bool {
         switch mode {
-        case .readOnly: return true  // Show completion status
+        case .readOnly: return false  // Replaced by e1RM column
         case .planning: return false
         case .execution: return true
         }
+    }
+
+    private var showE1RMColumn: Bool {
+        mode == .readOnly
     }
     
     private var showEditAffordance: Bool {
@@ -96,7 +100,12 @@ struct SetTable: View {
             
             Text("RIR")
                 .frame(width: 44, alignment: .center)
-            
+
+            if showE1RMColumn {
+                Text("e1RM")
+                    .frame(width: 52, alignment: .center)
+            }
+
             if showDoneColumn {
                 Image(systemName: "checkmark")
                     .frame(width: 36, alignment: .center)
@@ -142,6 +151,14 @@ struct SetTable: View {
             )
             .frame(width: 44)
             
+            // e1RM column (readOnly only)
+            if showE1RMColumn {
+                Text(set.e1rm ?? "—")
+                    .font(.system(size: 16, weight: .medium).monospacedDigit())
+                    .foregroundColor(set.e1rm != nil ? Color.textSecondary : Color.textTertiary)
+                    .frame(width: 52, alignment: .center)
+            }
+
             // DONE column
             if showDoneColumn {
                 doneCell(set)
