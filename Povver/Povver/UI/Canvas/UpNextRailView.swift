@@ -19,7 +19,7 @@ public struct UpNextRailView: View {
                         Button(action: { onTap(id) }) {
                             HStack(spacing: Space.xs) {
                                 StatusTag(card.type.rawValue, kind: .info)
-                                if let t = card.title { PovverText(t, style: .footnote, color: Color.textPrimary) }
+                                if let t = card.title { Text(t).textStyle(.caption) }
                             }
                             .padding(.vertical, Space.xs)
                             .padding(.horizontal, Space.sm)
@@ -32,7 +32,7 @@ public struct UpNextRailView: View {
                 if upNextIds.count > displayCap {
                     let overflow = upNextIds.count - displayCap
                     HStack(spacing: Space.xs) {
-                        PovverText("+\(overflow)", style: .footnote, color: Color.textSecondary)
+                        Text("+\(overflow)").textStyle(.caption).foregroundStyle(Color.textSecondary)
                     }
                     .padding(.vertical, Space.xs)
                     .padding(.horizontal, Space.sm)

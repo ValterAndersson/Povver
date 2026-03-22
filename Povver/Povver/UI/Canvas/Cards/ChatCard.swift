@@ -10,7 +10,8 @@ public struct ChatCard: View {
                 if case .chat(let lines) = model.data {
                     VStack(alignment: .leading, spacing: Space.xs) {
                         ForEach(Array(lines.enumerated()), id: \.offset) { item in
-                            PovverText(item.element, style: .body)
+                            Text(item.element)
+                                .textStyle(.body)
                         }
                     }
                 }

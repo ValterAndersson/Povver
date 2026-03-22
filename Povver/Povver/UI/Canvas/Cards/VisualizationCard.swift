@@ -39,15 +39,15 @@ public struct VisualizationCard: View {
         VStack(alignment: .leading, spacing: Space.xxs) {
             HStack {
                 Text(spec.title)
-                    .font(TypographyToken.headline)
+                    .font(TypographyToken.sectionHeader)
                     .foregroundStyle(Color.textPrimary)
-                
+
                 Spacer()
-                
+
                 // Chart type badge
                 chartTypeBadge
             }
-            
+
             if let subtitle = spec.subtitle {
                 Text(subtitle)
                     .font(TypographyToken.caption)
@@ -110,9 +110,9 @@ public struct VisualizationCard: View {
             Image(systemName: "chart.bar.xaxis")
                 .font(.system(size: 32))
                 .foregroundStyle(Color.textTertiary)
-            
+
             Text(spec.emptyState ?? "No data available")
-                .font(TypographyToken.callout)
+                .font(TypographyToken.secondary)
                 .foregroundStyle(Color.textSecondary)
                 .multilineTextAlignment(.center)
         }
@@ -126,9 +126,9 @@ public struct VisualizationCard: View {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 24))
                 .foregroundStyle(Color.warning)
-            
+
             Text("Charts require iOS 16+")
-                .font(TypographyToken.callout)
+                .font(TypographyToken.secondary)
                 .foregroundStyle(Color.textSecondary)
         }
         .frame(maxWidth: .infinity)

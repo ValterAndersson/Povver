@@ -15,7 +15,7 @@ public struct SuggestionCard: View {
                 CardHeader(title: model.title, subtitle: model.subtitle, lane: model.lane, status: model.status, timestamp: Date())
                 switch model.data {
                 case .suggestion(_, let rationale):
-                    if let rationale { PovverText(rationale, style: .subheadline, color: Color.textSecondary) }
+                    if let rationale { Text(rationale).textStyle(.secondary).foregroundStyle(Color.textSecondary) }
                 default: EmptyView()
                 }
                 HStack(spacing: Space.sm) {

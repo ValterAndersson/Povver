@@ -55,7 +55,7 @@ public struct AnalysisSummaryCard: View {
                     .foregroundStyle(Color.accent)
                 
                 Text("Progress Analysis")
-                    .font(TypographyToken.caption)
+                    .textStyle(.caption)
                     .foregroundStyle(Color.textSecondary)
                 
                 Spacer()
@@ -63,7 +63,7 @@ public struct AnalysisSummaryCard: View {
                 // Period badge
                 if let period = data.period {
                     Text("\(period.weeks) weeks")
-                        .font(TypographyToken.caption)
+                        .textStyle(.caption)
                         .padding(.horizontal, Space.xs)
                         .padding(.vertical, 2)
                         .background(Color.surfaceElevated)
@@ -73,7 +73,7 @@ public struct AnalysisSummaryCard: View {
             }
             
             Text(data.headline)
-                .font(TypographyToken.headline)
+                .font(TypographyToken.sectionHeader)
                 .foregroundStyle(Color.textPrimary)
         }
     }
@@ -84,7 +84,7 @@ public struct AnalysisSummaryCard: View {
     private var insightsSection: some View {
         VStack(alignment: .leading, spacing: Space.sm) {
             Text("Insights")
-                .font(TypographyToken.caption)
+                .textStyle(.caption)
                 .fontWeight(.semibold)
                 .foregroundStyle(Color.textSecondary)
             
@@ -103,11 +103,11 @@ public struct AnalysisSummaryCard: View {
             
             VStack(alignment: .leading, spacing: 2) {
                 Text(insight.signal)
-                    .font(TypographyToken.callout)
+                    .font(TypographyToken.secondary)
                     .foregroundStyle(Color.textPrimary)
-                
+
                 Text(insight.category.replacingOccurrences(of: "_", with: " ").capitalized)
-                    .font(TypographyToken.caption)
+                    .textStyle(.caption)
                     .foregroundStyle(Color.textTertiary)
             }
             
@@ -138,7 +138,7 @@ public struct AnalysisSummaryCard: View {
     private var recommendationsSection: some View {
         VStack(alignment: .leading, spacing: Space.sm) {
             Text("Recommendations")
-                .font(TypographyToken.caption)
+                .textStyle(.caption)
                 .fontWeight(.semibold)
                 .foregroundStyle(Color.textSecondary)
             
@@ -156,12 +156,12 @@ public struct AnalysisSummaryCard: View {
             
             VStack(alignment: .leading, spacing: 2) {
                 Text(rec.action)
-                    .font(TypographyToken.callout)
+                    .font(TypographyToken.secondary)
                     .fontWeight(.medium)
                     .foregroundStyle(Color.textPrimary)
-                
+
                 Text(rec.rationale)
-                    .font(TypographyToken.caption)
+                    .textStyle(.caption)
                     .foregroundStyle(Color.textSecondary)
             }
             
@@ -175,7 +175,7 @@ public struct AnalysisSummaryCard: View {
     @ViewBuilder
     private func priorityBadge(_ priority: Int) -> some View {
         Text("P\(priority)")
-            .font(TypographyToken.caption)
+            .textStyle(.caption)
             .fontWeight(.bold)
             .foregroundStyle(priority <= 2 ? Color.textInverse : Color.textSecondary)
             .frame(width: 24, height: 24)
@@ -201,10 +201,10 @@ public struct AnalysisSummaryCard: View {
                 .font(.system(size: 12))
             
             Text("\(dq.workoutsAnalyzed) workouts · \(dq.weeksWithData) weeks")
-                .font(TypographyToken.caption)
-            
+                .textStyle(.caption)
+
             Text(dq.confidence.capitalized)
-                .font(TypographyToken.caption)
+                .textStyle(.caption)
                 .fontWeight(.medium)
         }
         .foregroundStyle(confidenceColor(dq.confidence))
@@ -251,7 +251,7 @@ public struct AnalysisSummaryCard: View {
                         .font(.system(size: 12, weight: .medium))
                 }
                 Text(action.label)
-                    .font(TypographyToken.caption)
+                    .textStyle(.caption)
             }
             .padding(.horizontal, Space.sm)
             .padding(.vertical, Space.xs)

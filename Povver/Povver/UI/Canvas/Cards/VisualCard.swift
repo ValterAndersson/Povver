@@ -39,7 +39,7 @@ public struct VisualCard: View {
             .background(Color.surface)
             .frame(minHeight: 160)
             .overlay(
-                PovverText("No data yet", style: .callout, color: Color.textSecondary, align: .center)
+                Text("No data yet").textStyle(.secondary).foregroundStyle(Color.textSecondary).multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             )
     }
@@ -60,7 +60,7 @@ public struct VisualCard: View {
                 .padding(InsetsToken.all(Space.md))
             )
             .overlay(
-                PovverText("[Visualization]", style: .callout, color: Color.textSecondary, align: .center)
+                Text("[Visualization]").textStyle(.secondary).foregroundStyle(Color.textSecondary).multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             )
             .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous))

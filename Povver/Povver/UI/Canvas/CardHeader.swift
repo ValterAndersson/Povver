@@ -33,10 +33,10 @@ public struct CardHeader: View {
                 if !menuActions.isEmpty {
                     CardOverflowMenu(actions: menuActions, onAction: onAction)
                 }
-                if let ts = timestamp { PovverText(Self.format(ts), style: .footnote, color: Color.textSecondary) }
+                if let ts = timestamp { Text(Self.format(ts)).textStyle(.caption).foregroundStyle(Color.textSecondary) }
             }
-            if let title { PovverText(title, style: .headline).lineLimit(2) }
-            if let subtitle { PovverText(subtitle, style: .subheadline, color: Color.textSecondary).lineLimit(1) }
+            if let title { Text(title).textStyle(.sectionHeader).lineLimit(2) }
+            if let subtitle { Text(subtitle).textStyle(.secondary).foregroundStyle(Color.textSecondary).lineLimit(1) }
         }
     }
 

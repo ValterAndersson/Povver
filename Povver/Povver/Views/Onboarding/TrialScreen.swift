@@ -76,7 +76,7 @@ struct TrialScreen: View {
                                 .progressViewStyle(CircularProgressViewStyle(tint: .black))
                         } else {
                             Text("Start Free Trial")
-                                .font(TypographyToken.button)
+                                .font(TypographyToken.bodyStrong)
                                 .foregroundColor(.black)
                         }
                     }

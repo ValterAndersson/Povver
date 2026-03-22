@@ -92,7 +92,7 @@ public struct BarChartView: View {
             RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl, style: .continuous)
                 .stroke(Color.separatorLine, lineWidth: StrokeWidthToken.hairline)
             Text(spec.emptyState ?? "No data available")
-                .font(TypographyToken.callout)
+                .font(TypographyToken.secondary)
                 .foregroundStyle(Color.textSecondary)
                 .multilineTextAlignment(.center)
         }

@@ -15,7 +15,7 @@ public struct PinnedRailView: View {
                         Button(action: { onTap(card.id) }) {
                             HStack(spacing: Space.xs) {
                                 Icon("pin", size: .sm, color: Color.textSecondary)
-                                if let t = card.title { PovverText(t, style: .footnote, color: Color.textPrimary) }
+                                if let t = card.title { Text(t).textStyle(.caption) }
                             }
                             .padding(.vertical, Space.xs)
                             .padding(.horizontal, Space.sm)

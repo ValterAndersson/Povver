@@ -589,7 +589,7 @@ struct WorkspaceTimelineView: View {
             CardContainer(status: card.status) {
                 VStack(alignment: .leading, spacing: Space.xs) {
                     CardHeader(title: card.title ?? "Info", subtitle: card.subtitle, lane: card.lane, status: card.status, timestamp: card.publishedAt)
-                    PovverText(text, style: .body)
+                    Text(text).textStyle(.body)
                 }
             }
         default:
@@ -597,9 +597,9 @@ struct WorkspaceTimelineView: View {
                 VStack(alignment: .leading, spacing: Space.xs) {
                     CardHeader(title: card.title ?? "Update", subtitle: card.subtitle, lane: card.lane, status: card.status, timestamp: card.publishedAt)
                     if let detail = detailText(for: card) {
-                        PovverText(detail, style: .body, color: Color.textSecondary)
+                        Text(detail).textStyle(.body).foregroundStyle(Color.textSecondary)
                     } else {
-                        PovverText("New information available.", style: .body, color: Color.textSecondary)
+                        Text("New information available.").textStyle(.body).foregroundStyle(Color.textSecondary)
                     }
                 }
             }

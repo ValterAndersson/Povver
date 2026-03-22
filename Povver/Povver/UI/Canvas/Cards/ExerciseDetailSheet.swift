@@ -46,8 +46,9 @@ public struct ExerciseDetailSheet: View {
         VStack(spacing: Space.md) {
             ProgressView()
                 .progressViewStyle(.circular)
-            PovverText("Loading exercise details…", style: .body)
-                .foregroundColor(Color.textSecondary)
+            Text("Loading exercise details…")
+                .textStyle(.body)
+                .foregroundStyle(Color.textSecondary)
         }
         .frame(maxWidth: .infinity, minHeight: 300)
     }
@@ -57,9 +58,11 @@ public struct ExerciseDetailSheet: View {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 40))
                 .foregroundColor(Color.destructive)
-            PovverText("Failed to load exercise", style: .headline)
-            PovverText(message, style: .caption)
-                .foregroundColor(Color.textSecondary)
+            Text("Failed to load exercise")
+                .textStyle(.sectionHeader)
+            Text(message)
+                .textStyle(.caption)
+                .foregroundStyle(Color.textSecondary)
             Button("Retry") {
                 Task { await loadExercise() }
             }
@@ -73,9 +76,11 @@ public struct ExerciseDetailSheet: View {
             Image(systemName: "questionmark.circle")
                 .font(.system(size: 40))
                 .foregroundColor(Color.textSecondary)
-            PovverText("Exercise not found", style: .headline)
-            PovverText("This exercise may not be in the catalog yet.", style: .body)
-                .foregroundColor(Color.textSecondary)
+            Text("Exercise not found")
+                .textStyle(.sectionHeader)
+            Text("This exercise may not be in the catalog yet.")
+                .textStyle(.body)
+                .foregroundStyle(Color.textSecondary)
         }
         .frame(maxWidth: .infinity, minHeight: 300)
     }
@@ -168,8 +173,8 @@ public struct ExerciseDetailSheet: View {
 
     private func descriptionSection(_ ex: Exercise) -> some View {
         VStack(alignment: .leading, spacing: Space.sm) {
-            PovverText(ex.description, style: .body)
-                .foregroundColor(Color.textPrimary)
+            Text(ex.description)
+                .textStyle(.body)
         }
     }
 
@@ -194,11 +199,10 @@ public struct ExerciseDetailSheet: View {
         Group {
             if let attributed = try? AttributedString(markdown: string) {
                 Text(attributed)
-                    .font(TypographyToken.body)
-                    .foregroundColor(Color.textPrimary)
+                    .textStyle(.body)
             } else {
-                PovverText(string, style: .body)
-                    .foregroundColor(Color.textPrimary)
+                Text(string)
+                    .textStyle(.body)
             }
         }
     }
@@ -238,8 +242,9 @@ public struct ExerciseDetailSheet: View {
                     Image(systemName: "dumbbell")
                         .font(.system(size: 14))
                         .foregroundColor(Color.textSecondary)
-                    PovverText(ex.capitalizedEquipment, style: .body)
-                        .foregroundColor(Color.textSecondary)
+                    Text(ex.capitalizedEquipment)
+                        .textStyle(.body)
+                        .foregroundStyle(Color.textSecondary)
                 }
             }
 
@@ -248,11 +253,13 @@ public struct ExerciseDetailSheet: View {
                 Image(systemName: "arrow.left.and.right")
                     .font(.system(size: 14))
                     .foregroundColor(Color.textSecondary)
-                PovverText(ex.capitalizedMovementType, style: .body)
-                    .foregroundColor(Color.textSecondary)
+                Text(ex.capitalizedMovementType)
+                    .textStyle(.body)
+                    .foregroundStyle(Color.textSecondary)
                 if let plane = ex.metadata.planeOfMotion {
-                    PovverText("• \(plane.capitalized)", style: .body)
-                        .foregroundColor(Color.textSecondary)
+                    Text("• \(plane.capitalized)")
+                        .textStyle(.body)
+                        .foregroundStyle(Color.textSecondary)
                 }
             }
 
@@ -282,8 +289,9 @@ public struct ExerciseDetailSheet: View {
             VStack(alignment: .leading, spacing: Space.md) {
                 // Primary muscles
                 VStack(alignment: .leading, spacing: Space.xs) {
-                    PovverText("Primary", style: .caption)
-                        .foregroundColor(Color.textSecondary)
+                    Text("Primary")
+                        .textStyle(.caption)
+                        .foregroundStyle(Color.textSecondary)
                     FlowLayout(spacing: Space.xs) {
                         ForEach(ex.primaryMuscles, id: \.self) { muscle in
                             muscleBadge(muscle, isPrimary: true, contribution: ex.getContribution(for: muscle))
@@ -294,8 +302,9 @@ public struct ExerciseDetailSheet: View {
                 // Secondary muscles
                 if !ex.secondaryMuscles.isEmpty {
                     VStack(alignment: .leading, spacing: Space.xs) {
-                        PovverText("Secondary", style: .caption)
-                            .foregroundColor(Color.textSecondary)
+                        Text("Secondary")
+                            .textStyle(.caption)
+                            .foregroundStyle(Color.textSecondary)
                         FlowLayout(spacing: Space.xs) {
                             ForEach(ex.secondaryMuscles, id: \.self) { muscle in
                                 muscleBadge(muscle, isPrimary: false, contribution: ex.getContribution(for: muscle))
@@ -330,7 +339,8 @@ public struct ExerciseDetailSheet: View {
                 Image(systemName: icon)
                     .font(.system(size: 16, weight: .medium))
                     .foregroundColor(Color.accent)
-                PovverText(title, style: .headline)
+                Text(title)
+                    .textStyle(.sectionHeader)
             }
             content()
         }

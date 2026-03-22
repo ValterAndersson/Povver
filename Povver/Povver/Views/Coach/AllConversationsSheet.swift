@@ -77,16 +77,12 @@ struct AllConversationsSheet: View {
                                 SurfaceCard(padding: InsetsToken.all(Space.md)) {
                                     HStack(spacing: Space.md) {
                                         VStack(alignment: .leading, spacing: Space.xs) {
-                                            PovverText(
-                                                item.displayTitle,
-                                                style: .subheadline,
-                                                lineLimit: 1
-                                            )
-                                            PovverText(
-                                                item.date.relativeShort,
-                                                style: .caption,
-                                                color: Color.textSecondary
-                                            )
+                                            Text(item.displayTitle)
+                                                .textStyle(.secondary)
+                                                .lineLimit(1)
+                                            Text(item.date.relativeShort)
+                                                .textStyle(.micro)
+                                                .foregroundStyle(Color.textSecondary)
                                         }
                                         Spacer()
                                         Icon("chevron.right", size: .md, color: Color.textSecondary)

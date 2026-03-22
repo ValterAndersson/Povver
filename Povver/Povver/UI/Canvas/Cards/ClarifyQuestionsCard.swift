@@ -15,8 +15,8 @@ public struct ClarifyQuestionsCard: View {
                     VStack(alignment: .leading, spacing: Space.md) {
                         ForEach(qs) { q in
                             VStack(alignment: .leading, spacing: Space.sm) {
-                                PovverText(q.text, style: .subheadline)
-                                    .foregroundColor(Color.textPrimary)
+                                Text(q.text)
+                                    .textStyle(.secondary)
                                 
                                 if q.type == .text {
                                     // Text input with submit/skip
@@ -49,8 +49,9 @@ public struct ClarifyQuestionsCard: View {
                                                 }
                                             }) {
                                                 HStack {
-                                                    PovverText(opt, style: .body)
-                                                        .foregroundColor(isOptionSelected(opt, questionId: q.id) ? Color.textInverse : Color.textPrimary)
+                                                    Text(opt)
+                                                        .textStyle(.body)
+                                                        .foregroundStyle(isOptionSelected(opt, questionId: q.id) ? Color.textInverse : Color.textPrimary)
                                                     Spacer()
                                                     if isOptionSelected(opt, questionId: q.id) {
                                                         Image(systemName: q.type == .multi_choice ? "checkmark.square.fill" : "checkmark")
@@ -73,7 +74,8 @@ public struct ClarifyQuestionsCard: View {
                                         }) {
                                             HStack {
                                                 Image(systemName: "checkmark")
-                                                PovverText("Yes", style: .body)
+                                                Text("Yes")
+                                                    .textStyle(.body)
                                             }
                                             .frame(maxWidth: .infinity)
                                             .padding(InsetsToken.symmetric(vertical: Space.sm, horizontal: Space.md))
@@ -89,7 +91,8 @@ public struct ClarifyQuestionsCard: View {
                                         }) {
                                             HStack {
                                                 Image(systemName: "xmark")
-                                                PovverText("No", style: .body)
+                                                Text("No")
+                                                    .textStyle(.body)
                                             }
                                             .frame(maxWidth: .infinity)
                                             .padding(InsetsToken.symmetric(vertical: Space.sm, horizontal: Space.md))
@@ -112,7 +115,8 @@ public struct ClarifyQuestionsCard: View {
                             Button(action: skipQuestion) {
                                 HStack {
                                     Image(systemName: "arrow.right")
-                                    PovverText("Skip", style: .body)
+                                    Text("Skip")
+                                        .textStyle(.body)
                                 }
                                 .padding(InsetsToken.symmetric(vertical: Space.sm, horizontal: Space.lg))
                                 .background(Color.surfaceElevated)
@@ -125,7 +129,8 @@ public struct ClarifyQuestionsCard: View {
                         Button(action: submitAnswer) {
                             HStack {
                                 Image(systemName: "paperplane.fill")
-                                PovverText("Submit", style: .body)
+                                Text("Submit")
+                                    .textStyle(.body)
                             }
                             .padding(InsetsToken.symmetric(vertical: Space.sm, horizontal: Space.lg))
                             .background(Color.accent)

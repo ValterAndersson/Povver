@@ -30,14 +30,20 @@ public struct AgentStreamCard: View {
             VStack(alignment: .leading, spacing: Space.xs) {
                 switch step.kind {
                 case .thinking:
-                    PovverText("Thinking…", style: .subheadline, color: Color.textSecondary)
+                    Text("Thinking…")
+                        .textStyle(.secondary)
+                        .foregroundStyle(Color.textSecondary)
                     ProgressView().progressViewStyle(.circular)
                 case .info:
-                    PovverText(step.text ?? "", style: .body)
+                    Text(step.text ?? "")
+                        .textStyle(.body)
                 case .lookup:
-                    PovverText(step.text ?? "", style: .subheadline, color: Color.textSecondary)
+                    Text(step.text ?? "")
+                        .textStyle(.secondary)
+                        .foregroundStyle(Color.textSecondary)
                 case .result:
-                    PovverText(step.text ?? "", style: .body)
+                    Text(step.text ?? "")
+                        .textStyle(.body)
                 }
             }
             Spacer()

@@ -40,7 +40,7 @@ struct OnboardingAuthScreen: View {
                         Image(systemName: "apple.logo")
                             .font(.system(size: 20, weight: .semibold))
                         Text(isCreateMode ? "Continue with Apple" : "Sign in with Apple")
-                            .font(TypographyToken.button)
+                            .font(TypographyToken.bodyStrong)
                     }
                     .foregroundColor(.black)
                     .frame(maxWidth: .infinity)
@@ -58,7 +58,7 @@ struct OnboardingAuthScreen: View {
                         Image(systemName: "globe")
                             .font(.system(size: 20, weight: .semibold))
                         Text(isCreateMode ? "Continue with Google" : "Sign in with Google")
-                            .font(TypographyToken.button)
+                            .font(TypographyToken.bodyStrong)
                     }
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
@@ -80,7 +80,7 @@ struct OnboardingAuthScreen: View {
                         Image(systemName: "envelope")
                             .font(.system(size: 20, weight: .semibold))
                         Text(isCreateMode ? "Sign up with email" : "Sign in with email")
-                            .font(TypographyToken.button)
+                            .font(TypographyToken.bodyStrong)
                     }
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)

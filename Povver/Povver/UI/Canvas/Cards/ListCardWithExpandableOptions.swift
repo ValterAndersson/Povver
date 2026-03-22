@@ -16,7 +16,7 @@ public struct ListCardWithExpandableOptions: View {
             VStack(alignment: .leading, spacing: Space.md) {
                 CardHeader(title: model.title, subtitle: model.subtitle, lane: model.lane, status: model.status, timestamp: Date(), menuActions: model.menuItems, onAction: { action in handleAction(action, model) })
                 if case .programDay(let title, _) = model.data {
-                    PovverText(title, style: .headline)
+                    Text(title).textStyle(.sectionHeader)
                 }
                 VStack(spacing: Space.sm) {
                     ForEach(options) { opt in

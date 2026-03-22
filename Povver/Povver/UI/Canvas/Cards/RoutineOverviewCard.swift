@@ -13,16 +13,16 @@ public struct RoutineOverviewCard: View {
                 if case .routineOverview(let split, let days, let notes) = model.data {
                     HStack(spacing: Space.lg) {
                         VStack(alignment: .leading, spacing: Space.xs) {
-                            PovverText("Split", style: .footnote, color: Color.textSecondary)
-                            PovverText(split, style: .headline)
+                            Text("Split").textStyle(.caption).foregroundStyle(Color.textSecondary)
+                            Text(split).textStyle(.sectionHeader)
                         }
                         VStack(alignment: .leading, spacing: Space.xs) {
-                            PovverText("Days", style: .footnote, color: Color.textSecondary)
-                            PovverText(String(days), style: .headline)
+                            Text("Days").textStyle(.caption).foregroundStyle(Color.textSecondary)
+                            Text(String(days)).textStyle(.sectionHeader)
                         }
                         Spacer()
                     }
-                    if let notes { PovverText(notes, style: .body, color: Color.textSecondary) }
+                    if let notes { Text(notes).textStyle(.body).foregroundStyle(Color.textSecondary) }
                 }
                 if !model.actions.isEmpty { CardActionBar(actions: model.actions, onAction: { action in
                     let handler = Environment(\.cardActionHandler).wrappedValue

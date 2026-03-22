@@ -120,7 +120,7 @@ public struct PovverButton: View {
                             .frame(width: IconSizeToken.md, height: IconSizeToken.md)
                     }
                 }
-                SwiftUI.Text(title).font(TypographyToken.button)
+                SwiftUI.Text(title).font(TypographyToken.bodyStrong)
                 if let trailingIcon, !showingIndicator, !showingSuccess {
                     trailingIcon
                         .resizable()

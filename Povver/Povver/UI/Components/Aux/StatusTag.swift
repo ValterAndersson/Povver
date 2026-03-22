@@ -12,7 +12,7 @@ public struct StatusTag: View {
 
     public var body: some View {
         SwiftUI.Text(text)
-            .font(TypographyToken.footnote)
+            .font(TypographyToken.caption)
             .foregroundColor(foreground())
             .padding(.vertical, Space.xs)
             .padding(.horizontal, Space.sm)

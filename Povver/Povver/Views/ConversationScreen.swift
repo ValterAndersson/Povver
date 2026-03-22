@@ -102,7 +102,9 @@ struct ConversationScreen: View {
                     Color.bg.opacity(0.6).ignoresSafeArea()
                     VStack(spacing: Space.md) {
                         ProgressView().progressViewStyle(.circular)
-                        PovverText("Connecting to canvas…", style: .subheadline, color: Color.textSecondary)
+                        Text("Connecting to canvas…")
+                            .textStyle(.secondary)
+                            .foregroundStyle(Color.textSecondary)
                     }
                     .padding(InsetsToken.screen)
                 }
