@@ -834,6 +834,7 @@ public struct PovverTextField: View {
                 }
             }
         }
+        .accessibilityLabel(placeholder)
     }
 
     private var fieldBackground: Color {
@@ -857,6 +858,28 @@ public struct PovverTextField: View {
 }
 ```
 
+**Scroll-to-focus note:** Forms containing `PovverTextField` should use `ScrollViewReader` to scroll the focused field above the keyboard with `Space.lg` padding. This is the caller's responsibility (not built into PovverTextField). Apply in `LoginView`, `RegisterView`, and any future forms:
+
+```swift
+ScrollViewReader { proxy in
+    ScrollView {
+        VStack {
+            PovverTextField("Email", text: $email, validation: emailValidation)
+                .id("email")
+            // ...
+        }
+    }
+    .onChange(of: focusedField) { _, field in
+        if let field {
+            withAnimation {
+                proxy.scrollTo(field, anchor: .bottom) // Places field above keyboard
+            }
+        }
+    }
+    .scrollDismissesKeyboard(.interactively)
+}
+```
+
 - [ ] **Step 3: Build and verify**
 
 Run: `cd /Users/valterandersson/Documents/Povver/Povver && xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build 2>&1 | tail -5`
@@ -871,7 +894,8 @@ git commit -m "feat(design): add PovverTextField with 5 interaction states
 Idle (hairline border), focused (accent border + elevated bg),
 validation error (destructive border + error text with Reveal),
 validation success (success border, fades after 1s),
-disabled (40% opacity, not focusable)."
+disabled (40% opacity, not focusable). Scroll-to-focus pattern
+documented for callers."
 ```
 
 ---
@@ -1380,10 +1404,10 @@ struct SetCompletionCircle: View {
 
         // Phase 2: Pulse + haptic at peak
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) { pulseScale = 1.15 }
+            withAnimation(.bouncy) { pulseScale = 1.15 }
             fireHaptics()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) { pulseScale = 1.0 }
+                withAnimation(.bouncy) { pulseScale = 1.0 }
             }
         }
 
@@ -1763,7 +1787,7 @@ Completed exercises tappable to expand."
 
 ### Task 11: Destructive Action Tiers
 
-Implement all three tiers: Tier 1 (remove set + remove exercise → immediate + undo toast), Tier 2 (swipe thresholds), Tier 3 (standardize all destructive dialogs across app).
+Implement all three tiers: Tier 1 (remove set, remove exercise, clear filter, dismiss notification → immediate + undo toast where applicable), Tier 2 (swipe thresholds), Tier 3 (standardize all destructive dialogs across app including delete account).
 
 **Files:**
 - Modify: `Povver/Povver/UI/FocusMode/FocusModeWorkoutScreen.swift`
@@ -1800,8 +1824,9 @@ func undoLastRemoval() { /* restore from buffer */ }
 - [ ] **Step 3: Replace exercise/set removal with Tier 1 (immediate + UndoToast)**
 
 In `FocusModeWorkoutScreen`:
-- Remove exercise: immediate removal + UndoToast, no dialog
-- Remove set: immediate removal + UndoToast, no dialog
+- Remove exercise: immediate removal + UndoToast, no dialog, **no haptic on initial delete**
+- Remove set: immediate removal + UndoToast, no dialog, **no haptic on initial delete**
+- If user taps Undo: restore content with **Reveal animation** (opacity 0→1 + 8pt shift) + light impact haptic
 
 Add UndoToast overlay with 5s auto-dismiss. Add light impact haptic on undo tap.
 
@@ -1830,8 +1855,18 @@ For each Tier 3 action, apply spec copy rules (title = what happens, message = w
 - Delete template: "Delete this template?" / "This template will be permanently removed." / "Delete"
 - Delete routine: "Delete this routine?" / "This routine and its schedule will be permanently removed." / "Delete"
 
+**Settings disabled state** — find weight unit selector (or any custom disabled state in settings). Standardize to `InteractionToken.disabledOpacity` (40% opacity) instead of custom color/style:
+
+```swift
+.opacity(isDisabled ? InteractionToken.disabledOpacity : 1.0)
+.disabled(isDisabled)
+```
+
 **Sign out** — find the sign-out confirmation (likely in `MoreView.swift` or `SecurityView.swift`):
 - "Sign out?" / "You'll need to sign in again to access your data." / "Sign Out"
+
+**Delete account** — find the delete account confirmation:
+- "Delete your account?" / "All your data will be permanently removed. This cannot be undone." / "Delete Account"
 
 Add `HapticManager.destructiveAction()` after each destructive confirm.
 
@@ -1996,27 +2031,47 @@ Create a reusable modifier or approach for destructive action failures:
 }
 ```
 
-- [ ] **Step 5: Replace workout error banner with inline sync indicators**
+- [ ] **Step 5: Ensure error transition animations**
+
+When transitioning from loading to error state: use cross-fade (never hard cut). Apply `.transition(.opacity)` on both loading and error views within a shared container:
+
+```swift
+if isLoading {
+    ProgressView()
+        .transition(.opacity)
+} else if hasError {
+    DataLoadingErrorView(failureCount: failureCount, onRetry: retry)
+        .transition(.opacity)
+} else {
+    ContentView(data: data)
+        .revealEffect(isVisible: true)
+}
+```
+
+When error resolves: error Exits (fade out), content Reveals (opacity + shift in). Apply this pattern everywhere `DataLoadingErrorView` is used.
+
+- [ ] **Step 6: Replace workout error banner with inline sync indicators**
 
 In `FocusModeWorkoutScreen`, change from auto-dismiss banner to:
 - Per-row sync indicators using `exerciseSyncState` from `FocusModeWorkoutService`
-- Transient toast only for persistent sync failures (3+ retries)
+- Transient toast only for persistent sync failures (3+ retries), copy: "Couldn't save — will retry automatically."
 
-- [ ] **Step 6: Build and verify**
+- [ ] **Step 7: Build and verify**
 
 Run: `cd /Users/valterandersson/Documents/Povver/Povver && xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add Povver/Povver/UI/Components/Feedback/InlineError.swift Povver/Povver/UI/Components/Feedback/DataLoadingErrorView.swift Povver/Povver/UI/FocusMode/FocusModeWorkoutScreen.swift
 git commit -m "feat(errors): implement all 4 error communication patterns
 
 Form submissions: InlineError with progressive copy + coach escalation.
-Data loading: DataLoadingErrorView as content-area error state.
+Data loading: DataLoadingErrorView as content-area error state + cross-fade transitions.
 Sync errors: per-row SyncIndicator, toast after 3+ retries.
-Destructive failures: system alert with retry/cancel."
+Destructive failures: system alert with retry/cancel.
+Error resolve: Exit animation, content Reveals."
 ```
 
 ---
@@ -2047,9 +2102,16 @@ try? await Task.sleep(for: .milliseconds(500)) // Held beat of stillness
 completedWorkout = CompletedWorkoutRef(id: archivedId)
 ```
 
-- [ ] **Step 3: Align staggered reveal timing**
+- [ ] **Step 3: Align staggered reveal timing and content order**
 
-Update reveal phases to spec (0.0s / 0.2s / 0.4s / 0.6s / 0.8s). Use `revealEffect(isVisible:)` where possible.
+Update reveal phases to spec (0.0s / 0.2s / 0.4s / 0.6s / 0.8s). The five staggered items are:
+1. Duration (0.0s)
+2. Volume (0.2s)
+3. PRs (0.4s)
+4. Consistency map (0.6s)
+5. Coach reflection (0.8s)
+
+Use `revealEffect(isVisible:)` where possible.
 
 - [ ] **Step 4: Build and verify**
 
@@ -2119,7 +2181,28 @@ Use `PovverTextField` if migrating, or apply focus styling to existing `TextFiel
 
 Read `CoachTabView.swift`. Replace centered `ProgressView()` with structural loading — show quick actions and section headers while content loads.
 
-- [ ] **Step 6: Add sheet loading pattern**
+- [ ] **Step 6: Wire minimum 400ms loading display to view transitions**
+
+When a loading indicator appears in any view (not just PovverButton), enforce `InteractionToken.minimumLoadingDisplay` (400ms) before showing content. This prevents flash-of-spinner on fast loads:
+
+```swift
+@State private var loadingShowTime: Date?
+
+// When loading starts:
+loadingShowTime = Date()
+
+// When data arrives:
+let elapsed = Date().timeIntervalSince(loadingShowTime ?? Date())
+let remaining = InteractionToken.minimumLoadingDisplay - elapsed
+if remaining > 0 {
+    try? await Task.sleep(for: .milliseconds(Int(remaining * 1000)))
+}
+// Then transition to content with Reveal
+```
+
+Apply this pattern to: Library detail views, Coach tab, sheet loading, and any other view where a loading indicator was replaced in Steps 2-5.
+
+- [ ] **Step 7: Add sheet loading pattern**
 
 For sheets that need to load data, show chrome (title, drag indicator) immediately. Show compact `ProgressView()` within the content area, not replacing the sheet:
 
@@ -2141,21 +2224,22 @@ For sheets that need to load data, show chrome (title, drag indicator) immediate
 }
 ```
 
-- [ ] **Step 7: Build and verify**
+- [ ] **Step 8: Build and verify**
 
 Run: `cd /Users/valterandersson/Documents/Povver/Povver && xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add Povver/Povver/UI/FocusMode/FocusModeWorkoutScreen.swift Povver/Povver/Views/Tabs/LibraryView.swift Povver/Povver/Views/Tabs/CoachTabView.swift
-git commit -m "feat(loading): structural loading states across app
+git commit -m "feat(loading): structural loading states + 400ms minimum display
 
 Workout start uses PovverButton loading + inline error on failure.
 Library: immediate destination view + Reveal on data load + search
 focus styling. Coach: section structure during loading. Sheets: chrome
-shown immediately, compact spinner in content area."
+shown immediately, compact spinner in content area. 400ms minimum
+loading display enforced before content transition."
 ```
 
 ---
@@ -2324,13 +2408,32 @@ Batch of small fixes across History, floating banner, haptic standardization, an
 
 - [ ] **Step 1: Read HistoryView.swift**
 
-Read to check for "Load More" button and empty state.
+Read to check for "Load More" button, empty state, and any raw haptic calls.
 
-- [ ] **Step 2: Add loading state to History "Load More"**
+- [ ] **Step 2: Redesign History empty state as invitation**
+
+If the empty state is minimal (e.g., just "No workouts yet"), redesign it as an invitation to action:
+
+```swift
+VStack(spacing: Space.lg) {
+    Image(systemName: "figure.strengthtraining.traditional")
+        .font(.system(size: 40))
+        .foregroundStyle(Color.textTertiary)
+    Text("Your workout history will appear here")
+        .textStyle(.secondary)
+        .foregroundStyle(Color.textSecondary)
+    PovverButton("Start a workout", style: .secondary) {
+        // Navigate to Train tab
+    }
+}
+.padding(Space.xl)
+```
+
+- [ ] **Step 3: Add loading state to History "Load More"**
 
 If "Load More" uses PovverButton, add `isLoading` binding.
 
-- [ ] **Step 3: Add haptic to floating workout banner**
+- [ ] **Step 4: Add haptic to floating workout banner**
 
 ```swift
 FloatingWorkoutBanner(
@@ -2341,9 +2444,15 @@ FloatingWorkoutBanner(
 )
 ```
 
-- [ ] **Step 4: Migrate raw UIImpactFeedbackGenerator calls**
+- [ ] **Step 5: Migrate raw UIImpactFeedbackGenerator calls**
 
-Replace all 4 raw calls in `FocusModeWorkoutScreen.swift`:
+Search ALL Swift files for raw UIKit haptic calls (not just workout files — include onboarding, settings, and any other screens):
+
+```bash
+grep -rn "UIImpactFeedbackGenerator\|UINotificationFeedbackGenerator\|UISelectionFeedbackGenerator" Povver/Povver/ --include="*.swift" | grep -v "HapticManager"
+```
+
+Replace all found instances. Known instances in workout files:
 - `toggleReorderMode()` → `HapticManager.modeToggle()`
 - `reorderExercisesNew()` → `HapticManager.modeToggle()`
 - `addSet()` → `HapticManager.selectionTick()`
@@ -2352,26 +2461,27 @@ Replace all 4 raw calls in `FocusModeWorkoutScreen.swift`:
 And 1 in `FocusModeWorkoutService.swift`:
 - `addExercise()` → `HapticManager.modeToggle()`
 
-- [ ] **Step 5: Add workout button haptic overrides**
+- [ ] **Step 6: Add workout button haptic overrides**
 
 In `FocusModeWorkoutScreen.swift`, add `.buttonHaptic(.medium)` to high-stakes buttons:
 - "Start Session" button
 - "Finish Workout" button
 - "Complete Workout" button (in FinishWorkoutSheet)
 
-- [ ] **Step 6: Build and verify**
+- [ ] **Step 7: Build and verify**
 
 Run: `cd /Users/valterandersson/Documents/Povver/Povver && xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add Povver/Povver/Views/Tabs/HistoryView.swift Povver/Povver/Views/MainTabsView.swift Povver/Povver/UI/FocusMode/FocusModeWorkoutScreen.swift Povver/Povver/Services/FocusModeWorkoutService.swift
-git commit -m "feat(polish): history loading, banner haptic, haptic standardization
+git commit -m "feat(polish): history empty state, loading, banner haptic, haptic migration
 
-History Load More uses PovverButton loading. Floating banner fires
-light impact. All raw UIImpactFeedbackGenerator migrated to HapticManager.
+History empty state redesigned as invitation. Load More uses PovverButton
+loading. Floating banner fires light impact. ALL raw UIKit haptic calls
+migrated to HapticManager (workout, onboarding, settings).
 High-stakes workout buttons use .buttonHaptic(.medium)."
 ```
 
@@ -2502,27 +2612,49 @@ grep -rn "\.font(.system(size:" Povver/Povver/UI/Components/ --include="*.swift"
 
 For icon-only buttons that use fixed sizes (e.g., the pulsing dot, checkmark), ensure they scale with Dynamic Type by using relative sizing where appropriate.
 
-- [ ] **Step 4: Verify Reduce Motion fallbacks**
+- [ ] **Step 4: Verify Bold Text and Increased Contrast support**
+
+Bold Text: SwiftUI handles this automatically when using system fonts (`.textStyle()` → Dynamic Type). Verify no custom font weight overrides break bold text rendering:
+
+```bash
+grep -rn "\.fontWeight\|\.bold()" Povver/Povver/UI/Components/ --include="*.swift" | head -20
+```
+
+Increased Contrast: Check that interactive elements remain distinguishable. Verify design tokens use semantic colors (which adapt to increased contrast mode automatically). If any custom colors are used for state indicators, test with Settings → Accessibility → Increase Contrast.
+
+- [ ] **Step 5: Verify 44pt minimum touch targets outside workout mode**
+
+All interactive elements outside workout mode must meet Apple HIG 44pt minimum. Audit buttons, toggles, and tappable areas:
+
+```bash
+grep -rn "\.frame(.*height: [0-3][0-9]\b" Povver/Povver/UI/ --include="*.swift" | grep -v "FocusMode" | head -20
+```
+
+If any interactive elements are below 44pt, add `.frame(minHeight: 44)` or adjust padding.
+
+- [ ] **Step 6: Verify Reduce Motion fallbacks**
 
 Confirm that all new animations check `@Environment(\.accessibilityReduceMotion)`:
 - `SetCompletionCircle` — already has Reduce Motion path
 - `RevealEffect`, `TransformEffect`, `ExitEffect`, `ReflowEffect` — already have fallbacks
 - `PovverButton` press/loading — scale is not motion (no fallback needed), pulsing dot could be made static
 
-- [ ] **Step 5: Build and verify**
+- [ ] **Step 7: Build and verify**
 
 Run: `cd /Users/valterandersson/Documents/Povver/Povver && xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add -A Povver/Povver/
-git commit -m "feat(a11y): add accessibility labels, verify Dynamic Type + Reduce Motion
+git commit -m "feat(a11y): accessibility labels, Dynamic Type, Bold Text, touch targets
 
 Interactive elements: SetCompletionCircle, AgentPromptBar submit,
 FloatingWorkoutBanner all have descriptive labels. Dynamic Type via
-.textStyle() verified. Reduce Motion fallbacks on all new animations."
+.textStyle() verified. Bold Text and Increased Contrast verified.
+44pt min touch targets outside workout mode. Reduce Motion fallbacks
+on all new animations."
 ```
 
 ---
