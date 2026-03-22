@@ -61,7 +61,6 @@ async def stream_handler(request: Request) -> StreamingResponse:
         from app.functional_handler import execute_functional_lane
         from app.llm.gemini import GeminiClient
         from app.observability import log_request, log_request_complete, log_tools_available
-        from app.planner import plan_tools
         from app.router import route_request, Lane
         from app.tools.registry import execute_tool, get_tools
 
@@ -156,11 +155,6 @@ async def stream_handler(request: Request) -> StreamingResponse:
             tools = get_tools(ctx)
             tool_names = [t.name for t in tools]
             log_tools_available(tool_names, ctx.workout_mode)
-
-            # Run planner to prioritize tools
-            prioritized = plan_tools(message, ctx, tool_names)
-            if prioritized:
-                logger.info("Planner prioritized: %s", prioritized)
 
         except Exception as e:
             logger.exception("Slow lane setup failed")
