@@ -109,12 +109,11 @@ async def test_build_system_context_includes_all_sections(mock_get_fs, mock_get_
     # Conversation summaries
     assert "Discussed chest volume" in instruction
 
-    # Planning snapshot
+    # Planning snapshot (slim format)
     assert "User: Val" in instruction
-    assert "Fitness level: intermediate" in instruction
+    assert "Level: intermediate" in instruction
     assert "Goal: hypertrophy" in instruction
-    assert "Active routine: Push Pull Legs" in instruction
-    assert "Latest insight: Bench trending up" in instruction
+    assert "Routine: Push Pull Legs" in instruction
 
     # History formatted correctly
     assert len(history) == 2
@@ -146,11 +145,9 @@ async def test_build_system_context_handles_errors(mock_get_fs, mock_get_mm):
     # No memories section (errored out)
     assert "What You Know About This User" not in instruction
 
-    # No snapshot section (planning errored -> empty dict, but _format_snapshot
-    # still returns header). Actually: planning becomes {} on error, and
-    # isinstance({}, dict) is True, so _format_snapshot({}) is called.
-    # It produces "## Current Training Snapshot\nWeight unit: kg" (defaults).
-    assert "Current Training Snapshot" in instruction
+    # Snapshot section: planning becomes {} on error, _format_snapshot({}) still
+    # returns "## Training Snapshot\nUnit: kg" (defaults).
+    assert "Training Snapshot" in instruction
 
     # History should still work (only planning and memories failed)
     assert len(history) == 2
@@ -212,16 +209,17 @@ class TestFormatSnapshot:
         }
         result = _format_snapshot(planning)
         assert "User: Val" in result
-        assert "Fitness level: intermediate" in result
+        assert "Level: intermediate" in result
         assert "Goal: hypertrophy" in result
-        assert "Weight unit: lbs" in result
-        assert "Active routine: Upper Lower" in result
-        assert "Latest insight: Volume is up 12%" in result
+        assert "Unit: lbs" in result
+        assert "Routine: Upper Lower" in result
+        # analysis.summary no longer included — fetch on demand
+        assert "Latest insight" not in result
 
     def test_minimal_planning_context(self):
         result = _format_snapshot({})
-        assert "Current Training Snapshot" in result
-        assert "Weight unit: kg" in result  # default
+        assert "Training Snapshot" in result
+        assert "Unit: kg" in result  # default
 
     def test_no_routine_or_analysis(self):
         planning = {
@@ -231,8 +229,7 @@ class TestFormatSnapshot:
         }
         result = _format_snapshot(planning)
         assert "User: Test" in result
-        assert "Active routine" not in result
-        assert "Latest insight" not in result
+        assert "Routine" not in result
 
     def test_http_compact_view_shape(self):
         """HTTP compact view uses camelCase keys and flat user fields."""
@@ -251,12 +248,10 @@ class TestFormatSnapshot:
         }
         result = _format_snapshot(planning)
         assert "User: Val" in result
-        assert "Fitness level: intermediate" in result
+        assert "Level: intermediate" in result
         assert "Goal: Build Muscle" in result
-        assert "Weight unit: lbs" in result
-        assert "Active routine: PPL" in result
-        # No analysis key in compact view — should not appear
-        assert "Latest insight" not in result
+        assert "Unit: lbs" in result
+        assert "Routine: PPL" in result
 
     def test_http_compact_view_no_routine(self):
         """HTTP compact view with null activeRoutine."""
@@ -266,7 +261,7 @@ class TestFormatSnapshot:
         }
         result = _format_snapshot(planning)
         assert "User: New User" in result
-        assert "Active routine" not in result
+        assert "Routine" not in result
 
 
 class TestFormatHistory:

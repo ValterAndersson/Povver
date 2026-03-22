@@ -233,96 +233,71 @@ async def _get_session_vars(
 
 
 def _format_active_alerts(alerts: dict) -> str:
-    """Format active alerts (plateau, volume, periodization) as instruction section."""
-    sections = ["## Active Alerts"]
+    """Format active alerts as brief pointers — details fetched on demand."""
+    flags = []
 
     plateau = alerts.get("plateau_report")
     if plateau:
         exercises = plateau.get("plateaued_exercises", [])
-        if exercises:
-            lines = []
-            for ex in exercises[:5]:
-                lines.append(
-                    f"  - {ex.get('exercise_name', 'Unknown')}: "
-                    f"stalled {ex.get('weeks_stalled', '?')} weeks at "
-                    f"e1RM {ex.get('last_e1rm', '?')}kg "
-                    f"(suggested: {ex.get('suggested_action', 'review')})"
-                )
-            sections.append("**Plateaued Exercises:**\n" + "\n".join(lines))
+        for ex in exercises[:3]:
+            name = ex.get("exercise_name", "?")
+            weeks = ex.get("weeks_stalled", "?")
+            action = ex.get("suggested_action", "review")
+            flags.append(f"Plateau: {name} ({weeks}wk, suggested: {action})")
 
     volume = alerts.get("volume_optimization")
     if volume:
         volume_data = volume.get("volume_by_muscle", {})
-        deficits = [
-            f"{k} ({v.get('actual_sets', 0)}/{v.get('mev', '?')} MEV)"
-            for k, v in volume_data.items()
-            if v.get("status") == "deficit"
-        ]
-        surpluses = [
-            f"{k} ({v.get('actual_sets', 0)}/{v.get('mrv', '?')} MRV)"
-            for k, v in volume_data.items()
-            if v.get("status") == "surplus"
-        ]
-        if deficits:
-            sections.append(f"**Volume Deficits:** {', '.join(deficits[:5])}")
-        if surpluses:
-            sections.append(f"**Volume Surpluses:** {', '.join(surpluses[:5])}")
+        deficit_count = sum(1 for v in volume_data.values() if v.get("status") == "deficit")
+        surplus_count = sum(1 for v in volume_data.values() if v.get("status") == "surplus")
+        if deficit_count:
+            flags.append(f"{deficit_count} muscle group(s) below MEV")
+        if surplus_count:
+            flags.append(f"{surplus_count} muscle group(s) above MRV")
 
     period = alerts.get("periodization_status")
     if period:
         acwr = period.get("acwr")
-        status = period.get("status", "unknown")
         if acwr is not None:
-            sections.append(
-                f"**Workload Ratio (ACWR):** {acwr} ({status})"
-            )
+            flags.append(f"ACWR: {acwr}")
         if period.get("suggest_deload"):
-            sections.append(
-                f"**Deload Recommended:** {period.get('deload_reason', 'ACWR elevated')}"
-            )
+            flags.append("Deload recommended")
 
-    # Only return if we have actual alert content beyond the header
-    if len(sections) <= 1:
+    if not flags:
         return ""
 
-    return "\n".join(sections)
+    return "## Active Flags\n" + "\n".join(f"- {f}" for f in flags) + \
+        "\nUse get_training_analysis for full details if relevant to the user's question."
 
 
 def _format_snapshot(planning: dict) -> str:
-    """Format planning context as instruction section.
-
-    Handles two response shapes:
-    - Legacy (Python-assembled): user.attributes.fitness_level, active_routine, analysis
-    - HTTP compact view: user.fitness_level (flat), activeRoutine (camelCase), no analysis key
-    """
-    sections = ["## Current Training Snapshot"]
+    """Format planning context as brief orientation — not a data source."""
+    parts = []
     user = planning.get("user", {})
     if user.get("name"):
-        sections.append(f"User: {user['name']}")
+        parts.append(f"User: {user['name']}")
 
     # fitness_level / fitness_goal: check both flat (HTTP compact) and nested (legacy)
     attrs = user.get("attributes", {})
     fitness_level = attrs.get("fitness_level") or user.get("fitness_level")
     fitness_goal = attrs.get("fitness_goal") or user.get("fitness_goal")
     if fitness_level:
-        sections.append(f"Fitness level: {fitness_level}")
+        parts.append(f"Level: {fitness_level}")
     if fitness_goal:
-        sections.append(f"Goal: {fitness_goal}")
+        parts.append(f"Goal: {fitness_goal}")
 
     weight_unit = user.get("weight_unit", "kg")
-    sections.append(f"Weight unit: {weight_unit}")
+    parts.append(f"Unit: {weight_unit}")
 
     # active_routine (legacy snake_case) or activeRoutine (HTTP camelCase)
     routine = planning.get("active_routine") or planning.get("activeRoutine")
     if routine:
-        sections.append(f"Active routine: {routine.get('name', 'Unknown')}")
+        parts.append(f"Routine: {routine.get('name', 'Unknown')}")
 
-    # analysis key only exists in legacy shape; HTTP compact has strengthSummary instead
-    analysis = planning.get("analysis")
-    if analysis:
-        sections.append(f"Latest insight: {analysis.get('summary', 'N/A')}")
+    if not parts:
+        return ""
 
-    return "\n".join(sections)
+    return "## Training Snapshot\n" + " | ".join(parts)
 
 
 def _format_history(messages: list[dict]) -> list[dict]:

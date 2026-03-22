@@ -31,59 +31,39 @@ DIMENSION_WEIGHTS = {
 # Full judge prompt template (from spec)
 SINGLE_TURN_PROMPT = """You are evaluating two AI fitness coaching systems on the same user query.
 
-System A ("Gemini Agent"): A fully engineered coaching agent with a 733-line
-system prompt defining a hypertrophy coaching persona, pre-loaded context
-(user memories, conversation history, training snapshot, active alerts),
-keyword-based tool planning, and 31 tools including workout mutation.
+Both systems have access to tools for reading and writing training data.
+They may differ in architecture, prompting, and tool availability, but you
+should evaluate them PURELY on output quality — not on how they achieved it.
 
-System B ("Claude MCP"): A raw language model (Sonnet 4.6) with no system
-prompt, no pre-loaded context, and 17 MCP tools for reading/writing training
-data. It must discover context by calling tools itself.
-
-Your job is NOT to pick a winner. Your job is to understand WHAT CAUSED
-the difference in quality, so the engineering team knows where to invest.
-
-## Context Attribution Guidance
-
-When one system outperforms the other, determine the root cause:
-- If System A references data that System B did not fetch, check whether
-  System B had tools available to fetch that data but chose not to. If so,
-  this is a model reasoning difference, not an engineering advantage.
-- If System A references data from pre-loaded context (memories, alerts,
-  conversation history) that System B could NOT access via its tools,
-  this is an engineering advantage (context loading).
-- If System A's response follows a specific format or constraint from its
-  coaching prompt, evaluate whether that constraint helped or hurt quality.
-- If System B produces a better response despite having no instructions,
-  this indicates the engineering is actively constraining quality.
+Your job is to score each system's response on 6 dimensions and determine
+which response better serves the user.
 
 ## Test Case
 - Query: {query}
 - Category: {category}
 - Expected behavior: {expected_behavior}
 - Gold standard: {gold_standard}
-- Expected tools (System A): {expected_tools_gemini}
-- Expected tools (System B): {expected_tools_claude}
+- Expected tools (System A): {expected_tools_a}
+- Expected tools (System B): {expected_tools_b}
 
-## System A Response (Gemini Agent)
-Tools used: {gemini_tools}
+## System A Response
+Tools used: {system_a_tools}
 ```
-{gemini_response}
+{system_a_response}
 ```
 
-## System B Response (Claude MCP)
-Tools used: {claude_tools}
+## System B Response
+Tools used: {system_b_tools}
 ```
-{claude_response}
+{system_b_response}
 ```
 
 ## Instructions
 
 1. Score EACH system on 6 dimensions (0-100) with sub-scores and issues.
-2. Determine the winner, margin, and engineering attribution.
-3. Be specific in attribution — name the engineering component
-   (prompt rule, context loading, planner, safety gate, persona constraint,
-   tool guidance, conciseness rule) and explain how it helped or hurt.
+2. Determine the winner and margin based on response quality.
+3. Identify what each system did well or poorly — focus on the output,
+   not assumptions about the system's architecture.
 4. For tool_selection scoring: score based on "Tools Actually Used" matching
    "Expected Tools" for each system. Different tool names are expected.
 
@@ -100,14 +80,12 @@ Respond with ONLY valid JSON matching this schema:
   "system_b": {{...same structure...}},
   "coherence": null,
   "comparison": {{
-    "winner": "gemini | claude | tie",
+    "winner": "system_a | system_b | tie",
     "margin": "decisive | slight | negligible",
-    "engineering_attribution": {{
-      "helped": ["specific observation"],
-      "hurt": ["specific observation"],
-      "irrelevant": ["specific observation"]
+    "quality_drivers": {{
+      "system_a_advantages": ["specific observation"],
+      "system_b_advantages": ["specific observation"]
     }},
-    "raw_reasoning_advantage": "observation or null",
     "key_insight": "one sentence"
   }}
 }}"""
@@ -115,48 +93,55 @@ Respond with ONLY valid JSON matching this schema:
 
 def build_judge_prompt(
     case: Union[SingleTurnCase, MultiTurnCase],
-    gemini_response: str,
-    gemini_tools: list[str],
-    claude_response: str,
-    claude_tools: list[str],
-    gemini_turns: list | None = None,
-    claude_turns: list | None = None,
+    system_a_response: str,
+    system_a_tools: list[str],
+    system_b_response: str,
+    system_b_tools: list[str],
+    expected_tools_a: list[str],
+    expected_tools_b: list[str],
+    system_a_turns: list | None = None,
+    system_b_turns: list | None = None,
 ) -> str:
     """Build the judge prompt for a single case."""
-    if isinstance(case, MultiTurnCase) and gemini_turns and claude_turns:
-        return _build_multi_turn_prompt(case, gemini_turns, claude_turns)
+    if isinstance(case, MultiTurnCase) and system_a_turns and system_b_turns:
+        return _build_multi_turn_prompt(
+            case, system_a_turns, system_b_turns,
+            expected_tools_a, expected_tools_b,
+        )
 
     return SINGLE_TURN_PROMPT.format(
         query=case.query,
         category=case.category,
         expected_behavior=case.expected_behavior if isinstance(case, SingleTurnCase) else case.overall_expected_behavior,
         gold_standard=case.gold_standard,
-        expected_tools_gemini=", ".join(case.expected_tools_gemini) or "(none)",
-        expected_tools_claude=", ".join(case.expected_tools_claude) or "(none)",
-        gemini_tools=", ".join(gemini_tools) or "(none)",
-        gemini_response=gemini_response,
-        claude_tools=", ".join(claude_tools) or "(none)",
-        claude_response=claude_response,
+        expected_tools_a=", ".join(expected_tools_a) or "(none)",
+        expected_tools_b=", ".join(expected_tools_b) or "(none)",
+        system_a_tools=", ".join(system_a_tools) or "(none)",
+        system_a_response=system_a_response,
+        system_b_tools=", ".join(system_b_tools) or "(none)",
+        system_b_response=system_b_response,
     )
 
 
 def _build_multi_turn_prompt(
     case: MultiTurnCase,
-    gemini_turns: list,
-    claude_turns: list,
+    system_a_turns: list,
+    system_b_turns: list,
+    expected_tools_a: list[str],
+    expected_tools_b: list[str],
 ) -> str:
     """Build judge prompt for multi-turn case with conversation transcript."""
     transcript = ""
     for i, turn in enumerate(case.turns):
-        gt = gemini_turns[i] if i < len(gemini_turns) else None
-        ct = claude_turns[i] if i < len(claude_turns) else None
+        at = system_a_turns[i] if i < len(system_a_turns) else None
+        bt = system_b_turns[i] if i < len(system_b_turns) else None
         transcript += f"\n### Turn {i + 1}\n"
         transcript += f"User: {turn.query}\n"
         transcript += f"Expected: {turn.expected_behavior}\n"
-        if gt:
-            transcript += f"System A: {gt.response_text} (tools: {', '.join(gt.tools_used) or 'none'})\n"
-        if ct:
-            transcript += f"System B: {ct.response_text} (tools: {', '.join(ct.tools_used) or 'none'})\n"
+        if at:
+            transcript += f"System A: {at.response_text} (tools: {', '.join(at.tools_used) or 'none'})\n"
+        if bt:
+            transcript += f"System B: {bt.response_text} (tools: {', '.join(bt.tools_used) or 'none'})\n"
 
     # Reuse the single-turn prompt structure but replace the response section
     # with the transcript and add coherence scoring instruction
@@ -165,12 +150,12 @@ def _build_multi_turn_prompt(
         category=case.category,
         expected_behavior=case.overall_expected_behavior,
         gold_standard=case.gold_standard,
-        expected_tools_gemini=", ".join(case.expected_tools_gemini) or "(none)",
-        expected_tools_claude=", ".join(case.expected_tools_claude) or "(none)",
-        gemini_tools="(see transcript)",
-        gemini_response="(see transcript below)",
-        claude_tools="(see transcript)",
-        claude_response="(see transcript below)",
+        expected_tools_a=", ".join(expected_tools_a) or "(none)",
+        expected_tools_b=", ".join(expected_tools_b) or "(none)",
+        system_a_tools="(see transcript)",
+        system_a_response="(see transcript below)",
+        system_b_tools="(see transcript)",
+        system_b_response="(see transcript below)",
     )
     prompt += f"\n\n## Conversation Transcript\n{transcript}"
     prompt += '\n\nIMPORTANT: Populate the "coherence" field with {{"system_a": N, "system_b": N}} (0-100 each). Evaluate context carry, no repetition, and building on prior turns.'
@@ -181,8 +166,13 @@ def _build_multi_turn_prompt(
 
 def parse_judge_response(
     raw_text: str,
+    swapped: bool = False,
 ) -> tuple[dict[str, DimensionScore], dict[str, DimensionScore], ComparisonVerdict, dict | None]:
-    """Parse judge JSON into structured scores."""
+    """Parse judge JSON into structured scores.
+
+    If swapped=True, the judge saw Gemini as System B and Claude as System A,
+    so we swap the results back to canonical order (gemini=A, claude=B).
+    """
     # Strip markdown fences
     text = raw_text.strip()
     if text.startswith("```"):
@@ -211,21 +201,41 @@ def parse_judge_response(
             dims[dim_name] = DimensionScore(score=score, weight=weight, sub_scores=sub_scores, issues=issues)
         return dims
 
-    gemini_dims = extract_dimensions(data.get("system_a", {}))
-    claude_dims = extract_dimensions(data.get("system_b", {}))
+    a_dims = extract_dimensions(data.get("system_a", {}))
+    b_dims = extract_dimensions(data.get("system_b", {}))
 
     comp_data = data.get("comparison", {})
+    raw_winner = comp_data.get("winner", "tie")
+
+    # Map system_a/system_b back to gemini/claude
+    if raw_winner == "system_a":
+        winner = "claude" if swapped else "gemini"
+    elif raw_winner == "system_b":
+        winner = "gemini" if swapped else "claude"
+    else:
+        winner = "tie"
+
+    # Normalize quality_drivers to engineering_attribution shape for backwards compat
+    qd = comp_data.get("quality_drivers", {})
+    a_adv = qd.get("system_a_advantages", [])
+    b_adv = qd.get("system_b_advantages", [])
+    if swapped:
+        a_adv, b_adv = b_adv, a_adv
+
     comparison = ComparisonVerdict(
-        winner=comp_data.get("winner", "tie"),
+        winner=winner,
         margin=comp_data.get("margin", "negligible"),
-        engineering_attribution=comp_data.get("engineering_attribution", {"helped": [], "hurt": [], "irrelevant": []}),
+        engineering_attribution={"helped": a_adv, "hurt": b_adv, "irrelevant": []},
         raw_reasoning_advantage=comp_data.get("raw_reasoning_advantage"),
         key_insight=comp_data.get("key_insight", ""),
     )
 
     coherence = data.get("coherence")
 
-    return gemini_dims, claude_dims, comparison, coherence
+    # Swap dimensions back to canonical order
+    if swapped:
+        return b_dims, a_dims, comparison, coherence
+    return a_dims, b_dims, comparison, coherence
 
 
 async def judge_case(
@@ -237,11 +247,24 @@ async def judge_case(
     gemini_turns: list | None = None,
     claude_turns: list | None = None,
 ) -> tuple[dict[str, DimensionScore], dict[str, DimensionScore], ComparisonVerdict, dict | None]:
-    """Run the LLM judge on a single case."""
+    """Run the LLM judge on a single case with position randomization."""
+    import random
+    swapped = random.random() < 0.5
+
+    if swapped:
+        a_resp, b_resp = claude_response, gemini_response
+        a_tools, b_tools = claude_tools, gemini_tools
+        a_turns, b_turns = claude_turns, gemini_turns
+        exp_a, exp_b = case.expected_tools_claude, case.expected_tools_gemini
+    else:
+        a_resp, b_resp = gemini_response, claude_response
+        a_tools, b_tools = gemini_tools, claude_tools
+        a_turns, b_turns = gemini_turns, claude_turns
+        exp_a, exp_b = case.expected_tools_gemini, case.expected_tools_claude
+
     prompt = build_judge_prompt(
-        case, gemini_response, gemini_tools,
-        claude_response, claude_tools,
-        gemini_turns, claude_turns,
+        case, a_resp, a_tools, b_resp, b_tools,
+        exp_a, exp_b, a_turns, b_turns,
     )
 
     client = AsyncAnthropicVertex(
@@ -256,4 +279,4 @@ async def judge_case(
     )
 
     raw = resp.content[0].text
-    return parse_judge_response(raw)
+    return parse_judge_response(raw, swapped=swapped)
