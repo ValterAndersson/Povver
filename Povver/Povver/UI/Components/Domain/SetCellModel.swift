@@ -17,7 +17,8 @@ struct SetCellModel: Identifiable, Equatable {
     let weight: String?    // e.g., "95" not "95kg"
     let reps: String?      // e.g., "8"
     let rir: String?       // e.g., "2" or nil for warmup
-    
+    let e1rm: String?      // e.g., "102" or nil for warmups/high-rep sets
+
     /// Set type indicator for visual badge (W=warmup, F=failure, D=drop)
     let setTypeIndicator: SetTypeIndicator?
     
@@ -57,6 +58,7 @@ extension WorkoutExerciseSet {
     /// Index label is passed in to avoid requiring the model to know its position.
     func toSetCellModel(indexLabel: String, weightUnit: WeightUnit) -> SetCellModel {
         let indicator = setTypeIndicator(from: type)
+        let e1rmValue = computeE1RM(weightKg: weight, reps: reps, isWarmup: indicator == .warmup)
 
         return SetCellModel(
             id: id,
@@ -64,10 +66,18 @@ extension WorkoutExerciseSet {
             weight: formatWeight(weight, unit: weightUnit),
             reps: "\(reps)",
             rir: indicator == .warmup ? nil : rir.map { "\($0)" },
+            e1rm: e1rmValue.map { WeightFormatter.formatValue($0, unit: weightUnit) },
             setTypeIndicator: indicator,
             isActive: false,
             isCompleted: isCompleted
         )
+    }
+
+    /// Epley e1RM: weight * (1 + reps/30). Only for non-warmup sets with reps <= 12.
+    private func computeE1RM(weightKg: Double, reps: Int, isWarmup: Bool) -> Double? {
+        guard !isWarmup, reps >= 1, reps <= 12, weightKg > 0 else { return nil }
+        if reps == 1 { return weightKg }
+        return weightKg * (1.0 + Double(reps) / 30.0)
     }
 
     private func setTypeIndicator(from type: String) -> SetCellModel.SetTypeIndicator? {
@@ -130,6 +140,7 @@ extension WorkoutTemplateSet {
             weight: formatWeight(weight, unit: weightUnit),
             reps: "\(reps)",
             rir: indicator == .warmup ? nil : rir.map { "\($0)" },
+            e1rm: nil,
             setTypeIndicator: indicator,
             isActive: false,
             isCompleted: false
@@ -196,6 +207,7 @@ extension PlanSet {
             weight: weight.map { formatWeight($0, unit: weightUnit) },
             reps: "\(reps)",
             rir: isWarmup ? nil : (rir.map { "\($0)" }),
+            e1rm: nil,
             setTypeIndicator: indicator,
             isActive: isActive,
             isCompleted: isCompleted ?? false
@@ -263,6 +275,7 @@ extension FocusModeSet {
             weight: displayWeight.map { formatWeight($0, unit: weightUnit) },
             reps: displayReps.map { "\($0)" },
             rir: isWarmup ? nil : (displayRir.map { "\($0)" }),
+            e1rm: nil,
             setTypeIndicator: indicator,
             isActive: isActive,
             isCompleted: isDone

@@ -304,19 +304,19 @@ struct SetTable_Previews: PreviewProvider {
     
     static var sampleSets: [SetCellModel] {
         [
-            SetCellModel(id: "1", indexLabel: "W1", weight: "40", reps: "10", rir: nil, setTypeIndicator: .warmup, isActive: false, isCompleted: true),
-            SetCellModel(id: "2", indexLabel: "1", weight: "80", reps: "8", rir: "2", setTypeIndicator: nil, isActive: false, isCompleted: true),
-            SetCellModel(id: "3", indexLabel: "2", weight: "80", reps: "8", rir: "1", setTypeIndicator: nil, isActive: false, isCompleted: true),
-            SetCellModel(id: "4", indexLabel: "3", weight: "80", reps: "6", rir: "0", setTypeIndicator: .failure, isActive: false, isCompleted: true)
+            SetCellModel(id: "1", indexLabel: "W1", weight: "40", reps: "10", rir: nil, e1rm: nil, setTypeIndicator: .warmup, isActive: false, isCompleted: true),
+            SetCellModel(id: "2", indexLabel: "1", weight: "80", reps: "8", rir: "2", e1rm: "101", setTypeIndicator: nil, isActive: false, isCompleted: true),
+            SetCellModel(id: "3", indexLabel: "2", weight: "80", reps: "8", rir: "1", e1rm: "101", setTypeIndicator: nil, isActive: false, isCompleted: true),
+            SetCellModel(id: "4", indexLabel: "3", weight: "80", reps: "6", rir: "0", e1rm: "96", setTypeIndicator: .failure, isActive: false, isCompleted: true)
         ]
     }
     
     static var sampleExecutionSets: [SetCellModel] {
         [
-            SetCellModel(id: "1", indexLabel: "W1", weight: "40", reps: "10", rir: nil, setTypeIndicator: .warmup, isActive: false, isCompleted: true),
-            SetCellModel(id: "2", indexLabel: "1", weight: "80", reps: "8", rir: "2", setTypeIndicator: nil, isActive: false, isCompleted: true),
-            SetCellModel(id: "3", indexLabel: "2", weight: "80", reps: "8", rir: "2", setTypeIndicator: nil, isActive: true, isCompleted: false),
-            SetCellModel(id: "4", indexLabel: "3", weight: "80", reps: "8", rir: "2", setTypeIndicator: nil, isActive: false, isCompleted: false)
+            SetCellModel(id: "1", indexLabel: "W1", weight: "40", reps: "10", rir: nil, e1rm: nil, setTypeIndicator: .warmup, isActive: false, isCompleted: true),
+            SetCellModel(id: "2", indexLabel: "1", weight: "80", reps: "8", rir: "2", e1rm: "101", setTypeIndicator: nil, isActive: false, isCompleted: true),
+            SetCellModel(id: "3", indexLabel: "2", weight: "80", reps: "8", rir: "2", e1rm: "101", setTypeIndicator: nil, isActive: true, isCompleted: false),
+            SetCellModel(id: "4", indexLabel: "3", weight: "80", reps: "8", rir: "2", e1rm: "101", setTypeIndicator: nil, isActive: false, isCompleted: false)
         ]
     }
 }
