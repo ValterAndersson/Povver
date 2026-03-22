@@ -31,6 +31,7 @@ public struct UndoToast: View {
                     .clipShape(Capsule())
             }
             .buttonStyle(PlainButtonStyle())
+            .accessibilityLabel("Undo")
         }
         .padding(InsetsToken.symmetric(vertical: Space.sm, horizontal: Space.md))
         .background(Color.accent)

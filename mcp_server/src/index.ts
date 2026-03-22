@@ -1,44 +1,97 @@
 // src/index.ts
+import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { createServer } from 'http';
-import { authenticateApiKey } from './auth.js';
+import { mcpAuthRouter } from '@modelcontextprotocol/sdk/server/auth/router.js';
+import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
+import { PovverOAuthProvider } from './oauth-provider.js';
+import { consumeNonce } from './tokens.js';
 import { registerTools } from './tools.js';
 
 const PORT = parseInt(process.env.PORT || '8080');
+const ISSUER_URL = new URL(process.env.MCP_ISSUER_URL || 'https://mcp.povver.ai');
 
-const httpServer = createServer(async (req, res) => {
-  if (req.method === 'GET' && req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok' }));
-    return;
-  }
+const provider = new PovverOAuthProvider();
 
-  // Extract API key from Authorization header
-  const authHeader = req.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) {
-    res.writeHead(401, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Missing API key' }));
-    return;
-  }
+const app = express();
 
-  const apiKey = authHeader.slice(7);
+// Health check (unauthenticated)
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok' });
+});
 
+// Mount SDK OAuth router (handles /.well-known/*, /authorize, /token, /register)
+app.use(mcpAuthRouter({
+  provider,
+  issuerUrl: ISSUER_URL,
+}));
+
+// Rate limiter for custom OAuth endpoints (10 requests per minute per IP)
+const oauthEndpointLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'rate_limited', error_description: 'Too many requests' },
+});
+
+// Custom endpoint: consent page completion
+app.post('/authorize/complete', oauthEndpointLimiter, express.json(), async (req, res) => {
   try {
-    const auth = await authenticateApiKey(apiKey);
-
-    const server = new McpServer({ name: 'povver', version: '1.0.0' });
-    registerTools(server, auth.userId);
-
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    await server.connect(transport);
-    await transport.handleRequest(req, res);
+    const { id_token, nonce } = req.body;
+    if (!id_token || typeof id_token !== 'string' || !nonce || typeof nonce !== 'string' || nonce.length > 64) {
+      res.status(400).json({ error: 'invalid_request', error_description: 'Missing or invalid id_token or nonce' });
+      return;
+    }
+    const result = await provider.completeAuthorization(id_token, nonce);
+    res.json({ redirect_url: result.redirectUrl });
   } catch (e: any) {
-    res.writeHead(e.message === 'Premium subscription required for MCP access' ? 403 : 401);
-    res.end(JSON.stringify({ error: e.message }));
+    res.status(400).json({ error: 'access_denied', error_description: e.message });
   }
 });
 
-httpServer.listen(PORT, () => {
+// Custom endpoint: consent page denial (redirects with error)
+app.post('/authorize/deny', oauthEndpointLimiter, express.json(), async (req, res) => {
+  try {
+    const { nonce } = req.body;
+    if (!nonce || typeof nonce !== 'string' || nonce.length > 64) {
+      res.status(400).json({ error: 'invalid_request' });
+      return;
+    }
+    const nonceData = await consumeNonce(nonce);
+    if (!nonceData) {
+      res.status(400).json({ error: 'invalid_request', error_description: 'Invalid or expired nonce' });
+      return;
+    }
+    const redirectUrl = new URL(nonceData.redirect_uri);
+    redirectUrl.searchParams.set('error', 'access_denied');
+    if (nonceData.state) redirectUrl.searchParams.set('state', nonceData.state);
+    res.json({ redirect_url: redirectUrl.toString() });
+  } catch (e: any) {
+    res.status(400).json({ error: 'server_error', error_description: e.message });
+  }
+});
+
+// MCP endpoint (Bearer auth required)
+const bearerAuth = requireBearerAuth({ verifier: provider });
+
+app.post('/mcp', bearerAuth, express.json(), async (req, res) => {
+  const userId = req.auth?.extra?.userId as string | undefined;
+
+  if (!userId) {
+    res.status(401).json({ error: 'Authentication failed' });
+    return;
+  }
+
+  const server = new McpServer({ name: 'povver', version: '1.0.0' });
+  registerTools(server, userId);
+
+  const transport = new StreamableHTTPServerTransport();
+  await server.connect(transport);
+  await transport.handleRequest(req, res, req.body);
+});
+
+app.listen(PORT, () => {
   console.log(`MCP server listening on port ${PORT}`);
 });

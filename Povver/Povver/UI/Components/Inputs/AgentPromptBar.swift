@@ -37,6 +37,8 @@ public struct AgentPromptBar: View {
                             HapticManager.primaryAction()
                             onSubmit()
                         }
+                        .accessibilityLabel("Send message")
+                        .accessibilityAddTraits(.isButton)
                         .transition(.asymmetric(
                             insertion: .scale(scale: 0.8).combined(with: .opacity),
                             removal: .opacity
@@ -56,15 +58,18 @@ public struct AgentPromptBar: View {
 
 private struct VoiceLevels: View {
     @State private var phase: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         HStack(spacing: 2) {
             ForEach(0..<4) { i in
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
                     .fill(Color.textSecondary.opacity(0.6))
-                    .frame(width: 2, height: 8 + 6 * abs(sin(phase + CGFloat(i))))
+                    .frame(width: 2, height: reduceMotion ? 10 : 8 + 6 * abs(sin(phase + CGFloat(i))))
             }
         }
         .onAppear {
+            guard !reduceMotion else { return }
             withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
                 phase = .pi
             }

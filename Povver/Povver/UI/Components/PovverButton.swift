@@ -262,6 +262,7 @@ private struct PovverPressStyle: ButtonStyle {
 
 private struct PulsingDot: View {
     @State private var isPulsing = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Circle()
@@ -270,7 +271,7 @@ private struct PulsingDot: View {
             .scaleEffect(isPulsing ? 1.3 : 0.8)
             .opacity(isPulsing ? 1.0 : 0.4)
             .animation(
-                .easeInOut(duration: 0.6).repeatForever(autoreverses: true),
+                reduceMotion ? nil : .easeInOut(duration: 0.6).repeatForever(autoreverses: true),
                 value: isPulsing
             )
             .onAppear { isPulsing = true }

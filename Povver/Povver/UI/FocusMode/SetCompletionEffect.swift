@@ -67,6 +67,8 @@ struct SetCompletionCircle: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(SetCompletionPressStyle())
+        .accessibilityLabel(isComplete ? "Undo set completion" : "Mark set complete")
+        .accessibilityAddTraits(.isButton)
         .onChange(of: isComplete) { _, newValue in
             if newValue {
                 animateCompletion()

@@ -45,6 +45,8 @@ struct FloatingWorkoutBanner: View {
             .shadowStyle(ShadowsToken.level2)
         }
         .buttonStyle(PlainButtonStyle())
+        .accessibilityLabel("Return to \(workoutName)")
+        .accessibilityHint("Double tap to switch to workout")
         .scaleEffect(breatheScale)
         .onAppear {
             withAnimation(.easeInOut(duration: 4).repeatForever(autoreverses: true)) {
