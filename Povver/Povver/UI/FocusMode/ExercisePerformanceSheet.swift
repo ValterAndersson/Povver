@@ -23,7 +23,10 @@ private struct SetFact: Decodable {
     let setIndex: Int
     let weightKg: Double?
     let reps: Int?
+    let rir: Int?
     let e1rm: Double?
+    let isWarmup: Bool
+    let isFailure: Bool
 
     enum CodingKeys: String, CodingKey {
         case workoutId = "workout_id"
@@ -31,7 +34,10 @@ private struct SetFact: Decodable {
         case setIndex = "set_index"
         case weightKg = "weight_kg"
         case reps
+        case rir
         case e1rm
+        case isWarmup = "is_warmup"
+        case isFailure = "is_failure"
     }
 
     init(from decoder: Decoder) throws {
@@ -41,7 +47,23 @@ private struct SetFact: Decodable {
         setIndex = try container.decodeIfPresent(Int.self, forKey: .setIndex) ?? 0
         weightKg = try container.decodeIfPresent(Double.self, forKey: .weightKg)
         reps = try container.decodeIfPresent(Int.self, forKey: .reps)
+        rir = try container.decodeIfPresent(Int.self, forKey: .rir)
         e1rm = try container.decodeIfPresent(Double.self, forKey: .e1rm)
+        isWarmup = try container.decodeIfPresent(Bool.self, forKey: .isWarmup) ?? false
+        isFailure = try container.decodeIfPresent(Bool.self, forKey: .isFailure) ?? false
+    }
+
+    /// Set type indicator matching SetTable convention
+    var setTypeLabel: String? {
+        if isWarmup { return "W" }
+        if isFailure { return "F" }
+        return nil
+    }
+
+    var setTypeColor: Color? {
+        if isWarmup { return Color.warning }
+        if isFailure { return Color.destructive }
+        return nil
     }
 }
 
@@ -258,13 +280,15 @@ struct ExercisePerformanceSheet: View {
                 // Header row
                 HStack(spacing: 0) {
                     Text("Set")
-                        .frame(width: 36, alignment: .leading)
+                        .frame(width: 36, alignment: .center)
                     Text("Weight")
-                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .frame(maxWidth: .infinity, alignment: .center)
                     Text("Reps")
-                        .frame(width: 50, alignment: .trailing)
+                        .frame(width: 44, alignment: .center)
+                    Text("RIR")
+                        .frame(width: 36, alignment: .center)
                     Text("e1RM")
-                        .frame(width: 60, alignment: .trailing)
+                        .frame(width: 52, alignment: .center)
                 }
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(Color.textTertiary)
@@ -291,18 +315,37 @@ struct ExercisePerformanceSheet: View {
 
     private func setRow(index: Int, fact: SetFact) -> some View {
         HStack(spacing: 0) {
-            Text("\(index)")
-                .frame(width: 36, alignment: .leading)
-                .foregroundColor(Color.textSecondary)
-            Text(fact.weightKg.map { WeightFormatter.format($0, unit: weightUnit) } ?? "—")
-                .frame(maxWidth: .infinity, alignment: .trailing)
+            // Set index with type badge
+            ZStack {
+                if let label = fact.setTypeLabel, let color = fact.setTypeColor {
+                    Text(label)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.textInverse)
+                        .frame(width: 22, height: 22)
+                        .background(color)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                } else {
+                    Text("\(index)")
+                        .foregroundColor(Color.textSecondary)
+                }
+            }
+            .frame(width: 36, alignment: .center)
+
+            Text(fact.weightKg.map { WeightFormatter.formatValue($0, unit: weightUnit) } ?? "—")
+                .frame(maxWidth: .infinity, alignment: .center)
                 .foregroundColor(Color.textPrimary)
+
             Text(fact.reps.map { "\($0)" } ?? "—")
-                .frame(width: 50, alignment: .trailing)
+                .frame(width: 44, alignment: .center)
                 .foregroundColor(Color.textPrimary)
+
+            Text(fact.isWarmup ? "—" : (fact.rir.map { "\($0)" } ?? "—"))
+                .frame(width: 36, alignment: .center)
+                .foregroundColor(fact.rir != nil && !fact.isWarmup ? Color.textPrimary : Color.textTertiary)
+
             Text(fact.e1rm.map { WeightFormatter.formatValue($0, unit: weightUnit) } ?? "—")
-                .frame(width: 60, alignment: .trailing)
-                .foregroundColor(Color.textSecondary)
+                .frame(width: 52, alignment: .center)
+                .foregroundColor(fact.e1rm != nil ? Color.textSecondary : Color.textTertiary)
         }
         .font(.system(size: 14).monospacedDigit())
         .padding(.horizontal, Space.md)
