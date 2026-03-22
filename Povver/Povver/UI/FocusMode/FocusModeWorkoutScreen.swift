@@ -110,6 +110,8 @@ struct FocusModeWorkoutScreen: View {
 
     // Error banner (auto-dismiss after 4s)
     @State private var errorBanner: String? = nil
+    @State private var errorDismissTask: Task<Void, Never>?
+    @State private var finishTask: Task<Void, Never>?
 
     // Post-workout summary
     @State private var completedWorkout: CompletedWorkoutRef? = nil
@@ -253,6 +255,8 @@ struct FocusModeWorkoutScreen: View {
             .onDisappear {
                 UIApplication.shared.isIdleTimerDisabled = false
                 stopTimer()
+                errorDismissTask?.cancel()
+                finishTask?.cancel()
             }
             .task {
                 await startWorkoutIfNeeded()
@@ -1137,7 +1141,7 @@ struct FocusModeWorkoutScreen: View {
     
     private func finishWorkout() {
         stopTimer()
-        Task {
+        finishTask = Task {
             do {
                 let archivedId = try await service.completeWorkout()
                 // Held beat of stillness before transition
@@ -1469,9 +1473,11 @@ struct FocusModeWorkoutScreen: View {
     
     /// Show a transient error banner that auto-dismisses after 4 seconds.
     private func showError(_ message: String) {
+        errorDismissTask?.cancel()
         withAnimation(.easeOut(duration: MotionToken.fast)) { errorBanner = message }
-        Task {
+        errorDismissTask = Task {
             try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: MotionToken.fast)) { if errorBanner == message { errorBanner = nil } }
         }
     }
