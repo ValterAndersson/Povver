@@ -170,6 +170,8 @@ All tools are registered in `src/tools.ts` via `registerTools(server, userId)`. 
 | `create_template` | Create new workout template | `name`, `exercises` | `templates.js` |
 | `update_template` | Update existing template | `template_id`, `updates` | `templates.js` |
 
+**Change logging**: All write tools log to `users/{uid}/mcp_change_log` for training analyst visibility. Updates log full args (the actual diff matters for analysis); creates log only the name (analyst reads the full template in its normal context).
+
 **Note**: Workout creation and active workout operations are deliberately excluded to maintain the iOS app as the canonical workout logging interface.
 
 ---
