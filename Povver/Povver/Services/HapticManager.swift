@@ -59,4 +59,63 @@ enum HapticManager {
         lightImpact.prepare()
         lightImpact.impactOccurred()
     }
+
+    // MARK: - Rapid Succession Guard
+
+    /// Tracks last fire time per category to suppress rapid identical haptics.
+    /// @MainActor ensures thread safety — all haptic calls originate from main thread.
+    @MainActor private static var lastFireTime: [String: Date] = [:]
+    private static let suppressionWindow: TimeInterval = 0.2 // 200ms
+
+    /// Fire a haptic only if the same category hasn't fired within the suppression window.
+    @MainActor static func guardedFire(category: String, action: () -> Void) {
+        let now = Date()
+        if let last = lastFireTime[category], now.timeIntervalSince(last) < suppressionWindow {
+            return // Suppress
+        }
+        lastFireTime[category] = now
+        action()
+    }
+
+    /// Reset suppression state (e.g., when scroll ends or context changes)
+    @MainActor static func resetSuppression() {
+        lastFireTime.removeAll()
+    }
+
+    // MARK: - Scroll Suppression
+
+    /// Set to true while user is actively scrolling at high velocity.
+    @MainActor static var isScrollingSuppressed = false
+
+    /// Check if haptics should be suppressed due to active scrolling.
+    @MainActor static var shouldSuppressForScroll: Bool { isScrollingSuppressed }
+
+    // MARK: - Button Haptics
+
+    /// Haptic for button taps. Uses guarded fire to prevent rapid succession.
+    @MainActor static func buttonTap(style: ButtonHapticStyle) {
+        guard !shouldSuppressForScroll else { return }
+        switch style {
+        case .light:
+            guardedFire(category: "button") {
+                lightImpact.prepare()
+                lightImpact.impactOccurred()
+            }
+        case .medium:
+            guardedFire(category: "button") {
+                mediumImpact.prepare()
+                mediumImpact.impactOccurred()
+            }
+        case .none:
+            break
+        }
+    }
+
+    /// Selection haptic for toggles, segments, chips. Uses guarded fire.
+    @MainActor static func selectionChanged() {
+        guard !shouldSuppressForScroll else { return }
+        guardedFire(category: "selection") {
+            UISelectionFeedbackGenerator().selectionChanged()
+        }
+    }
 }
