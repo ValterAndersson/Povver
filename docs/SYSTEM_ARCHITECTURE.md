@@ -52,7 +52,7 @@ Each module doc maintains its own file map:
 │                                                                                 │
 │  ┌─────────────────────────────────────────────────────────────────────────┐   │
 │  │ MCP Server (mcp_server/) — Cloud Run, Node.js/TypeScript               │   │
-│  │  Premium-gated API key auth, imports shared Firebase Functions logic    │   │
+│  │  Premium-gated dual auth (API key + OAuth 2.1 for Claude Desktop)      │   │
 │  └─────────────────────────────────────────────────────────────────────────┘   │
 │                                                                                 │
 │  ┌─────────────────────────────────────────────────────────────────────────┐   │

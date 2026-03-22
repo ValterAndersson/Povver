@@ -50,6 +50,7 @@ Firebase Functions serve as the backend API layer for the Povver fitness platfor
 | **Conversations** | `artifactAction` | Flexible Auth |
 | **Sessions** | ~~`initializeSession`~~, ~~`preWarmSession`~~, ~~`cleanupSessions`~~ | **(REMOVED — sessions eliminated)** |
 | **MCP API Keys** | `generateMcpApiKey`, `listMcpApiKeys`, `revokeMcpApiKey` | Flexible Auth |
+| **MCP OAuth** | `getMcpConnectionStatus`, `revokeMcpTokens`, `cleanupMcpTokens` | Flexible / Scheduled |
 | **Active Workout** | `startActiveWorkout`, `getActiveWorkout`, `logSet`, `completeCurrentSet`, `addExercise`, `swapExercise`, `completeActiveWorkout`, `cancelActiveWorkout`, `proposeSession`, `patchActiveWorkout`, `autofillExercise` | Flexible Auth |
 | **Agents** | `invokeAgent`, `getPlanningContext`, `streamAgentNormalized` | Flexible Auth |
 | **Subscriptions** | `appStoreWebhook`, `syncSubscriptionStatus` | None (webhook) / Flexible (sync) |

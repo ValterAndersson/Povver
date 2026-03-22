@@ -547,6 +547,36 @@ Audit trail for template mutations from all sources. Written by Cloud Functions 
      - `created_at: Timestamp`
      - `last_used_at?: Timestamp` — Updated on each use by MCP Server
 
+22) mcp_oauth_nonces/{nonce}
+   - Temporary session nonces for CSRF protection during OAuth consent flow. Server-only (Admin SDK).
+   - Fields:
+     - `client_id: string` — OAuth client ID
+     - `redirect_uri: string` — OAuth redirect URI
+     - `state?: string` — OAuth state parameter
+     - `code_challenge: string` — PKCE S256 challenge
+     - `code_challenge_method: string` — Always `"S256"`
+     - `expires_at: Timestamp` — 10 minutes from creation
+     - `created_at: Timestamp`
+
+23) mcp_oauth_codes/{code_hash}
+   - Temporary, single-use authorization codes. Server-only (Admin SDK). SHA-256 hash of code as document ID.
+   - Fields:
+     - `user_id: string` — Firebase Auth UID
+     - `code_challenge: string` — PKCE S256 challenge
+     - `redirect_uri: string` — Must match on token exchange
+     - `expires_at: Timestamp` — 5 minutes from creation
+     - `created_at: Timestamp`
+
+24) mcp_oauth_tokens/{token_hash}
+   - OAuth access and refresh tokens. Server-only (Admin SDK). SHA-256 hash of token as document ID.
+   - Fields:
+     - `user_id: string` — Firebase Auth UID
+     - `type: string` — `"access"` or `"refresh"`
+     - `expires_at: Timestamp` — 1h (access) or 90d (refresh)
+     - `created_at: Timestamp`
+     - `last_used_at: Timestamp` — Debounced ~5min updates
+     - `grace_until: Timestamp | null` — For rotated refresh tokens (30s grace window)
+
 ---
 
 ## Global Collections

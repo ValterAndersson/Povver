@@ -66,6 +66,15 @@ const ALLOWED_ORIGINS = new Set([
 
 No wildcard CORS (`Access-Control-Allow-Origin: *`) is permitted. If browser clients are added in the future, add specific origins to the allowlist.
 
+### Browser Client Surface (Consent Page)
+
+The MCP OAuth consent page at `mcp.povver.ai` is a browser client using Firebase Auth JS SDK. This is the only browser-facing surface in the system.
+
+- **CORS**: Same-origin (consent page + `/authorize/complete` both on `mcp.povver.ai`). No CORS headers needed.
+- **CSRF**: Server-generated nonce stored in Firestore, embedded in consent page, validated server-side. Single-use, 10-minute TTL.
+- **Token type enforcement**: Access tokens (`type === "access"`) validated on MCP requests. Refresh tokens (`type === "refresh"`) validated on refresh. Prevents 90-day refresh token from being used as 1-hour access token.
+- **Firebase API key in browser**: The consent page embeds `FIREBASE_API_KEY` in the HTML source. This is standard practice for Firebase browser clients — the key is restricted to authorized domains and Firebase Auth operations only. It is NOT a server secret despite being stored as an env var for deployment convenience.
+
 ### Security Headers
 
 All responses include:
