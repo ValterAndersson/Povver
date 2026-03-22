@@ -13,7 +13,10 @@ public struct ExerciseSwapSheet: View {
     @State private var searchResults: [Exercise] = []
     @State private var isSearching: Bool = false
     @State private var errorMessage: String? = nil
-    
+    @State private var hasLoadedMuscleResults: Bool = false
+    /// Resolved primary muscle for pre-filtering (from currentExercise or catalog lookup)
+    @State private var resolvedPrimaryMuscle: String? = nil
+
     private let exerciseRepo = ExerciseRepository()
     
     enum SwapTab {
@@ -53,6 +56,27 @@ public struct ExerciseSwapSheet: View {
             }
         }
         .presentationDetents([.large])
+        .task {
+            // Resolve primary muscle for pre-filtering the search tab.
+            // Use primaryMuscles from PlanExercise if available; otherwise look up from catalog.
+            if let muscle = currentExercise.primaryMuscles?.first {
+                resolvedPrimaryMuscle = muscle
+            } else if let exerciseId = currentExercise.exerciseId, !exerciseId.isEmpty {
+                do {
+                    if let catalogExercise = try await exerciseRepo.read(id: exerciseId) {
+                        resolvedPrimaryMuscle = catalogExercise.primaryMuscles.first
+                    }
+                } catch {
+                    // Non-critical — search still works without pre-filter
+                }
+            }
+        }
+        .onChange(of: selectedTab) { _, newTab in
+            // Pre-load muscle-matched exercises when user first opens the Search tab
+            if newTab == .manualSearch, !hasLoadedMuscleResults, searchQuery.isEmpty {
+                loadMuscleGroupResults()
+            }
+        }
     }
     
     // MARK: - Current Exercise Header
@@ -231,6 +255,16 @@ public struct ExerciseSwapSheet: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
+                        // Show context header when results are from muscle-group pre-load
+                        if searchQuery.isEmpty, let muscle = resolvedPrimaryMuscle {
+                            Text("\(muscle.capitalized) exercises")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(Color.textSecondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, Space.lg)
+                                .padding(.vertical, Space.xs)
+                        }
+
                         ForEach(searchResults) { exercise in
                             exerciseResultRow(exercise)
                             Divider()
@@ -281,7 +315,37 @@ public struct ExerciseSwapSheet: View {
     }
     
     // MARK: - Search
-    
+
+    /// Pre-loads exercises matching the current exercise's primary muscle group.
+    /// Called once when the user first opens the Search tab.
+    private func loadMuscleGroupResults() {
+        guard let muscle = resolvedPrimaryMuscle else { return }
+        hasLoadedMuscleResults = true
+        isSearching = true
+        errorMessage = nil
+
+        Task {
+            do {
+                let results = try await exerciseRepo.getExercisesByPrimaryMuscle(muscle)
+                // Remove the current exercise from results and limit to 30
+                let filtered = Array(
+                    results
+                        .filter { $0.id != currentExercise.exerciseId }
+                        .prefix(30)
+                )
+                await MainActor.run {
+                    searchResults = filtered
+                    isSearching = false
+                }
+            } catch {
+                await MainActor.run {
+                    // Silently fall back to empty state — user can still search manually
+                    isSearching = false
+                }
+            }
+        }
+    }
+
     private func performSearch() {
         guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         

@@ -68,9 +68,11 @@ enum MuscleGroupMapping: String, CaseIterable {
 struct FocusModeExerciseSearch: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel = ExercisesViewModel()
-    
+
     let onSelect: (Exercise) -> Void
-    
+    /// Pre-applied filters (e.g. muscle group from swap flow). Applied once on appear.
+    var initialFilters: ExerciseFilters = ExerciseFilters()
+
     @State private var searchText = ""
     @State private var filters = ExerciseFilters()
     @State private var showingFilterSheet = false
@@ -142,6 +144,10 @@ struct FocusModeExerciseSearch: View {
             }
         }
         .task {
+            // Apply initial filters once on first load
+            if !initialFilters.isEmpty {
+                filters = initialFilters
+            }
             await viewModel.loadExercises()
         }
         .onChange(of: searchText) { _, newValue in
