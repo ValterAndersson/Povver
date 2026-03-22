@@ -291,11 +291,13 @@ struct ExercisePerformanceSheet: View {
                         .frame(width: 52, alignment: .center)
                 }
                 .font(.system(size: 12, weight: .medium))
-                .foregroundColor(Color.textTertiary)
+                .foregroundColor(Color.accent.opacity(0.6))
                 .padding(.horizontal, Space.md)
                 .padding(.vertical, 6)
 
-                Divider()
+                Rectangle()
+                    .fill(Color.accent.opacity(0.15))
+                    .frame(height: 1)
 
                 ForEach(Array(sets.enumerated()), id: \.offset) { index, setFact in
                     setRow(index: index + 1, fact: setFact)

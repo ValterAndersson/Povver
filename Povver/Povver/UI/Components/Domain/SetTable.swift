@@ -68,8 +68,9 @@ struct SetTable: View {
         VStack(spacing: 0) {
             headerRow
             
-            Divider()
-                .background(Color.surfaceElevated)
+            Rectangle()
+                .fill(Color.accent.opacity(0.15))
+                .frame(height: 1)
             
             ForEach(sets) { set in
                 setRow(set)
@@ -112,7 +113,7 @@ struct SetTable: View {
             }
         }
         .font(.system(size: 11, weight: .semibold))
-        .foregroundColor(Color.textTertiary)
+        .foregroundColor(Color.accent.opacity(0.6))
         .padding(.vertical, Space.xs)
         .padding(.horizontal, Space.sm)
     }
