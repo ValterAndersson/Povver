@@ -152,7 +152,7 @@ All tools are registered in `src/tools.ts` via `registerTools(server, userId)`. 
 | `get_routine` | Get specific routine by ID | `routine_id` | `routines.js` |
 | `list_templates` | List all workout templates | None | `templates.js` |
 | `get_template` | Get specific template by ID | `template_id` | `templates.js` |
-| `list_workouts` | List recent completed workouts | `limit` (default 20) | `workouts.js` |
+| `list_workouts` | List recent completed workouts | `limit` (default 10, max 100) | `workouts.js` |
 | `get_workout` | Get specific workout by ID | `workout_id` | `workouts.js` |
 | `search_exercises` | Search exercise catalog | `query`, `limit` | `exercises.js` |
 | `get_training_analysis` | Get training insights/analysis | `sections` (optional) | `training-queries.js` |

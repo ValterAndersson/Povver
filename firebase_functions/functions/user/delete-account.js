@@ -47,6 +47,10 @@ const USER_SUBCOLLECTIONS = [
   'exercise_usage_stats',
   'set_facts',
   'meta',
+  'mcp_change_log',
+  'agent_memory',
+  'analysis_insights',
+  'weekly_reviews',
 ];
 
 // Subcollections that themselves have sub-subcollections
@@ -133,7 +137,7 @@ async function deleteAccountHandler(req, res) {
     }
 
     // Clean up MCP root collections (keyed by user_id)
-    for (const collection of ['mcp_tokens', 'mcp_oauth_codes', 'mcp_api_keys']) {
+    for (const collection of ['mcp_tokens', 'mcp_oauth_codes', 'mcp_oauth_nonces', 'mcp_api_keys']) {
       let hasMore = true;
       while (hasMore) {
         const snap = await db.collection(collection)

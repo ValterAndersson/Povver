@@ -98,7 +98,7 @@ export class PovverOAuthProvider implements OAuthServerProvider {
   async verifyAccessToken(token: string): Promise<AuthInfo> {
     // OAuth token path
     if (token.startsWith('pvt_')) {
-      const { userId, expiresAt } = await verifyToken(token);
+      const { userId, clientId, expiresAt } = await verifyToken(token);
 
       // Premium check
       const userDoc = await admin.firestore().doc(`users/${userId}`).get();
@@ -110,7 +110,7 @@ export class PovverOAuthProvider implements OAuthServerProvider {
 
       return {
         token,
-        clientId: 'claude-desktop',
+        clientId: clientId || 'oauth',
         scopes: [],
         expiresAt,
         extra: { userId },
@@ -148,7 +148,7 @@ export class PovverOAuthProvider implements OAuthServerProvider {
 
     // Generate auth code
     const code = generateCode();
-    await storeAuthCode(code, userId, nonceData.code_challenge, nonceData.redirect_uri);
+    await storeAuthCode(code, userId, nonceData.code_challenge, nonceData.redirect_uri, nonceData.client_id);
 
     // Build redirect URL
     const redirectUrl = new URL(nonceData.redirect_uri);

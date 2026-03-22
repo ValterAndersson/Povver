@@ -30,7 +30,7 @@ function logMcpChange(
     result_id: resultId || null,
     source: 'mcp',
     created_at: admin.firestore.FieldValue.serverTimestamp(),
-  }).catch(() => {}); // fire-and-forget
+  }).catch((err) => console.warn('[logMcpChange] failed:', err.message)); // fire-and-forget
 }
 
 export function registerTools(server: McpServer, userId: string) {
@@ -77,7 +77,7 @@ export function registerTools(server: McpServer, userId: string) {
 
   // --- Workouts ---
   server.tool('list_workouts', 'List recent workouts (summaries: date, exercises, set counts). Use get_workout for full set data.', {
-    limit: z.number().default(10).describe('Max results (default 10)')
+    limit: z.number().max(100).default(10).describe('Max results (default 10, max 100)')
   }, async ({ limit }) => {
     const result = await workouts.listWorkouts(db, userId, { limit: limit || 10, view: 'summary' });
     return { content: [{ type: 'text' as const, text: JSON.stringify({
@@ -97,7 +97,7 @@ export function registerTools(server: McpServer, userId: string) {
   // --- Exercises ---
   server.tool('search_exercises', 'Search exercise catalog', {
     query: z.string().describe('Search query'),
-    limit: z.number().default(10).describe('Max results')
+    limit: z.number().max(100).default(10).describe('Max results (max 100)')
   }, async ({ query, limit }) => {
     const result = await exercises.searchExercises(db, { query, limit: limit || 10, fields: 'lean' });
     return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
@@ -133,7 +133,7 @@ export function registerTools(server: McpServer, userId: string) {
     muscle_group: z.string().optional().describe('Muscle group (e.g., "chest", "back", "shoulders")'),
     muscle: z.string().optional().describe('Specific muscle (e.g., "posterior deltoid")'),
     exercise_ids: z.array(z.string()).optional().describe('Exercise IDs (max 10)'),
-    limit: z.number().default(50).describe('Max results')
+    limit: z.number().max(200).default(50).describe('Max results (max 200)')
   }, async ({ exercise_name, muscle_group, muscle, exercise_ids, limit }) => {
     const target: Record<string, any> = {};
     if (exercise_name) target.exercise_name = exercise_name;

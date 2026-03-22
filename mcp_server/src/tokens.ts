@@ -100,10 +100,12 @@ export async function storeAuthCode(
   userId: string,
   codeChallenge: string,
   redirectUri: string,
+  clientId?: string,
 ): Promise<void> {
   const hash = hashToken(code);
   await db.collection(COLLECTIONS.codes).doc(hash).set({
     user_id: userId,
+    client_id: clientId || null,
     code_challenge: codeChallenge,
     redirect_uri: redirectUri,
     expires_at: admin.firestore.Timestamp.fromMillis(Date.now() + TTL.code),
@@ -129,7 +131,7 @@ export async function getCodeChallenge(code: string): Promise<string> {
 export async function exchangeCode(
   code: string,
   redirectUri: string,
-): Promise<{ userId: string; accessToken: string; refreshToken: string; expiresIn: number }> {
+): Promise<{ userId: string; clientId: string | null; accessToken: string; refreshToken: string; expiresIn: number }> {
   const codeHash = hashToken(code);
   const accessToken = generateToken();
   const refreshToken = generateToken();
@@ -137,7 +139,7 @@ export async function exchangeCode(
   const refreshHash = hashToken(refreshToken);
   const expiresIn = TTL.access / 1000; // seconds
 
-  const userId = await db.runTransaction(async (tx) => {
+  const { userId, clientId } = await db.runTransaction(async (tx) => {
     const codeDoc = await tx.get(db.collection(COLLECTIONS.codes).doc(codeHash));
     if (!codeDoc.exists) throw new Error('Invalid authorization code');
 
@@ -152,6 +154,7 @@ export async function exchangeCode(
     const now = admin.firestore.Timestamp.now();
     tx.set(db.collection(COLLECTIONS.tokens).doc(accessHash), {
       user_id: data.user_id,
+      client_id: data.client_id || null,
       type: 'access',
       expires_at: admin.firestore.Timestamp.fromMillis(Date.now() + TTL.access),
       created_at: now,
@@ -162,6 +165,7 @@ export async function exchangeCode(
     // Write refresh token
     tx.set(db.collection(COLLECTIONS.tokens).doc(refreshHash), {
       user_id: data.user_id,
+      client_id: data.client_id || null,
       type: 'refresh',
       expires_at: admin.firestore.Timestamp.fromMillis(Date.now() + TTL.refresh),
       created_at: now,
@@ -169,10 +173,10 @@ export async function exchangeCode(
       grace_until: null,
     });
 
-    return data.user_id;
+    return { userId: data.user_id, clientId: data.client_id || null };
   });
 
-  return { userId, accessToken, refreshToken, expiresIn };
+  return { userId, clientId, accessToken, refreshToken, expiresIn };
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +222,7 @@ export async function rotateRefreshToken(
     const now = admin.firestore.Timestamp.now();
     tx.set(db.collection(COLLECTIONS.tokens).doc(newAccessHash), {
       user_id: data.user_id,
+      client_id: data.client_id || null,
       type: 'access',
       expires_at: admin.firestore.Timestamp.fromMillis(Date.now() + TTL.access),
       created_at: now,
@@ -227,6 +232,7 @@ export async function rotateRefreshToken(
 
     tx.set(db.collection(COLLECTIONS.tokens).doc(newRefreshHash), {
       user_id: data.user_id,
+      client_id: data.client_id || null,
       type: 'refresh',
       expires_at: admin.firestore.Timestamp.fromMillis(Date.now() + TTL.refresh),
       created_at: now,
@@ -249,7 +255,7 @@ const lastWriteTimes = new Map<string, number>();
 
 export async function verifyAccessToken(
   token: string,
-): Promise<{ userId: string; expiresAt: number }> {
+): Promise<{ userId: string; clientId: string | null; expiresAt: number }> {
   const hash = hashToken(token);
   const doc = await db.collection(COLLECTIONS.tokens).doc(hash).get();
   if (!doc.exists) throw new Error('Invalid access token');
@@ -265,7 +271,7 @@ export async function verifyAccessToken(
     lastWriteTimes.set(hash, Date.now());
   }
 
-  return { userId: data.user_id, expiresAt: Math.floor(data.expires_at.toMillis() / 1000) };
+  return { userId: data.user_id, clientId: data.client_id || null, expiresAt: Math.floor(data.expires_at.toMillis() / 1000) };
 }
 
 // ---------------------------------------------------------------------------

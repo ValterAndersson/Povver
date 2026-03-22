@@ -15,6 +15,7 @@ const ISSUER_URL = new URL(process.env.MCP_ISSUER_URL || 'https://mcp.povver.ai'
 const provider = new PovverOAuthProvider();
 
 const app = express();
+app.set('trust proxy', true);
 
 // Security headers
 app.use((_req, res, next) => {
