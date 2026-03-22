@@ -330,3 +330,6 @@ exercises_dump_*.json
 .tmp/
 screenshots/
 .worktrees/.mcp.json
+
+# Eval results (contain API responses, potentially sensitive)
+adk_agent/agent_service/tests/eval/comparative/results/*/
