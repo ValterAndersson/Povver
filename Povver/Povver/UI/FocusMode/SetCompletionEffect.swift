@@ -86,6 +86,7 @@ struct SetCompletionCircle: View {
             }
             hasAppeared = true
         }
+        .onDisappear { animationTask?.cancel() }
     }
 
     // MARK: - Animation Choreography

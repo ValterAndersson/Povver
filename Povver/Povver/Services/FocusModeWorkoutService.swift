@@ -175,7 +175,11 @@ class FocusModeWorkoutService: ObservableObject {
         deferredSync = nil
         if let sync {
             Task {
-                try? await sync()
+                do {
+                    try await sync()
+                } catch {
+                    print("[clearUndo] Deferred sync failed: \(error)")
+                }
             }
         }
     }

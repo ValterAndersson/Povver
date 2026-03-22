@@ -255,6 +255,7 @@ struct FocusModeWorkoutScreen: View {
             .onDisappear {
                 UIApplication.shared.isIdleTimerDisabled = false
                 stopTimer()
+                service.clearUndo() // Flush deferred sync before teardown
                 errorDismissTask?.cancel()
                 finishTask?.cancel()
                 pendingSheetTask?.cancel()
