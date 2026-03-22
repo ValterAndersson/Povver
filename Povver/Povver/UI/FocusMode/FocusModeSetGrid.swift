@@ -31,6 +31,10 @@ struct FocusModeSetGrid: View {
     let onRemoveSet: (String) -> Void
     var onToggleAllDone: (() -> Void)? = nil
 
+    /// Ghost values for undone sets (keyed by set ID). Displayed at 40% opacity.
+    /// When user taps done on a set with ghost values and no manual entry, ghost values become actuals.
+    var ghostValues: [String: GhostValues] = [:]
+
     // Row height - larger than typical for gym use (big fingers, sweat)
     private let rowHeight: CGFloat = 52
 
@@ -143,9 +147,10 @@ struct FocusModeSetGrid: View {
                         }
                     },
                     onLogSet: {
-                        let weight = set.displayWeight
-                        let reps = set.displayReps ?? 10
-                        let rir = set.displayRir
+                        let ghost = ghostValues[set.id]
+                        let weight = set.displayWeight ?? ghost?.weight
+                        let reps = set.displayReps ?? ghost?.reps ?? 10
+                        let rir = set.displayRir ?? ghost?.rir
                         onLogSet(exercise.instanceId, set.id, weight, reps, rir)
                         selectedCell = nil
                     },
@@ -210,14 +215,16 @@ struct FocusModeSetGrid: View {
     private func setRow(set: FocusModeSet, index: Int) -> some View {
         GeometryReader { geo in
             let widths = columnWidths(for: geo.size.width)
-            
+            let ghost = ghostValues[set.id]
+
             HStack(spacing: 0) {
                 // SET column
                 setNumberCell(set: set, index: index, width: widths.set)
-                
-                // WEIGHT column
+
+                // WEIGHT column — show ghost value at 40% opacity if no real value
                 valueCell(
                     value: formatWeight(set.displayWeight),
+                    ghostValue: (!set.isDone && set.displayWeight == nil) ? ghost?.weight.map { formatWeight($0) } : nil,
                     isSelected: selectedCell == .weight(exerciseId: exercise.instanceId, setId: set.id),
                     isSecondary: set.isWarmup,
                     isDone: set.isDone,
@@ -227,10 +234,11 @@ struct FocusModeSetGrid: View {
                         selectedCell = .weight(exerciseId: exercise.instanceId, setId: set.id)
                     }
                 }
-                
-                // REPS column
+
+                // REPS column — show ghost value at 40% opacity if no real value
                 valueCell(
                     value: set.displayReps.map { "\($0)" } ?? "—",
+                    ghostValue: (!set.isDone && set.displayReps == nil) ? ghost?.reps.map { "\($0)" } : nil,
                     isSelected: selectedCell == .reps(exerciseId: exercise.instanceId, setId: set.id),
                     isSecondary: set.isWarmup,
                     isDone: set.isDone,
@@ -240,10 +248,11 @@ struct FocusModeSetGrid: View {
                         selectedCell = .reps(exerciseId: exercise.instanceId, setId: set.id)
                     }
                 }
-                
-                // RIR column
+
+                // RIR column — show ghost value at 40% opacity if no real value
                 valueCell(
                     value: set.isWarmup ? "—" : (set.displayRir.map { "\($0)" } ?? "—"),
+                    ghostValue: (!set.isDone && !set.isWarmup && set.displayRir == nil) ? ghost?.rir.map { "\($0)" } : nil,
                     isSelected: selectedCell == .rir(exerciseId: exercise.instanceId, setId: set.id),
                     isSecondary: set.isWarmup || set.displayRir == nil,
                     isDone: set.isDone,
@@ -255,7 +264,7 @@ struct FocusModeSetGrid: View {
                         }
                     }
                 }
-                
+
                 // DONE column
                 doneCell(set: set, width: widths.done)
             }
@@ -290,9 +299,11 @@ struct FocusModeSetGrid: View {
     }
     
     // MARK: - Value Cell (v1.1 Single Focus Rule)
-    /// Only the selected/editing row gets accentMuted background - no thick colored borders
+    /// Only the selected/editing row gets accentMuted background - no thick colored borders.
+    /// Ghost values are shown at 40% opacity when the set is undone and has no real value.
     private func valueCell(
         value: String,
+        ghostValue: String? = nil,
         isSelected: Bool,
         isSecondary: Bool,
         isDone: Bool,
@@ -300,15 +311,27 @@ struct FocusModeSetGrid: View {
         onTap: @escaping () -> Void
     ) -> some View {
         Button(action: onTap) {
-            Text(value)
-                .font(.system(size: 16, weight: isSelected ? .semibold : .regular).monospacedDigit())
-                .foregroundColor(cellTextColor(isSelected: isSelected, isSecondary: isSecondary, isDone: isDone, value: value))
-                .frame(width: width - 8, height: rowHeight - 12)
-                // Single focus: selected cell gets subtle accentMuted, NO thick border
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(isSelected ? Color.accentMuted : Color.clear)
-                )
+            // If a ghost value exists and the real value is the placeholder "—", show ghost text
+            if let ghostText = ghostValue, value == "—" {
+                Text(ghostText)
+                    .font(.system(size: 16, weight: isSelected ? .semibold : .regular).monospacedDigit())
+                    .foregroundColor(Color.textPrimary)
+                    .opacity(InteractionToken.disabledOpacity)
+                    .frame(width: width - 8, height: rowHeight - 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(isSelected ? Color.accentMuted : Color.clear)
+                    )
+            } else {
+                Text(value)
+                    .font(.system(size: 16, weight: isSelected ? .semibold : .regular).monospacedDigit())
+                    .foregroundColor(cellTextColor(isSelected: isSelected, isSecondary: isSecondary, isDone: isDone, value: value))
+                    .frame(width: width - 8, height: rowHeight - 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(isSelected ? Color.accentMuted : Color.clear)
+                    )
+            }
         }
         .buttonStyle(PlainButtonStyle())
         .frame(width: width)
@@ -317,13 +340,15 @@ struct FocusModeSetGrid: View {
     private func doneCell(set: FocusModeSet, width: CGFloat) -> some View {
         Button {
             if set.isDone {
-                // Already done - tap to undo
+                // Already done — tap to undo (forgiveness)
                 onPatchField(exercise.instanceId, set.id, "status", "planned")
+                HapticManager.selectionTick()
             } else {
-                // Mark as done with current values
-                let weight = set.displayWeight
-                let reps = set.displayReps ?? 10
-                let rir = set.displayRir
+                // Mark as done: use ghost values as fallback when no manual entry exists
+                let ghost = ghostValues[set.id]
+                let weight = set.displayWeight ?? ghost?.weight
+                let reps = set.displayReps ?? ghost?.reps ?? 10
+                let rir = set.displayRir ?? ghost?.rir
                 onLogSet(exercise.instanceId, set.id, weight, reps, rir)
                 HapticManager.setCompleted()
             }

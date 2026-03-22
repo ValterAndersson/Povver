@@ -140,6 +140,9 @@ struct FocusModeExerciseSectionNew: View {
     var onEditNote: (() -> Void)? = nil
     var onSwapExercise: (() -> Void)? = nil
 
+    /// Ghost values for undone sets, resolved from last session or template prescription
+    var ghostValues: [String: GhostValues] = [:]
+
     @State private var showRemoveConfirmation = false
 
     /// Derive selectedCell from screenMode for this exercise
@@ -228,12 +231,17 @@ struct FocusModeExerciseSectionNew: View {
                             onPatchField(exercise.instanceId, s.id, "status", "planned")
                         }
                     } else {
-                        // Log all undone working sets
+                        // Log all undone working sets, using ghost values as fallback
                         for s in exercise.sets where !s.isWarmup && !s.isDone {
-                            onLogSet(exercise.instanceId, s.id, s.displayWeight, s.displayReps ?? 10, s.displayRir)
+                            let ghost = ghostValues[s.id]
+                            let weight = s.displayWeight ?? ghost?.weight
+                            let reps = s.displayReps ?? ghost?.reps ?? 10
+                            let rir = s.displayRir ?? ghost?.rir
+                            onLogSet(exercise.instanceId, s.id, weight, reps, rir)
                         }
                     }
-                }
+                },
+                ghostValues: ghostValues
             )
         }
     }

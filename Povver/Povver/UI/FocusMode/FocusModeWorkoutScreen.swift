@@ -73,6 +73,9 @@ struct FocusModeWorkoutScreen: View {
 
     // Post-workout summary
     @State private var completedWorkout: CompletedWorkoutRef? = nil
+
+    // Ghost values: last-session data fetched once per workout start
+    @State private var hasFetchedLastSession = false
     
     // Template and routine data for start view
     @State private var templates: [FocusModeWorkoutService.TemplateInfo] = []
@@ -779,7 +782,8 @@ struct FocusModeWorkoutScreen: View {
                                     onShowDetails: { presentSheet(.exerciseDetail(exerciseId: exercise.exerciseId, exerciseName: exercise.name)) },
                                     onShowPerformance: { presentSheet(.exercisePerformance(exerciseId: exercise.exerciseId, exerciseName: exercise.name)) },
                                     onEditNote: { presentSheet(.noteEditorExercise(exerciseInstanceId: exercise.instanceId)) },
-                                    onSwapExercise: { presentSheet(.exerciseSwap(exercise: exercise)) }
+                                    onSwapExercise: { presentSheet(.exerciseSwap(exercise: exercise)) },
+                                    ghostValues: ghostValues(for: exercise)
                                 )
                             }
                             .padding(.top, Space.md)
@@ -1147,6 +1151,12 @@ struct FocusModeWorkoutScreen: View {
         // Sync coach VM with current workout
         syncCoachWorkoutId()
 
+        // Fetch last-session data for ghost values (once per workout session)
+        if !hasFetchedLastSession {
+            hasFetchedLastSession = true
+            Task { await service.fetchLastSessionData() }
+        }
+
         // Reset UI state
         screenMode = .normal
         elapsedTime = Date().timeIntervalSince(workout.startTime)
@@ -1322,6 +1332,12 @@ struct FocusModeWorkoutScreen: View {
         }
     }
     
+    /// Resolve ghost values for a given exercise using last-session data from the service.
+    private func ghostValues(for exercise: FocusModeExercise) -> [String: GhostValues] {
+        let lastSession = service.lastSessionData[exercise.exerciseId]
+        return GhostValueResolver.resolve(exercise: exercise, lastSession: lastSession)
+    }
+
     private func autofillExercise(_ exerciseId: String) {
         // TODO: Get AI prescription and call autofillExercise
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
