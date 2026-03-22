@@ -192,14 +192,20 @@ export async function rotateRefreshToken(
 
     const data = oldDoc.data()!;
     if (data.type !== 'refresh') throw new Error('Token is not a refresh token');
-    if (data.expires_at.toMillis() < Date.now()) {
-      // Check grace window
-      if (!data.grace_until || data.grace_until.toMillis() < Date.now()) {
-        throw new Error('Refresh token expired');
+
+    // If already rotated (grace_until set), reject — prevents token multiplication
+    if (data.grace_until) {
+      if (data.grace_until.toMillis() >= Date.now()) {
+        throw new Error('Refresh token already rotated');
       }
+      throw new Error('Refresh token expired');
     }
 
-    // Set grace window on old token (30s) instead of deleting immediately
+    if (data.expires_at.toMillis() < Date.now()) {
+      throw new Error('Refresh token expired');
+    }
+
+    // Mark old token as rotated with grace window (30s) instead of deleting
     tx.update(oldDoc.ref, {
       grace_until: admin.firestore.Timestamp.fromMillis(Date.now() + TTL.grace),
       expires_at: admin.firestore.Timestamp.fromMillis(Date.now() + TTL.grace),

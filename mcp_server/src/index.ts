@@ -16,6 +16,14 @@ const provider = new PovverOAuthProvider();
 
 const app = express();
 
+// Security headers
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
 // Health check (unauthenticated)
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
@@ -40,7 +48,7 @@ const oauthEndpointLimiter = rateLimit({
 app.post('/authorize/complete', oauthEndpointLimiter, express.json(), async (req, res) => {
   try {
     const { id_token, nonce } = req.body;
-    if (!id_token || typeof id_token !== 'string' || !nonce || typeof nonce !== 'string' || nonce.length > 64) {
+    if (!id_token || typeof id_token !== 'string' || id_token.length > 4096 || !nonce || typeof nonce !== 'string' || nonce.length > 64) {
       res.status(400).json({ error: 'invalid_request', error_description: 'Missing or invalid id_token or nonce' });
       return;
     }
@@ -89,7 +97,12 @@ app.post('/mcp', bearerAuth, express.json(), async (req, res) => {
 
   const transport = new StreamableHTTPServerTransport();
   await server.connect(transport);
-  await transport.handleRequest(req, res, req.body);
+  try {
+    await transport.handleRequest(req, res, req.body);
+  } finally {
+    await transport.close();
+    await server.close();
+  }
 });
 
 app.listen(PORT, () => {

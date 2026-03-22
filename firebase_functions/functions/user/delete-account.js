@@ -132,8 +132,8 @@ async function deleteAccountHandler(req, res) {
       totalDeleted += 1;
     }
 
-    // Clean up MCP OAuth tokens and codes (root collections, keyed by user_id)
-    for (const collection of ['mcp_tokens', 'mcp_oauth_codes']) {
+    // Clean up MCP root collections (keyed by user_id)
+    for (const collection of ['mcp_tokens', 'mcp_oauth_codes', 'mcp_api_keys']) {
       let hasMore = true;
       while (hasMore) {
         const snap = await db.collection(collection)

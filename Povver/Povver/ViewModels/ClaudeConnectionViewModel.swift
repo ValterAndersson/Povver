@@ -1,6 +1,6 @@
 import Foundation
 
-enum ClaudeConnectionState {
+enum ClaudeConnectionState: Equatable {
     case loading
     case notConnected
     case connected(lastUsedAt: Date?)

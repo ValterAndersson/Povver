@@ -5,6 +5,7 @@ import SwiftUI
 struct ClaudeConnectionSection: View {
     @StateObject private var viewModel = ClaudeConnectionViewModel()
     @State private var showDisconnectAlert = false
+    @State private var showingPaywall = false
 
     private let mcpUrl = "https://mcp.povver.ai"
 
@@ -48,6 +49,9 @@ struct ClaudeConnectionSection: View {
         .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         .padding(.horizontal, Space.lg)
         .task { await viewModel.checkStatus() }
+        .sheet(isPresented: $showingPaywall) {
+            PaywallView()
+        }
         .alert("Disconnect Claude?", isPresented: $showDisconnectAlert) {
             Button("Disconnect", role: .destructive) {
                 Task { await viewModel.disconnect() }
@@ -102,7 +106,7 @@ struct ClaudeConnectionSection: View {
                 .font(.system(size: 14, weight: .medium))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, Space.sm)
-                .background(Color.surface.opacity(0.06))
+                .background(Color.accent.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
             }
             .foregroundColor(Color.accent)
@@ -114,7 +118,7 @@ struct ClaudeConnectionSection: View {
     private func connectedContent(lastUsedAt: Date?) -> some View {
         VStack(alignment: .leading, spacing: Space.md) {
             if let lastUsed = lastUsedAt {
-                Text("Last used \(lastUsed, style: .relative) ago")
+                Text("Last used \(lastUsed, style: .relative)")
                     .font(.system(size: 12))
                     .foregroundColor(Color.textSecondary)
             }
@@ -150,7 +154,7 @@ struct ClaudeConnectionSection: View {
                 .foregroundColor(Color.textSecondary)
 
             Button {
-                // Present paywall — follow existing pattern in the codebase
+                showingPaywall = true
             } label: {
                 Text("Upgrade")
                     .font(.system(size: 16, weight: .semibold))
