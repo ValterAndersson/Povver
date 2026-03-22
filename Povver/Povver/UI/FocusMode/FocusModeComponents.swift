@@ -7,6 +7,16 @@
 
 import SwiftUI
 
+// MARK: - Exercise Density
+
+/// Contextual density levels for exercise sections.
+/// Controls how much detail each exercise card shows based on its completion state.
+enum ExerciseDensity: Equatable {
+    case active      // Full set grid, large touch targets, ~60% of screen
+    case completed   // Compressed: name + set count + emerald left-edge bar. Tappable to expand.
+    case upcoming    // Minimal: name + set count, subdued opacity
+}
+
 // MARK: - Screen Mode State Machine
 
 /// Cell types for editing in the set grid

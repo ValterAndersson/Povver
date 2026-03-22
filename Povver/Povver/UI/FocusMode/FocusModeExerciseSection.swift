@@ -127,6 +127,7 @@ struct FocusModeExerciseSection: View {
 struct FocusModeExerciseSectionNew: View {
     let exercise: FocusModeExercise
     let isActive: Bool
+    let density: ExerciseDensity
     @Binding var screenMode: FocusModeScreenMode
 
     let onLogSet: (String, String, Double?, Int, Int?) -> Void
@@ -147,6 +148,9 @@ struct FocusModeExerciseSectionNew: View {
     var isLastExercise: Bool = false
 
     @State private var showRemoveConfirmation = false
+
+    /// Manual expansion override for completed exercises (tappable to expand)
+    @State private var isExpandedOverride = false
 
     /// Derive selectedCell from screenMode for this exercise
     private var selectedCell: Binding<FocusModeGridCell?> {
@@ -206,7 +210,34 @@ struct FocusModeExerciseSectionNew: View {
         ]
     }
 
+    /// Whether to show compressed view: completed density unless manually expanded
+    private var showCompressed: Bool {
+        density == .completed && !isExpandedOverride
+    }
+
     var body: some View {
+        Group {
+            if showCompressed {
+                completedCompressedRow
+            } else {
+                fullExerciseContent
+                    .opacity(density == .upcoming ? 0.6 : 1.0)
+            }
+        }
+        .onChange(of: density) { oldDensity, newDensity in
+            // Fire haptic when exercise transitions to completed
+            if oldDensity != .completed && newDensity == .completed {
+                HapticManager.modeToggle()
+            }
+            // Reset expansion override when density changes away from completed
+            if newDensity != .completed {
+                isExpandedOverride = false
+            }
+        }
+    }
+
+    /// Full exercise content (active/upcoming/expanded-completed)
+    private var fullExerciseContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Exercise Header
             exerciseHeader
@@ -248,6 +279,50 @@ struct FocusModeExerciseSectionNew: View {
                 isLastExercise: isLastExercise
             )
         }
+    }
+
+    /// Compressed summary row for completed exercises
+    private var completedCompressedRow: some View {
+        Button {
+            withAnimation(MotionToken.snappy) {
+                isExpandedOverride = true
+            }
+        } label: {
+            HStack(spacing: 0) {
+                // Emerald left-edge bar
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Color.accent)
+                    .frame(width: 3)
+                    .padding(.vertical, 4)
+                    .revealEffect(isVisible: density == .completed)
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(exercise.name)
+                            .textStyle(.bodyStrong)
+                            .foregroundColor(Color.textPrimary)
+
+                        Text("\(exercise.completedSetsCount)/\(exercise.totalWorkingSetsCount) sets")
+                            .textStyle(.caption)
+                            .foregroundColor(Color.textSecondary)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(Color.success)
+                        .font(.system(size: 20))
+
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(Color.textTertiary)
+                        .padding(.leading, Space.xs)
+                }
+                .padding(.horizontal, Space.md)
+                .padding(.vertical, Space.sm)
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
     }
 
     private var exerciseHeader: some View {

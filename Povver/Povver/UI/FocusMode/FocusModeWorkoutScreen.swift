@@ -178,6 +178,18 @@ struct FocusModeWorkoutScreen: View {
         return service.workout?.exercises.first { !$0.isComplete }?.instanceId
     }
     
+    /// Compute contextual density for an exercise based on completion state and position
+    private func exerciseDensity(for exercise: FocusModeExercise) -> ExerciseDensity {
+        guard let workout = service.workout else { return .active }
+        let firstActiveIndex = workout.exercises.firstIndex { !$0.isComplete }
+        let exerciseIndex = workout.exercises.firstIndex { $0.id == exercise.id }
+        guard let eIdx = exerciseIndex else { return .active }
+
+        if exercise.isComplete { return .completed }
+        if eIdx == firstActiveIndex { return .active }
+        return .upcoming
+    }
+
     /// Total and completed sets for progress display
     private var totalSets: Int {
         service.workout?.exercises.flatMap { $0.sets }.count ?? 0
@@ -804,11 +816,13 @@ struct FocusModeWorkoutScreen: View {
                         ForEach(workout.exercises) { exercise in
                             let isActive = exercise.instanceId == activeExerciseId
                             let isCompleted = exercise.isComplete
+                            let density = exerciseDensity(for: exercise)
 
                             ExerciseCardContainer(isActive: isActive, isCompleted: isCompleted) {
                                 FocusModeExerciseSectionNew(
                                     exercise: exercise,
                                     isActive: isActive,
+                                    density: density,
                                     screenMode: $screenMode,
                                     onLogSet: logSet,
                                     onPatchField: patchField,
@@ -831,6 +845,7 @@ struct FocusModeWorkoutScreen: View {
                                 )
                             }
                             .padding(.top, Space.md)
+                            .animation(MotionToken.snappy, value: density)
                         }
                         
                         // Add Exercise Button (hidden during reorder mode via parent check)
