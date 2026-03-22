@@ -143,6 +143,9 @@ struct FocusModeExerciseSectionNew: View {
     /// Ghost values for undone sets, resolved from last session or template prescription
     var ghostValues: [String: GhostValues] = [:]
 
+    /// Whether this is the last exercise in the workout (for progressive haptic intensity)
+    var isLastExercise: Bool = false
+
     @State private var showRemoveConfirmation = false
 
     /// Derive selectedCell from screenMode for this exercise
@@ -241,7 +244,8 @@ struct FocusModeExerciseSectionNew: View {
                         }
                     }
                 },
-                ghostValues: ghostValues
+                ghostValues: ghostValues,
+                isLastExercise: isLastExercise
             )
         }
     }

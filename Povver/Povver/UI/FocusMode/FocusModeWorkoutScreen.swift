@@ -783,7 +783,8 @@ struct FocusModeWorkoutScreen: View {
                                     onShowPerformance: { presentSheet(.exercisePerformance(exerciseId: exercise.exerciseId, exerciseName: exercise.name)) },
                                     onEditNote: { presentSheet(.noteEditorExercise(exerciseInstanceId: exercise.instanceId)) },
                                     onSwapExercise: { presentSheet(.exerciseSwap(exercise: exercise)) },
-                                    ghostValues: ghostValues(for: exercise)
+                                    ghostValues: ghostValues(for: exercise),
+                                    isLastExercise: exercise.instanceId == workout.exercises.last?.instanceId
                                 )
                             }
                             .padding(.top, Space.md)

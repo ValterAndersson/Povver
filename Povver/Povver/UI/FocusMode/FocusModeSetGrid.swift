@@ -35,6 +35,9 @@ struct FocusModeSetGrid: View {
     /// When user taps done on a set with ghost values and no manual entry, ghost values become actuals.
     var ghostValues: [String: GhostValues] = [:]
 
+    /// Whether this is the last exercise in the workout (for progressive haptics)
+    var isLastExercise: Bool = false
+
     // Row height - larger than typical for gym use (big fingers, sweat)
     private let rowHeight: CGFloat = 52
 
@@ -167,6 +170,7 @@ struct FocusModeSetGrid: View {
             Divider()
                 .padding(.leading, Space.md)
         }
+        .setCompletionFlash(trigger: set.isDone)
         .background(rowBackground(for: set))
     }
     
@@ -338,47 +342,46 @@ struct FocusModeSetGrid: View {
     }
     
     private func doneCell(set: FocusModeSet, width: CGFloat) -> some View {
-        Button {
-            if set.isDone {
-                // Already done — tap to undo (forgiveness)
-                onPatchField(exercise.instanceId, set.id, "status", "planned")
-                HapticManager.selectionTick()
-            } else {
-                // Mark as done: use ghost values as fallback when no manual entry exists
-                let ghost = ghostValues[set.id]
-                let weight = set.displayWeight ?? ghost?.weight
-                let reps = set.displayReps ?? ghost?.reps ?? 10
-                let rir = set.displayRir ?? ghost?.rir
-                onLogSet(exercise.instanceId, set.id, weight, reps, rir)
-                HapticManager.setCompleted()
-            }
-
-        } label: {
-            ZStack {
-                // Circle background: filled when done, ring when not
-                Circle()
-                    .fill(set.isDone ? Color.success.opacity(0.15) : Color.clear)
-                    .frame(width: 20, height: 20)
-
-                Circle()
-                    .stroke(
-                        set.isDone ? Color.success.opacity(0.3) : Color.textSecondary.opacity(0.15),
-                        lineWidth: set.isDone ? 2 : 1.5
-                    )
-                    .frame(width: 20, height: 20)
-
-                // Checkmark when done
+        SetCompletionCircle(
+            isComplete: set.isDone,
+            completionLevel: completionLevel(for: set),
+            action: {
                 if set.isDone {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(Color.success)
+                    // Already done -- tap to undo (forgiveness)
+                    onPatchField(exercise.instanceId, set.id, "status", "planned")
+                    HapticManager.selectionTick()
+                } else {
+                    // Mark as done: use ghost values as fallback when no manual entry exists
+                    let ghost = ghostValues[set.id]
+                    let weight = set.displayWeight ?? ghost?.weight
+                    let reps = set.displayReps ?? ghost?.reps ?? 10
+                    let rir = set.displayRir ?? ghost?.rir
+                    onLogSet(exercise.instanceId, set.id, weight, reps, rir)
+                    // Haptics are fired by SetCompletionCircle based on completionLevel
                 }
             }
-            .frame(width: 44, height: 44) // 44pt hit target
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PlainButtonStyle())
+        )
         .frame(width: width, height: rowHeight)
+    }
+
+    /// Determine the completion level for progressive haptics.
+    /// - Last undone working set of the last exercise = workoutFinal
+    /// - Last undone working set of this exercise = exerciseFinal
+    /// - Otherwise = standard
+    private func completionLevel(for set: FocusModeSet) -> CompletionLevel {
+        // Only working sets participate in progressive intensity
+        guard !set.isWarmup else { return .standard }
+
+        let undoneWorking = workingSets.filter { !$0.isDone }
+        // If this set is the only undone working set, completing it finishes the exercise
+        let isLastUndoneInExercise = undoneWorking.count == 1 && undoneWorking.first?.id == set.id
+
+        if isLastUndoneInExercise && isLastExercise {
+            return .workoutFinal
+        } else if isLastUndoneInExercise {
+            return .exerciseFinal
+        }
+        return .standard
     }
     
     // MARK: - Add Set Button
