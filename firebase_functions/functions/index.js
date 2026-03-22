@@ -122,6 +122,10 @@ const { generateMcpApiKey } = require('./mcp/generate-api-key');
 const { listMcpApiKeys } = require('./mcp/list-api-keys');
 const { revokeMcpApiKey } = require('./mcp/revoke-api-key');
 
+// MCP OAuth Connection Operations
+const { getMcpConnectionStatus } = require('./mcp/get-connection-status');
+const { revokeMcpTokens } = require('./mcp/revoke-tokens');
+
 // Subscription Operations
 const { appStoreWebhook } = require('./subscriptions/app-store-webhook');
 const { syncSubscriptionStatus } = require('./subscriptions/sync-subscription-status');
@@ -314,3 +318,5 @@ exports.syncSubscriptionStatus = syncSubscriptionStatus;
 exports.generateMcpApiKey = generateMcpApiKey;
 exports.listMcpApiKeys = listMcpApiKeys;
 exports.revokeMcpApiKey = revokeMcpApiKey;
+exports.getMcpConnectionStatus = getMcpConnectionStatus;
+exports.revokeMcpTokens = revokeMcpTokens;
