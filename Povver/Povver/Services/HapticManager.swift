@@ -5,6 +5,7 @@ enum HapticManager {
     private static let lightImpact = UIImpactFeedbackGenerator(style: .light)
     private static let mediumImpact = UIImpactFeedbackGenerator(style: .medium)
     private static let notification = UINotificationFeedbackGenerator()
+    private static let selection = UISelectionFeedbackGenerator()
 
     static func prepare() {
         lightImpact.prepare()
@@ -115,7 +116,8 @@ enum HapticManager {
     @MainActor static func selectionChanged() {
         guard !shouldSuppressForScroll else { return }
         guardedFire(category: "selection") {
-            UISelectionFeedbackGenerator().selectionChanged()
+            selection.prepare()
+            selection.selectionChanged()
         }
     }
 }

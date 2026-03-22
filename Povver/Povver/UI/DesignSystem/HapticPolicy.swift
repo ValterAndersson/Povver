@@ -33,12 +33,8 @@ public extension View {
 
 struct ScrollHapticSuppression: ViewModifier {
     func body(content: Content) -> some View {
-        if #available(iOS 18.0, *) {
-            content.onScrollPhaseChange { _, newPhase in
-                HapticManager.isScrollingSuppressed = (newPhase == .interacting || newPhase == .decelerating)
-            }
-        } else {
-            content
+        content.onScrollPhaseChange { _, newPhase in
+            HapticManager.isScrollingSuppressed = (newPhase == .interacting || newPhase == .decelerating)
         }
     }
 }
