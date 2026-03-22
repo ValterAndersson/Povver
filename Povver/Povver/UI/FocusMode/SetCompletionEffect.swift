@@ -32,6 +32,7 @@ struct SetCompletionCircle: View {
     @State private var pulseScale: CGFloat = 1.0
     @State private var checkmarkTrim: CGFloat = 0
     @State private var hasAppeared = false
+    @State private var animationTask: Task<Void, Never>?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -95,7 +96,9 @@ struct SetCompletionCircle: View {
             fillProgress = 1.0
             checkmarkTrim = 1.0
             pulseScale = 1.0
-            fireHaptics(completionLevel)
+            animationTask = Task { @MainActor in
+                await fireHaptics(completionLevel)
+            }
             return
         }
 
@@ -104,31 +107,34 @@ struct SetCompletionCircle: View {
             fillProgress = 1.0
         }
 
-        // 2. Pulse: scale to 1.15 with bouncy spring + haptic at peak
+        // 2. Pulse: scale to 1.15 with bouncy spring
         withAnimation(.bouncy) {
             pulseScale = 1.15
         }
-        // Fire haptic at pulse peak (~0.15s in)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            fireHaptics(completionLevel)
-        }
 
-        // Return scale to 1.0
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            withAnimation(.bouncy) {
-                pulseScale = 1.0
-            }
-        }
+        // Choreograph delayed steps via cancellable Task
+        animationTask = Task { @MainActor in
+            // Fire haptic at pulse peak (~0.15s in)
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            await fireHaptics(completionLevel)
 
-        // 3. Checkmark: stroke draw 0.2s easeOut (starts at ~0.15s)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            // Checkmark: stroke draw 0.2s easeOut (starts at ~0.15s)
             withAnimation(.easeOut(duration: 0.2)) {
                 checkmarkTrim = 1.0
+            }
+
+            // Return scale to 1.0 (at ~0.2s from start, so 0.05s after haptic)
+            try? await Task.sleep(for: .milliseconds(50))
+            guard !Task.isCancelled else { return }
+            withAnimation(.bouncy) {
+                pulseScale = 1.0
             }
         }
     }
 
     private func animateReset() {
+        animationTask?.cancel()
         withAnimation(.easeOut(duration: 0.15)) {
             fillProgress = 0
             checkmarkTrim = 0
@@ -138,7 +144,7 @@ struct SetCompletionCircle: View {
 
     // MARK: - Progressive Haptics
 
-    private func fireHaptics(_ level: CompletionLevel) {
+    private func fireHaptics(_ level: CompletionLevel) async {
         // Base: light impact
         HapticManager.setCompleted()
 
@@ -146,16 +152,16 @@ struct SetCompletionCircle: View {
         case .standard:
             break
         case .exerciseFinal:
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                HapticManager.modeToggle()
-            }
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            HapticManager.modeToggle()
         case .workoutFinal:
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                HapticManager.modeToggle()
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
-                HapticManager.workoutCompleted()
-            }
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            HapticManager.modeToggle()
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            HapticManager.workoutCompleted()
         }
     }
 }
