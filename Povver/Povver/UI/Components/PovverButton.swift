@@ -33,6 +33,7 @@ public struct PovverButton: View {
     @State private var showingIndicator = false
     @State private var showingSuccess = false
     @State private var loadingTask: Task<Void, Never>?
+    @State private var actionTask: Task<Void, Never>?
 
     @Environment(\.povverTheme) private var theme
     @Environment(\.isEnabled) private var isEnabled
@@ -147,11 +148,18 @@ public struct PovverButton: View {
         .onChange(of: isLoading) { _, newValue in
             if newValue {
                 startLoadingSequence()
-            } else if showingIndicator {
-                endLoadingSequence()
+            } else {
+                loadingTask?.cancel()
+                loadingTask = nil
+                if showingIndicator {
+                    endLoadingSequence()
+                }
             }
         }
-        .onDisappear { loadingTask?.cancel() }
+        .onDisappear {
+            actionTask?.cancel()
+            loadingTask?.cancel()
+        }
     }
 
     // MARK: - Colors (moved from MappedButtonStyle)
@@ -200,7 +208,7 @@ public struct PovverButton: View {
 
         if let asyncAction {
             internalLoading = true
-            Task {
+            actionTask = Task {
                 await asyncAction()
                 internalLoading = false
             }
