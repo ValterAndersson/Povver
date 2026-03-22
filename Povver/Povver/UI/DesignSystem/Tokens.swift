@@ -145,12 +145,12 @@ public enum InteractionToken {
     public static let pressScale: CGFloat = 0.97
     /// Press brightness factor (~90%)
     public static let pressBrightness: Double = -0.08
-    /// Loading indicator delay before showing
+    /// Delay before showing a loading indicator (prevents flash for fast operations)
     public static let loadingDelay: Duration = .milliseconds(300)
-    /// Minimum loading indicator display time
-    public static let loadingMinDisplay: Duration = .milliseconds(600)
-    /// Minimum display for any loading indicator (prevents flash-of-spinner)
-    public static let minimumLoadingDisplay: Duration = .milliseconds(400)
+    /// Minimum display time for button loading states (once shown, keep visible this long)
+    public static let buttonLoadingMinDisplay: Duration = .milliseconds(600)
+    /// Minimum display time for structural/content loading indicators
+    public static let contentLoadingMinDisplay: Duration = .milliseconds(400)
 }
 
 public struct ShadowStyle: Equatable {

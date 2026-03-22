@@ -35,10 +35,11 @@ struct RevealEffect: ViewModifier {
     }
 }
 
-// MARK: - Transform Intent
+// MARK: - Morph Intent (spec name: Transform)
 // System spring, element morphs. Reduce Motion: 0.2s cross-fade.
+// Named "morph" to avoid collision with SwiftUI's built-in .transformEffect(_: CGAffineTransform).
 
-struct TransformEffect: ViewModifier {
+struct MorphEffect: ViewModifier {
     let isTransformed: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -133,9 +134,9 @@ public extension View {
         modifier(RevealEffect(isVisible: isVisible))
     }
 
-    /// Transform intent: spring animation for state changes
-    func transformEffect(isTransformed: Bool) -> some View {
-        modifier(TransformEffect(isTransformed: isTransformed))
+    /// Transform/morph intent: spring animation for state changes
+    func morphEffect(isTransformed: Bool) -> some View {
+        modifier(MorphEffect(isTransformed: isTransformed))
     }
 
     /// Exit intent: fade-out + slide for removing content
