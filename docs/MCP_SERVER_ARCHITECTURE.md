@@ -24,9 +24,10 @@ The MCP server is an HTTP service that exposes Povver training data and operatio
 **Purpose**: Enable premium users to connect their preferred AI assistant to their Povver training data for personalized workout planning, progress analysis, and training recommendations.
 
 **Runtime**: Node.js 20 + TypeScript
-**Framework**: `@modelcontextprotocol/sdk` v1.0.0
+**Framework**: `@modelcontextprotocol/sdk` ^1.27.1, Express 5
 **Transport**: Streamable HTTP (SSE-compatible)
 **Deployment**: Google Cloud Run (us-central1)
+**Custom Domain**: `https://mcp.povver.ai`
 
 ---
 
@@ -35,14 +36,19 @@ The MCP server is an HTTP service that exposes Povver training data and operatio
 ### Request Flow
 
 ```
-External LLM Client (Claude Desktop, ChatGPT)
-  ↓ HTTP POST with Bearer token (MCP API key)
-MCP Server (Cloud Run)
-  ↓ SHA-256 hash lookup in `mcp_api_keys`
-  ↓ Premium validation via `users/{userId}`
-  ↓ Per-request MCP server instance
+External LLM Client (Claude Desktop, ChatGPT, Cursor)
+  ↓ HTTP POST/GET to https://mcp.povver.ai/ with Bearer token
+MCP Server (Express 5 on Cloud Run)
+  ↓ requireBearerAuth middleware (MCP SDK)
+  ↓ Token prefix routing:
+  │   pvt_ → OAuth token → Firestore mcp_tokens/{hash}
+  │   pvk_ → API key → Firestore mcp_api_keys/{hash}
+  │   none → legacy API key → same as pvk_
+  ↓ Premium validation via users/{userId}
+  ↓ Per-request McpServer instance + StreamableHTTPServerTransport
   ↓ Tool calls → Shared business logic (from Firebase Functions)
   ↓ Firestore read/write
+  ↓ Transport + server closed after each request
 ```
 
 ### Transport
@@ -54,57 +60,82 @@ The server uses **StreamableHTTPServerTransport** from the MCP SDK, which suppor
 - Stateless per-request authentication
 
 Each incoming HTTP request:
-1. Extracts API key from `Authorization: Bearer <key>` header
-2. Authenticates and validates premium status
+1. SDK `requireBearerAuth` extracts Bearer token
+2. `PovverOAuthProvider.verifyAccessToken()` routes by prefix and validates premium
 3. Creates a new `McpServer` instance scoped to that user
 4. Registers tools with userId bound to closures
 5. Delegates to `StreamableHTTPServerTransport.handleRequest()`
+6. Transport and server closed in `finally` block to prevent resource leaks
 
 ### File Structure
 
 ```
 mcp_server/
 ├── src/
-│   ├── index.ts        # HTTP server, auth middleware, health endpoint
-│   ├── auth.ts         # API key authentication + premium validation
-│   └── tools.ts        # MCP tool registration (all 15 tools)
-├── Dockerfile          # Cloud Run container
-├── Makefile            # build, deploy, dev, test
-├── package.json        # Dependencies (@modelcontextprotocol/sdk, firebase-admin)
-└── tsconfig.json       # TypeScript config
+│   ├── index.ts           # Express app, routes, MCP endpoint at /
+│   ├── auth.ts            # API key authentication + premium validation
+│   ├── oauth-provider.ts  # OAuthServerProvider — authorize, token exchange, verify
+│   ├── tokens.ts          # OAuth token/code/nonce generation, hashing, Firestore CRUD
+│   ├── clients-store.ts   # Dynamic client registration with redirect URI validation
+│   ├── consent.ts         # HTML consent page with Firebase Auth JS SDK
+│   └── tools.ts           # MCP tool registration (all 15 tools)
+├── Dockerfile             # Cloud Run container
+├── Makefile               # build, deploy, dev, test
+├── package.json           # Dependencies (@modelcontextprotocol/sdk, express, firebase-admin)
+└── tsconfig.json          # TypeScript config
 ```
 
 ---
 
 ## Authentication
 
-### API Key Flow
+The server supports two authentication paths, routed by token prefix:
+
+### OAuth 2.1 Flow (Claude Desktop — `pvt_` prefix)
+
+Claude Desktop uses OAuth 2.1 with PKCE (S256) for public clients. The full flow:
+
+1. **Discovery**: Client fetches `/.well-known/oauth-authorization-server` for endpoints
+2. **Registration**: Client `POST /register` with its redirect URI (dynamic localhost port). In-memory store validates URI against allowlist (localhost, 127.0.0.1, claude.ai)
+3. **Authorization**: Client opens browser to `/authorize` → consent page served
+4. **Sign-in**: User signs in via Firebase Auth JS SDK (Apple/Google/Email) on consent page
+5. **Consent**: User clicks "Allow access" → `POST /authorize/complete` with Firebase ID token + nonce
+6. **Code exchange**: Server validates nonce (single-use, transactional), verifies Firebase ID token, generates auth code, redirects to client callback
+7. **Token exchange**: Client `POST /token` with auth code + PKCE verifier → server returns `pvt_`-prefixed access + refresh tokens
+8. **MCP requests**: Client sends Bearer token with each request to `/`
+
+**Token storage**: Only SHA-256 hashes stored in Firestore `mcp_tokens/{hash}`. Raw tokens never persisted.
+
+**Token rotation**: Refresh tokens are rotated on each use. Old token marked with `grace_until` (30s) rather than deleted immediately. Retries with an already-rotated token are rejected to prevent token multiplication.
+
+**Implementation**: `src/oauth-provider.ts`, `src/tokens.ts`, `src/clients-store.ts`, `src/consent.ts`
+
+### API Key Flow (Cursor, scripts — `pvk_` or no prefix)
 
 1. **Client** includes `Authorization: Bearer <mcp_api_key>` in request
 2. **Server** computes `SHA-256(api_key)` → keyHash
 3. **Firestore lookup**: `mcp_api_keys/{keyHash}`
-4. **Premium validation**: Read `users/{user_id}` and check:
-   - `subscription_override === 'premium'` OR
-   - `subscription_tier === 'premium'`
+4. **Premium validation**: Read `users/{user_id}` and check subscription status
 5. **Update timestamp**: Set `last_used_at` to server timestamp
 6. **Bind userId**: All tool calls scoped to authenticated user
 
 **Implementation**: `src/auth.ts` → `authenticateApiKey(apiKey): Promise<AuthResult>`
 
-**Error codes**:
-- `401` - Invalid API key or user not found
-- `403` - Valid key but user is not premium
-
 ### Premium Gate
 
-MCP access is **premium-only**. The server mirrors the `isPremiumUser()` logic from `firebase_functions/functions/utils/auth-helpers.js` to ensure consistency with the rest of the platform.
+MCP access is **premium-only** for both auth paths. The server mirrors the `isPremiumUser()` logic from `firebase_functions/functions/utils/auth-helpers.js`:
+- `subscription_override === 'premium'` OR
+- `subscription_tier === 'premium'`
 
-Non-premium users who attempt to connect receive:
-```json
-{
-  "error": "Premium subscription required for MCP access"
-}
-```
+### OAuth Firestore Collections
+
+| Collection | Purpose | Security Rules |
+|------------|---------|----------------|
+| `mcp_tokens/{hash}` | Access + refresh token records | Deny-all (Admin SDK only) |
+| `mcp_oauth_codes/{hash}` | Single-use auth codes | Deny-all (Admin SDK only) |
+| `mcp_oauth_nonces/{nonce}` | CSRF nonces for consent flow | Deny-all (Admin SDK only) |
+
+All read-then-write operations use `runTransaction` to prevent race conditions.
 
 ---
 
@@ -198,10 +229,16 @@ make deploy
 4. Cloud Run builds container from Dockerfile
 5. Cleanup: `rm -rf shared/`
 
-**Environment**:
-- `GOOGLE_CLOUD_PROJECT=myon-53d85` (set via `--set-env-vars`)
+**Environment** (all set via Makefile `--set-env-vars`):
+- `GOOGLE_CLOUD_PROJECT=myon-53d85`
+- `MCP_ISSUER_URL=https://mcp.povver.ai` — OAuth discovery issuer
+- `FIREBASE_API_KEY` — Used by consent page Firebase Auth JS SDK
 - `PORT=8080` (default, overridden by Cloud Run)
 - Firebase Admin SDK auto-configures from service account
+
+**Custom Domain**: `mcp.povver.ai` → Cloud Run domain mapping with managed SSL. DNS: CNAME to `ghs.googlehosted.com` (Route 53).
+
+**Important**: The Makefile uses `--set-env-vars` which replaces ALL env vars. Every env var must be included in the deploy command.
 
 ### Health Endpoint
 
@@ -216,15 +253,26 @@ Used for Cloud Run health checks and uptime monitoring.
 
 ## Client Configuration
 
-### Claude Desktop
+### Claude Desktop (OAuth — recommended)
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+1. Open Claude Desktop → Settings → Connectors → Add custom connector
+2. Enter URL: `https://mcp.povver.ai`
+3. Claude Desktop initiates OAuth — opens browser to consent page
+4. User signs in with Apple/Google/Email (same account as Povver app)
+5. Click "Allow access" → Claude Desktop receives tokens automatically
+6. Done — Claude can access training data via MCP tools
+
+No manual config file editing required. Claude Desktop handles OAuth registration, authorization, and token management automatically.
+
+### Cursor / Other Clients (API Key)
+
+Add to MCP client config:
 
 ```json
 {
   "mcpServers": {
     "povver": {
-      "url": "https://mcp-server-<hash>-uc.a.run.app",
+      "url": "https://mcp.povver.ai",
       "headers": {
         "Authorization": "Bearer <user_mcp_api_key>"
       }
@@ -233,27 +281,23 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-### ChatGPT (via MCP Bridge)
-
-Configure in ChatGPT settings → Integrations → MCP Servers:
-
-```
-URL: https://mcp-server-<hash>-uc.a.run.app
-Auth: Bearer <user_mcp_api_key>
-```
-
 ### Obtaining API Keys
 
 Users generate MCP API keys via the Povver iOS app:
-1. Settings → Developer → MCP API Keys
+1. Settings → Connected Apps → MCP API Keys
 2. Tap "Create New Key"
 3. Firebase Function `createMcpApiKey` generates:
-   - Random 32-byte API key (hex-encoded)
+   - Random 32-byte key with `pvk_` prefix (hex-encoded)
    - SHA-256 hash stored in `mcp_api_keys/{hash}`
    - Key document fields: `user_id`, `name`, `created_at`, `last_used_at`
 4. Key displayed once (never stored plaintext)
 
-**Security**: Only the hash is stored in Firestore. Keys cannot be retrieved after initial display.
+### iOS Connection Status
+
+The Povver iOS app shows connection status in Settings → Connected Apps → Claude Desktop section (`ClaudeConnectionSection.swift`). Users can:
+- See if Claude Desktop is connected (checks for non-expired tokens)
+- Copy the MCP URL
+- Disconnect (revokes all OAuth tokens)
 
 ---
 
@@ -265,37 +309,49 @@ Users generate MCP API keys via the Povver iOS app:
 - Premium status validated on every request (not cached)
 - If subscription expires, all MCP requests fail with 403
 
-### API Key Hashing
+### Token Security
 
-- Keys generated via `crypto.randomBytes(32).toString('hex')`
-- Only SHA-256 hash stored in Firestore (`mcp_api_keys/{keyHash}`)
-- Keys are bearer tokens — treat like passwords (HTTPS only)
+- OAuth tokens prefixed `pvt_`, API keys prefixed `pvk_` — enables prefix-based auth routing
+- Only SHA-256 hashes stored in Firestore — raw tokens/keys never persisted
+- All tokens are bearer tokens — HTTPS only (enforced by Cloud Run)
+- OAuth access tokens expire after 1 hour, refresh tokens after 90 days
+- Debounced `last_used_at` updates (5 min per Cloud Run instance) to reduce Firestore writes
 
-### No Direct Firestore Writes from Clients
+### Security Headers
 
-- MCP server does not expose raw Firestore write operations
-- All write tools delegate to shared business logic that enforces:
-  - Ownership validation (`userId` scoped)
-  - Schema validation
-  - Transactional consistency
-  - Proper timestamps (via `serverTimestamp()`)
+Express middleware adds on all responses:
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `Referrer-Policy: strict-origin-when-cross-origin`
 
 ### Rate Limiting
 
-- Cloud Run autoscaling limits concurrent requests
-- Max 5 instances × concurrent requests per instance
-- Consider adding per-user rate limiting if abuse occurs
+- Custom OAuth endpoints (`/authorize/complete`, `/authorize/deny`): 10 req/min/IP via `express-rate-limit`
+- SDK OAuth endpoints (`/authorize`, `/token`, `/register`): SDK-managed rate limiting
+- Cloud Run autoscaling: max 5 instances
+
+### Input Validation
+
+- `id_token` length capped at 4096 bytes (prevents DoS before Firebase Auth verification)
+- `nonce` length capped at 64 characters
+- Dynamic client registration validates redirect URIs against allowlist (localhost, 127.0.0.1, claude.ai)
+
+### CSRF Protection
+
+- Server-generated nonces stored in Firestore (`mcp_oauth_nonces`)
+- Consumed atomically via `runTransaction` — single-use, prevents replay
+- 10-minute TTL
+
+### Cleanup
+
+- `cleanupMcpTokens` scheduled function runs daily, deletes expired documents from all 3 OAuth collections (paginated at 500)
+- Account deletion (`delete-account.js`) purges `mcp_tokens`, `mcp_oauth_codes`, and `mcp_api_keys`
+- Token revocation available via `revokeMcpTokens` Firebase Function and iOS disconnect button
 
 ### Firestore Security Rules
 
-MCP server uses Firebase Admin SDK, which **bypasses Firestore security rules**. This is intentional — the server itself is the security boundary (via API key auth + premium validation).
-
-**Implication**: Any Firestore write path accessible via MCP tools must enforce ownership validation in application code (all shared modules already do this via `userId` parameter).
-
-### Audit Trail
-
-- `last_used_at` timestamp updated on every successful auth
-- Consider adding Cloud Logging for tool invocations if audit requirements increase
+- OAuth collections (`mcp_tokens`, `mcp_oauth_codes`, `mcp_oauth_nonces`) have deny-all rules — Admin SDK only
+- MCP server uses Admin SDK which bypasses rules — the server itself is the security boundary
 
 ---
 
@@ -317,4 +373,6 @@ Potential additions (not currently implemented):
 - **System Architecture**: `docs/SYSTEM_ARCHITECTURE.md`
 - **Security Model**: `docs/SECURITY.md` → "Authentication Model"
 - **Firebase Functions**: `docs/FIREBASE_FUNCTIONS_ARCHITECTURE.md` → "Shared Modules"
-- **Firestore Schema**: `docs/FIRESTORE_SCHEMA.md` → `mcp_api_keys` collection
+- **Firestore Schema**: `docs/FIRESTORE_SCHEMA.md` → `mcp_api_keys`, `mcp_tokens`, `mcp_oauth_codes`, `mcp_oauth_nonces`
+- **OAuth Design Spec**: `docs/superpowers/specs/2026-03-22-mcp-oauth-claude-desktop-design.md`
+- **iOS Views**: `ClaudeConnectionSection.swift`, `ClaudeConnectionViewModel.swift`
