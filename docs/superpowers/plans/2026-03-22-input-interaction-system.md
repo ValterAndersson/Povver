@@ -1394,7 +1394,7 @@ struct SetCompletionCircle: View {
             }
             .scaleEffect(pulseScale)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SetCompletionPressStyle()) // Respond: scale 0.97 on touch-down
         .frame(width: 44, height: 44)
         .onChange(of: isComplete) { oldValue, newValue in
             if newValue && !oldValue { playCompletionAnimation() }
@@ -1407,6 +1407,16 @@ struct SetCompletionCircle: View {
 
     private func handleTap() { onTap() }
     // IMPORTANT: Parent MUST update `isComplete` synchronously after onTap() fires.
+}
+
+/// Respond effect for the done circle: scale 0.97 on touch-down, instant release.
+/// Spec choreography step 1: "Finger touches done circle -- Respond (scale 0.97, instant)."
+private struct SetCompletionPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? InteractionToken.pressScale : 1.0)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+    }
     // Async delay will cause animation to lag or not trigger.
 
     private func playCompletionAnimation() {
@@ -1789,7 +1799,11 @@ func exerciseDensity(for exercise: FocusModeExercise) -> ExerciseDensity {
 Run: `cd /Users/valterandersson/Documents/Povver/Povver && xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Manual test — verify exercise completion total ~0.7s**
+
+In simulator: complete all sets of an exercise. Verify the full choreography (final set signature + emerald left-edge + card compression + medium haptic + next exercise expands) completes in approximately 0.7s from the final set tap. Adjust animation timings if the sequence feels too fast or too slow.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add Povver/Povver/UI/FocusMode/FocusModeExerciseSection.swift Povver/Povver/UI/FocusMode/FocusModeComponents.swift Povver/Povver/UI/FocusMode/FocusModeWorkoutScreen.swift
@@ -2096,6 +2110,15 @@ grep -rn "\.localizedDescription\|error\.message\|\\\(error\)" Povver/Povver/Vie
 ```
 
 Replace any technical error text with user-friendly copy. Spec rule: never show status codes, error class names, or technical identifiers to users.
+
+Also audit for tone violations (exclamation marks, apologies, congratulatory text):
+
+```bash
+grep -rn "Sorry\|Oops\|Great job\|Awesome\|Congrats\|Well done" Povver/Povver/Views/ Povver/Povver/UI/ --include="*.swift" | head -20
+grep -rn '!\"' Povver/Povver/Views/ Povver/Povver/UI/ --include="*.swift" | grep -v "//\|import\|guard\|if \|!=\|#" | head -20
+```
+
+Replace any findings with calm, brief copy per spec voice rules (no exclamation marks, no apologies).
 
 - [ ] **Step 7: Replace workout error banner with inline sync indicators**
 
@@ -2683,19 +2706,32 @@ grep -rn "\.frame(.*height: [0-3][0-9]\b" Povver/Povver/UI/ --include="*.swift" 
 
 If any interactive elements are below 44pt, add `.frame(minHeight: 44)` or adjust padding.
 
-- [ ] **Step 6: Verify Reduce Motion fallbacks**
+- [ ] **Step 6: Audit disabled-vs-hidden states across app**
+
+Spec rule: "Disable when fixable ('fill in email first'). Hide when irrelevant."
+
+```bash
+grep -rn "\.disabled(" Povver/Povver/Views/ Povver/Povver/UI/ --include="*.swift" | head -30
+```
+
+For each disabled element, verify:
+- If the condition is fixable by the user (e.g., empty field) → keep disabled at 40% opacity
+- If the action is irrelevant in the current context → change to conditionally hidden (use `if` to show/hide)
+- Destructive buttons: never disabled, always hide if unavailable (already audited in Task 11)
+
+- [ ] **Step 7: Verify Reduce Motion fallbacks**
 
 Confirm that all new animations check `@Environment(\.accessibilityReduceMotion)`:
 - `SetCompletionCircle` — already has Reduce Motion path
 - `RevealEffect`, `TransformEffect`, `ExitEffect`, `ReflowEffect` — already have fallbacks
 - `PovverButton` press/loading — scale is not motion (no fallback needed), pulsing dot could be made static
 
-- [ ] **Step 7: Build and verify**
+- [ ] **Step 8: Build and verify**
 
 Run: `cd /Users/valterandersson/Documents/Povver/Povver && xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build 2>&1 | tail -5`
 Expected: BUILD SUCCEEDED
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add -A Povver/Povver/
