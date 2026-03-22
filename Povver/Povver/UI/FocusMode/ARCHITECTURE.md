@@ -122,3 +122,61 @@ Both sheet actions use the centralized `FocusModeActiveSheet` enum and the `pres
 ### WorkoutAlertsModifier
 
 Alert/confirmation dialogs (finish, name edit, discard, resume gate) are extracted into a `ViewModifier` to reduce type-checker load on the main `body` computed property.
+
+### Ghost Value Resolution (GhostValueResolver.swift)
+
+Ghost values provide contextual pre-fills in the set grid. Resolution priority:
+1. **Last session data** — weight/reps/RIR from the same set index in the most recent session for this exercise (via `set_facts` subcollection)
+2. **Template prescription** — `targetWeight`/`targetReps`/`targetRir` from the template
+3. **Blank** — no ghost value shown
+
+Ghost values display at 40% opacity. When the user taps "done" on a set with ghost values, the ghost values are accepted as the actual values. User-entered values always take priority over ghosts.
+
+`FocusModeWorkoutService.fetchLastSessionData()` populates `lastSessionData: [String: LastSessionExerciseData]` from Firestore on workout start.
+
+### Auto-Advance Focus Progression (AutoAdvance enum)
+
+After logging a set, focus automatically advances to the next undone set:
+- `AutoAdvance.findNextUndoneSet()` scans exercises/sets in order, skipping done sets
+- **With ghost values**: highlights the done button (user can confirm with one tap)
+- **Without ghost values**: enters weight editing (user can type immediately)
+- **Cross-exercise**: scrolls to the next exercise if needed
+- **All done**: returns to normal mode
+
+### Set Completion Signature (SetCompletionEffect.swift)
+
+Choreographed completion animation (~0.5s total):
+1. Radial fill (accent circle expands)
+2. Pulse (`.bouncy` spring scale)
+3. Haptic feedback
+4. Checkmark appearance
+5. Row flash (subtle highlight)
+
+**Progressive intensity** via `CompletionLevel`:
+- `.standard` — light haptic
+- `.exerciseFinal` — medium haptic (last set in exercise)
+- `.workoutFinal` — success notification haptic (last set in workout)
+
+### Contextual Density (ExerciseDensity enum)
+
+Exercise sections adapt their visual density based on workout state:
+- `.active` — full set grid with editing controls
+- `.completed` — compressed view with emerald left-edge bar, tap to expand
+- `.upcoming` — 0.6 opacity, shown at normal size
+
+### Destructive Action Tiers
+
+Three tiers based on reversibility:
+- **Tier 1** (reversible: remove set/exercise) — immediate action + undo toast (5s window)
+- **Tier 2** (significant: swipe thresholds) — >150pt full swipe or >60pt with release
+- **Tier 3** (irreversible: finish/discard workout, delete template) — standardized confirmation dialog
+
+### Workout Completion Arc
+
+Completion sequence after saving:
+1. Final exercise signature plays
+2. 500ms held beat of stillness
+3. Success haptic fires
+4. Full-screen summary with staggered reveal (200ms intervals across 6 phases)
+
+Summary uses `.revealEffect()` for each phase. Coach reflection loads asynchronously and reveals last.

@@ -55,7 +55,7 @@ async function generateMcpApiKeyHandler(req, res) {
   }
 
   // Generate random key, store only the hash
-  const rawKey = crypto.randomBytes(32).toString('hex');
+  const rawKey = 'pvk_' + crypto.randomBytes(32).toString('hex');
   const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
 
   await db.doc(`mcp_api_keys/${keyHash}`).set({

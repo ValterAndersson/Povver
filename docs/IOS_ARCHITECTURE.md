@@ -501,6 +501,47 @@ Centralized design tokens — all visual values should reference tokens, not har
 
 **Corner Radius:** Use `radiusCard/radiusControl/radiusIcon/pill`. Legacy `small/medium/large/card` are deprecated.
 
+### Interaction Tokens (`UI/DesignSystem/Tokens.swift`)
+
+| Token | Value | Purpose |
+|-------|-------|---------|
+| `InteractionToken.disabledOpacity` | 0.4 | All disabled states |
+| `InteractionToken.pressScale` | 0.97 | Button press feedback |
+| `InteractionToken.pressBrightness` | -0.08 | Button press darkening |
+| `InteractionToken.loadingDelay` | 300ms | Delay before showing spinner |
+| `InteractionToken.buttonLoadingMinDisplay` | 600ms | Min spinner display on buttons |
+| `InteractionToken.contentLoadingMinDisplay` | 400ms | Min spinner display in content |
+
+### Motion Intents (`UI/DesignSystem/MotionIntent.swift`)
+
+Five named animation intents, each with Reduce Motion fallbacks:
+
+| Intent | Modifier | Animation | Reduce Motion |
+|--------|----------|-----------|---------------|
+| Respond | `.respondEffect(isPressed:)` | Scale 0.97 + brightness -0.08 | Same (not motion) |
+| Reveal | `.revealEffect(isVisible:)` | Opacity + 8pt vertical shift | Opacity only |
+| Morph | `.morphEffect(isTransformed:)` | Spring transition | 0.2s cross-fade |
+| Exit | `.exitEffect(isExiting:edge:)` | Fade + slide to edge | Opacity only |
+| Reflow | `.reflowEffect(trigger:)` | Position-only spring | Gentle 0.2s |
+
+### Haptic Policy (`UI/DesignSystem/HapticPolicy.swift`, `Services/HapticManager.swift`)
+
+- `ButtonHapticStyle` enum: `.light`, `.medium`, `.none`
+- Default per button style: `.light` (primary), `.medium` (destructive), `.none` (secondary/ghost)
+- `.buttonHaptic(_:)` view modifier overrides default for descendants
+- **Rapid succession guard**: 200ms suppression window per category
+- **Scroll suppression**: haptics suppressed during active scrolling via `.suppressHapticsWhileScrolling()`
+- All haptic calls go through `HapticManager` — no raw `UIImpactFeedbackGenerator` usage
+
+### Error Communication
+
+| Pattern | Component | Behavior |
+|---------|-----------|----------|
+| Form submission | `InlineError` | Progressive copy (1st → 2nd attempt), coach escalation on 2nd failure |
+| Data loading | `DataLoadingErrorView` | Content-area replacement, retry button, coach escalation |
+| Sync errors | `SyncIndicator` | Per-row indicator (syncing/failed), bottom toast after 3+ retries |
+| Destructive failure | System alert | "Try Again" / "Cancel" |
+
 ### Environment Values
 
 | Key | Type | Purpose |
@@ -513,13 +554,13 @@ Centralized design tokens — all visual values should reference tokens, not har
 |---------|---------|
 | `TrainingDataService` | Reads pre-computed training analytics from Firestore (`weekly_reviews`, `analysis_insights`, `analytics_rollups`). 5-minute in-memory cache. Singleton. |
 | `CoachTabViewModel` | State machine for Coach tab: `newUser`, `workoutDay`, `restDay`, `postWorkout`, `returningAfterInactivity`. Derives state from routine cursor, training snapshot, and post-workout flag. |
-| `HapticManager` | Centralized haptic feedback: `setCompleted()`, `prDetected()`, `workoutCompleted()`, `milestoneUnlocked()`. |
+| `HapticManager` | Centralized haptics with rapid succession guard, scroll suppression, guarded fire. `buttonTap()`, `selectionChanged()`, `modeToggle()`, `confirmAction()`, etc. |
 
 ### Components (`UI/Components/`)
 
 | Component | Purpose |
 |-----------|---------|
-| `PovverButton` | Standard button styles (primary, secondary, destructive) |
+| `PovverButton` | Button with 5 states: idle, pressed, loading, loaded, disabled. Sync/async/external-loading inits. |
 | `SurfaceCard` | Card container with elevation tiers |
 | `CoachPresenceIndicator` | Breathing emerald glow — agent presence indicator |
 | `TrainingConsistencyMap` | 12-week training consistency grid (signature visual) |
@@ -529,6 +570,10 @@ Centralized design tokens — all visual values should reference tokens, not har
 | `AgentPromptBar` | Chat input with send button |
 | `Banner` / `Toast` | Feedback components |
 | `Chip` / `ChipGroup` | Filter chips (neutral selected state) |
+| `PovverTextField` | Text field with 5 states: idle, focused, error, success, disabled |
+| `InlineError` | Progressive error messages with coach escalation |
+| `DataLoadingErrorView` | Content-area error state with retry |
+| `UndoToast` | Timed undo action with auto-dismiss |
 | `Spinner` / `StatusTag` | Auxiliary indicators |
 
 ---
