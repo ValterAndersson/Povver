@@ -8,6 +8,7 @@ const { refineExercise } = require('./exercises/refine-exercise');
 const { searchAliases } = require('./exercises/search-aliases');
 const functions = require('firebase-functions');
 const { onRequest: onRequestV2 } = require('firebase-functions/v2/https');
+const { setGlobalOptions } = require('firebase-functions/v2');
 const admin = require('firebase-admin');
 
 // Initialize admin if not already initialized
@@ -15,10 +16,10 @@ if (!admin.apps.length) {
   admin.initializeApp();
 }
 
-// Runtime options for v1 functions (tiered maxInstances for cost control)
-const readOptions = { maxInstances: 30, timeoutSeconds: 60 };
-const writeOptions = { maxInstances: 10, timeoutSeconds: 60 };
-const agentOptions = { maxInstances: 10, timeoutSeconds: 120 };
+// Cost protection: cap all functions at 30 instances by default.
+// v2 functions can override with their own maxInstances (e.g. streamAgentNormalized: 20).
+// firebase-functions v6 dropped runWith(), so setGlobalOptions is the only way to cap v1 functions.
+setGlobalOptions({ maxInstances: 30 });
 
 // Middleware
 const { withApiKey } = require('./auth/middleware');
@@ -156,21 +157,21 @@ const { onAnalysisInsightCreated, onWeeklyReviewCreated, expireStaleRecommendati
 const { cleanupMcpTokens } = require('./triggers/cleanup-mcp-tokens');
 
 // Export all functions as Firebase HTTPS functions
-exports.health = functions.runWith(readOptions).https.onRequest(health);
+exports.health = functions.https.onRequest(health);
 
 // User Operations
-exports.getUser = functions.runWith(readOptions).https.onRequest((req, res) => withApiKey(getUser)(req, res));
-exports.updateUser = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(updateUser)(req, res));
-exports.getUserPreferences = functions.runWith(readOptions).https.onRequest((req, res) => withApiKey(getUserPreferences)(req, res));
+exports.getUser = functions.https.onRequest((req, res) => withApiKey(getUser)(req, res));
+exports.updateUser = functions.https.onRequest((req, res) => withApiKey(updateUser)(req, res));
+exports.getUserPreferences = functions.https.onRequest((req, res) => withApiKey(getUserPreferences)(req, res));
 // updateUserPreferences is a v2 onRequest with requireFlexibleAuth — called by iOS app
 exports.updateUserPreferences = updateUserPreferences;
-exports.upsertUserAttributes = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(upsertUserAttributes)(req, res));
+exports.upsertUserAttributes = functions.https.onRequest((req, res) => withApiKey(upsertUserAttributes)(req, res));
 // Account deletion — v2 onRequest with requireFlexibleAuth (bearer only, iOS app)
 exports.deleteAccount = deleteAccount;
 
 // Workout Operations
-exports.getUserWorkouts = functions.runWith(readOptions).https.onRequest((req, res) => withApiKey(getUserWorkouts)(req, res));
-exports.getWorkout = functions.runWith(readOptions).https.onRequest((req, res) => withApiKey(getWorkout)(req, res));
+exports.getUserWorkouts = functions.https.onRequest((req, res) => withApiKey(getUserWorkouts)(req, res));
+exports.getWorkout = functions.https.onRequest((req, res) => withApiKey(getWorkout)(req, res));
 // upsertWorkout is a v2 onRequest with requireFlexibleAuth - used by import scripts, not exposed to agents
 exports.upsertWorkout = upsertWorkout;
 // deleteWorkout is a v2 onRequest with requireFlexibleAuth - iOS app calls
@@ -181,48 +182,48 @@ exports.deleteWorkout = deleteWorkout;
 exports.getUserTemplates = getUserTemplates;
 // getTemplate is already a v2 onRequest function with requireFlexibleAuth from get-template.js
 exports.getTemplate = getTemplate;
-exports.createTemplate = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(createTemplate)(req, res));
-exports.updateTemplate = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(updateTemplate)(req, res));
-exports.deleteTemplate = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(deleteTemplate)(req, res));
-exports.createTemplateFromPlan = functions.runWith(writeOptions).https.onRequest((req, res) => requireFlexibleAuth(createTemplateFromPlan)(req, res));
-exports.patchTemplate = functions.runWith(writeOptions).https.onRequest((req, res) => requireFlexibleAuth(patchTemplate)(req, res));
+exports.createTemplate = functions.https.onRequest((req, res) => withApiKey(createTemplate)(req, res));
+exports.updateTemplate = functions.https.onRequest((req, res) => withApiKey(updateTemplate)(req, res));
+exports.deleteTemplate = functions.https.onRequest((req, res) => withApiKey(deleteTemplate)(req, res));
+exports.createTemplateFromPlan = functions.https.onRequest((req, res) => requireFlexibleAuth(createTemplateFromPlan)(req, res));
+exports.patchTemplate = functions.https.onRequest((req, res) => requireFlexibleAuth(patchTemplate)(req, res));
 
 // Routine Operations
 // getUserRoutines is already a v2 onRequest function with requireFlexibleAuth from get-user-routines.js
 exports.getUserRoutines = getUserRoutines;
-exports.getRoutine = functions.runWith(readOptions).https.onRequest((req, res) => requireFlexibleAuth(getRoutine)(req, res));
-exports.createRoutine = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(createRoutine)(req, res));
-exports.updateRoutine = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(updateRoutine)(req, res));
-exports.deleteRoutine = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(deleteRoutine)(req, res));
-exports.getActiveRoutine = functions.runWith(readOptions).https.onRequest((req, res) => withApiKey(getActiveRoutine)(req, res));
-exports.setActiveRoutine = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(setActiveRoutine)(req, res));
+exports.getRoutine = functions.https.onRequest((req, res) => requireFlexibleAuth(getRoutine)(req, res));
+exports.createRoutine = functions.https.onRequest((req, res) => withApiKey(createRoutine)(req, res));
+exports.updateRoutine = functions.https.onRequest((req, res) => withApiKey(updateRoutine)(req, res));
+exports.deleteRoutine = functions.https.onRequest((req, res) => withApiKey(deleteRoutine)(req, res));
+exports.getActiveRoutine = functions.https.onRequest((req, res) => withApiKey(getActiveRoutine)(req, res));
+exports.setActiveRoutine = functions.https.onRequest((req, res) => withApiKey(setActiveRoutine)(req, res));
 exports.getNextWorkout = getNextWorkout;
-exports.patchRoutine = functions.runWith(writeOptions).https.onRequest((req, res) => requireFlexibleAuth(patchRoutine)(req, res));
+exports.patchRoutine = functions.https.onRequest((req, res) => requireFlexibleAuth(patchRoutine)(req, res));
 
 // Exercise Operations
-exports.getExercises = functions.runWith(readOptions).https.onRequest((req, res) => withApiKey(getExercises)(req, res));
-exports.getExercise = functions.runWith(readOptions).https.onRequest((req, res) => withApiKey(getExercise)(req, res));
+exports.getExercises = functions.https.onRequest((req, res) => withApiKey(getExercises)(req, res));
+exports.getExercise = functions.https.onRequest((req, res) => withApiKey(getExercise)(req, res));
 // searchExercises is already a v2 onRequest function from search-exercises.js
 exports.searchExercises = searchExercises;
-exports.upsertExercise = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(upsertExercise)(req, res));
-exports.approveExercise = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(approveExercise)(req, res));
-exports.ensureExerciseExists = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(ensureExerciseExists)(req, res));
-exports.resolveExercise = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(resolveExercise)(req, res));
-exports.mergeExercises = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(mergeExercises)(req, res));
-exports.backfillNormalizeFamily = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(backfillNormalizeFamily)(req, res));
-exports.backupExercises = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(backupExercises)(req, res));
-exports.duplicateCatalog = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(duplicateCatalog)(req, res));
-exports.repointAlias = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(repointAlias)(req, res));
-exports.repointShorthandAliases = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(repointShorthandAliases)(req, res));
-exports.upsertAlias = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(upsertAlias)(req, res));
-exports.deleteAlias = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(deleteAlias)(req, res));
-exports.suggestFamilyVariant = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(suggestFamilyVariant)(req, res));
-exports.suggestAliases = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(suggestAliases)(req, res));
-exports.refineExercise = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(refineExercise)(req, res));
-exports.searchAliases = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(searchAliases)(req, res));
-exports.normalizeCatalog = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(normalizeCatalog)(req, res));
-exports.listFamilies = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(listFamilies)(req, res));
-exports.normalizeCatalogPage = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(normalizeCatalogPage)(req, res));
+exports.upsertExercise = functions.https.onRequest((req, res) => withApiKey(upsertExercise)(req, res));
+exports.approveExercise = functions.https.onRequest((req, res) => withApiKey(approveExercise)(req, res));
+exports.ensureExerciseExists = functions.https.onRequest((req, res) => withApiKey(ensureExerciseExists)(req, res));
+exports.resolveExercise = functions.https.onRequest((req, res) => withApiKey(resolveExercise)(req, res));
+exports.mergeExercises = functions.https.onRequest((req, res) => withApiKey(mergeExercises)(req, res));
+exports.backfillNormalizeFamily = functions.https.onRequest((req, res) => withApiKey(backfillNormalizeFamily)(req, res));
+exports.backupExercises = functions.https.onRequest((req, res) => withApiKey(backupExercises)(req, res));
+exports.duplicateCatalog = functions.https.onRequest((req, res) => withApiKey(duplicateCatalog)(req, res));
+exports.repointAlias = functions.https.onRequest((req, res) => withApiKey(repointAlias)(req, res));
+exports.repointShorthandAliases = functions.https.onRequest((req, res) => withApiKey(repointShorthandAliases)(req, res));
+exports.upsertAlias = functions.https.onRequest((req, res) => withApiKey(upsertAlias)(req, res));
+exports.deleteAlias = functions.https.onRequest((req, res) => withApiKey(deleteAlias)(req, res));
+exports.suggestFamilyVariant = functions.https.onRequest((req, res) => withApiKey(suggestFamilyVariant)(req, res));
+exports.suggestAliases = functions.https.onRequest((req, res) => withApiKey(suggestAliases)(req, res));
+exports.refineExercise = functions.https.onRequest((req, res) => withApiKey(refineExercise)(req, res));
+exports.searchAliases = functions.https.onRequest((req, res) => withApiKey(searchAliases)(req, res));
+exports.normalizeCatalog = functions.https.onRequest((req, res) => withApiKey(normalizeCatalog)(req, res));
+exports.listFamilies = functions.https.onRequest((req, res) => withApiKey(listFamilies)(req, res));
+exports.normalizeCatalogPage = functions.https.onRequest((req, res) => withApiKey(normalizeCatalogPage)(req, res));
 
 // Active Workout Operations (all v2 — already wrapped with onRequest + requireFlexibleAuth internally)
 exports.proposeSession = proposeSession;
@@ -246,8 +247,8 @@ exports.streamOnboardingRoutine = onRequestV2(
   { timeoutSeconds: 120, memory: '256MiB', maxInstances: 10, concurrency: 1 },
   requireFlexibleAuth(streamOnboardingRoutineHandler)
 );
-exports.upsertProgressReport = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(upsertProgressReport)(req, res));
-exports.getProgressReports = functions.runWith(readOptions).https.onRequest((req, res) => requireFlexibleAuth(getProgressReports)(req, res));
+exports.upsertProgressReport = functions.https.onRequest((req, res) => withApiKey(upsertProgressReport)(req, res));
+exports.getProgressReports = functions.https.onRequest((req, res) => requireFlexibleAuth(getProgressReports)(req, res));
 
 // Artifact Operations
 exports.artifactAction = artifactAction;
@@ -256,19 +257,19 @@ exports.artifactAction = artifactAction;
 exports.reviewRecommendation = reviewRecommendation;
 
 // Canvas Operations
-exports.applyAction = functions.runWith(writeOptions).https.onRequest((req, res) => requireFlexibleAuth(applyAction)(req, res));
-exports.proposeCards = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(proposeCards)(req, res));
-exports.expireProposals = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(expireProposals)(req, res));
-exports.emitEvent = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(emitEvent)(req, res));
-exports.purgeCanvas = functions.runWith(writeOptions).https.onRequest((req, res) => requireFlexibleAuth(purgeCanvas)(req, res));
+exports.applyAction = functions.https.onRequest((req, res) => requireFlexibleAuth(applyAction)(req, res));
+exports.proposeCards = functions.https.onRequest((req, res) => withApiKey(proposeCards)(req, res));
+exports.expireProposals = functions.https.onRequest((req, res) => withApiKey(expireProposals)(req, res));
+exports.emitEvent = functions.https.onRequest((req, res) => withApiKey(emitEvent)(req, res));
+exports.purgeCanvas = functions.https.onRequest((req, res) => requireFlexibleAuth(purgeCanvas)(req, res));
 // No-op stubs removed in Phase 7 (openCanvas, bootstrapCanvas, initializeSession, preWarmSession).
 // Conversation ID is now generated client-side; agent service creates docs on first message.
-exports.runAnalyticsForUser = functions.runWith(writeOptions).https.onRequest((req, res) => requireFlexibleAuth(runAnalyticsForUser)(req, res));
-exports.compactAnalyticsForUser = functions.runWith(writeOptions).https.onRequest((req, res) => requireFlexibleAuth(compactAnalyticsForUser)(req, res));
-exports.publishWeeklyJob = functions.runWith(writeOptions).https.onRequest((req, res) => requireFlexibleAuth(publishWeeklyJob)(req, res));
-exports.recalculateWeeklyForUser = functions.runWith(writeOptions).https.onRequest((req, res) => requireFlexibleAuth(recalculateWeeklyForUser)(req, res));
+exports.runAnalyticsForUser = functions.https.onRequest((req, res) => requireFlexibleAuth(runAnalyticsForUser)(req, res));
+exports.compactAnalyticsForUser = functions.https.onRequest((req, res) => requireFlexibleAuth(compactAnalyticsForUser)(req, res));
+exports.publishWeeklyJob = functions.https.onRequest((req, res) => requireFlexibleAuth(publishWeeklyJob)(req, res));
+exports.recalculateWeeklyForUser = functions.https.onRequest((req, res) => requireFlexibleAuth(recalculateWeeklyForUser)(req, res));
 // Agents
-exports.getPlanningContext = functions.runWith(agentOptions).https.onRequest((req, res) => requireFlexibleAuth(getPlanningContext)(req, res));
+exports.getPlanningContext = functions.https.onRequest((req, res) => requireFlexibleAuth(getPlanningContext)(req, res));
 // applyProgression is a v2 onRequest function with built-in CORS
 exports.applyProgression = applyProgression;
 
