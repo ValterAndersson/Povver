@@ -410,11 +410,17 @@ async def _compact_history_if_needed(
 def _format_history(messages: list[dict]) -> list[dict]:
     """Format Firestore messages to LLM history format.
 
+    Tool interactions from prior turns are merged into the assistant's text
+    as a [DATA CONTEXT] block. Gemini's thinking models require thought
+    signatures on native function calls, which are ephemeral — so we can't
+    replay them from stored data. Text-based context achieves the same goal:
+    the model knows what tools it called and what data came back.
+
     Firestore message types → LLM roles:
     - user_prompt   → {"role": "user", "content": ...}
     - agent_response / agentResponse → {"role": "assistant", "content": ...}
-    - tool_calls    → {"role": "assistant", "tool_calls": [...]}
-    - tool_result   → {"role": "tool", "tool_name": ..., "tool_call_id": ..., "tool_result": ...}
+    - tool_calls    → accumulated into next agent_response as [DATA CONTEXT]
+    - tool_result   → accumulated into next agent_response as [DATA CONTEXT]
     - artifact      → skipped (rendered as cards in the UI)
     - summary       → {"role": "user", "content": ...} (compacted history)
     """
@@ -425,33 +431,60 @@ def _format_history(messages: list[dict]) -> list[dict]:
         "agent_response": "assistant",
         "agentResponse": "assistant",
     }
+
+    # First pass: collect tool interactions to merge into assistant responses
+    # The Firestore ordering is: user_prompt → tool_calls → tool_result(s) → agent_response
     formatted = []
+    pending_tool_context: list[str] = []
+
     for msg in messages:
         msg_type = msg.get("type", "user_prompt")
 
-        # Standard text messages
-        role = TYPE_TO_ROLE.get(msg_type)
-        if role:
-            formatted.append({"role": role, "content": msg.get("content", "")})
-            continue
-
-        # Model function calls (persisted by agent_loop)
+        # Accumulate tool calls as text context
         if msg_type == "tool_calls":
             content = msg.get("content", "[]")
             calls = _json.loads(content) if isinstance(content, str) else content
-            formatted.append({"role": "assistant", "tool_calls": calls})
+            for call in calls:
+                pending_tool_context.append(
+                    f"Called {call.get('name', '?')}({_json.dumps(call.get('args', {}), default=str)})"
+                )
             continue
 
-        # Tool results (persisted by agent_loop)
+        # Accumulate tool results as text context
         if msg_type == "tool_result":
             content = msg.get("content", "{}")
             result = _json.loads(content) if isinstance(content, str) else content
+            tool_name = msg.get("tool_name", "unknown")
+            # Compact large results to avoid bloating context
+            result_str = _json.dumps(result, default=str)
+            if len(result_str) > 2000:
+                result_str = result_str[:2000] + "..."
+            pending_tool_context.append(
+                f"Result from {tool_name}: {result_str}"
+            )
+            continue
+
+        # Assistant response — prepend any accumulated tool context
+        role = TYPE_TO_ROLE.get(msg_type)
+        if role == "assistant" and pending_tool_context:
+            tool_block = "[DATA CONTEXT — tools called this turn]\n" + "\n".join(pending_tool_context)
+            content = msg.get("content", "")
             formatted.append({
-                "role": "tool",
-                "tool_name": msg.get("tool_name", "unknown"),
-                "tool_call_id": msg.get("call_id", "unknown"),
-                "tool_result": result,
+                "role": "assistant",
+                "content": tool_block + "\n\n" + content,
             })
+            pending_tool_context.clear()
+            continue
+
+        if role:
+            # Flush any orphaned tool context before a user message
+            if role == "user" and pending_tool_context:
+                formatted.append({
+                    "role": "assistant",
+                    "content": "[DATA CONTEXT — tools called this turn]\n" + "\n".join(pending_tool_context),
+                })
+                pending_tool_context.clear()
+            formatted.append({"role": role, "content": msg.get("content", "")})
             continue
 
         # Compacted history summary
@@ -466,6 +499,14 @@ def _format_history(messages: list[dict]) -> list[dict]:
             continue
 
         # Skip artifacts and unknown types
+
+    # Flush any trailing tool context
+    if pending_tool_context:
+        formatted.append({
+            "role": "assistant",
+            "content": "[DATA CONTEXT — tools called this turn]\n" + "\n".join(pending_tool_context),
+        })
+
     return formatted
 
 
