@@ -19,4 +19,8 @@ COPY utils/ utils/
 COPY shared-package.json shared/package.json
 COPY shared-package.json utils/package.json
 
+# Create non-root user
+RUN adduser --disabled-password --no-create-home --gecos "" appuser
+USER appuser
+
 CMD ["node", "dist/index.js"]

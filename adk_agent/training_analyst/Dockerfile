@@ -28,5 +28,9 @@ COPY workers/ workers/
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD python -c "from workers.analyst_worker import AnalystWorker; print('ok')" || exit 1
 
+# Create non-root user
+RUN adduser --disabled-password --no-create-home --gecos "" appuser
+USER appuser
+
 # Default: run worker
 CMD ["python", "workers/analyst_worker.py"]
