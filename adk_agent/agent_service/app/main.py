@@ -17,6 +17,9 @@ from app.observability import setup_logging, new_trace_id, set_trace_id
 setup_logging()
 logger = logging.getLogger(__name__)
 
+# Defense-in-depth: API key validation (Cloud Run IAM is primary)
+VALID_API_KEYS = set(k for k in os.environ.get("MYON_API_KEY", "").split(",") if k)
+
 # Register all tools at import time
 from app.tools.definitions import register_all_skills
 register_all_skills()
@@ -34,6 +37,11 @@ async def stream_handler(request: Request) -> StreamingResponse:
     }
     Response: SSE stream
     """
+    # Defense-in-depth: API key check (non-blocking if env var not set)
+    api_key = request.headers.get("x-api-key", "")
+    if VALID_API_KEYS and api_key not in VALID_API_KEYS:
+        return JSONResponse(status_code=401, content={"error": "Unauthorized"})
+
     try:
         body = await request.json()
     except Exception:
@@ -82,7 +90,7 @@ async def stream_handler(request: Request) -> StreamingResponse:
 
         fs = get_firestore_client()
         llm_client = GeminiClient()
-        model = os.environ.get("AGENT_MODEL", "gemini-2.5-flash")
+        model = os.environ.get("AGENT_MODEL", "gemini-3-flash-preview")
 
         # Route the request
         lane = route_request(message if isinstance(message, str) else body)
@@ -136,8 +144,8 @@ async def stream_handler(request: Request) -> StreamingResponse:
                     log_request_complete("functional", elapsed, success=True)
                     return
                 except Exception as e:
-                    logger.error("Functional lane error: %s", e)
-                    yield sse_event("error", {"message": str(e)}).encode()
+                    logger.error("Functional lane error: %s", e, exc_info=True)
+                    yield sse_event("error", {"code": "INTERNAL_ERROR", "message": "An internal error occurred"}).encode()
                     elapsed = int((_time.monotonic() - request_start) * 1000)
                     log_request_complete("functional", elapsed, success=False, error=str(e))
                     return
@@ -159,7 +167,7 @@ async def stream_handler(request: Request) -> StreamingResponse:
 
         except Exception as e:
             logger.exception("Slow lane setup failed")
-            yield sse_event("error", {"code": "SETUP_ERROR", "message": str(e)}).encode()
+            yield sse_event("error", {"code": "SETUP_ERROR", "message": "Failed to initialize agent context"}).encode()
             yield sse_event("done", {}).encode()
             elapsed = int((_time.monotonic() - request_start) * 1000)
             log_request_complete("slow", elapsed, success=False, error=str(e))
@@ -214,7 +222,8 @@ async def health(request: Request) -> JSONResponse:
             await fs.db.collection("_health").limit(1).get()
             checks["firestore"] = "ok"
         except Exception as e:
-            checks["firestore"] = f"error: {e}"
+            logger.error("Firestore health check failed: %s", e, exc_info=True)
+            checks["firestore"] = "error: service check failed"
         # Vertex AI / Gemini
         try:
             from app.llm.gemini import GeminiClient
@@ -222,7 +231,8 @@ async def health(request: Request) -> JSONResponse:
             # Minimal call to verify auth + endpoint
             checks["vertex_ai"] = "ok (client initialized)"
         except Exception as e:
-            checks["vertex_ai"] = f"error: {e}"
+            logger.error("Vertex AI health check failed: %s", e, exc_info=True)
+            checks["vertex_ai"] = "error: service check failed"
 
         all_ok = all(v.startswith("ok") for v in checks.values())
         return JSONResponse(
