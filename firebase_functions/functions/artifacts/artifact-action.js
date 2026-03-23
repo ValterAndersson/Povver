@@ -11,6 +11,8 @@ const admin = require('firebase-admin');
 const { logger } = require('firebase-functions');
 const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const { executeArtifactAction } = require('../shared/artifacts');
+const { writeLimiter } = require('../utils/rate-limiter');
+const { fail } = require('../utils/response');
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -20,6 +22,11 @@ const db = admin.firestore();
 async function artifactActionHandler(req, res) {
   // Secure userId derivation — prevents IDOR via auth-helpers
   const userId = getAuthenticatedUserId(req);
+
+  if (!writeLimiter.check(userId)) {
+    return fail(res, 'RATE_LIMITED', 'Too many requests', null, 429);
+  }
+
   const conversationId = req.body?.conversationId;
   const artifactId = req.body?.artifactId;
   const action = req.body?.action;
