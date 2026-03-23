@@ -50,7 +50,7 @@ class CloudFunctionService: CloudFunctionServiceProtocol {
     
     func updateUser(userId: String, user: User) async throws {
         let data = try JSONEncoder().encode(user)
-        let params = ["userId": userId, "user": String(data: data, encoding: .utf8)!]
+        let params = ["userId": userId, "user": String(data: data, encoding: .utf8) ?? ""]
         _ = try await callFunction(name: "updateUser", data: params)
     }
     
@@ -68,14 +68,14 @@ class CloudFunctionService: CloudFunctionServiceProtocol {
     
     func createTemplate(template: WorkoutTemplate) async throws -> String {
         let data = try JSONEncoder().encode(template)
-        let params = ["template": String(data: data, encoding: .utf8)!]
+        let params = ["template": String(data: data, encoding: .utf8) ?? ""]
         let result = try await callFunction(name: "createTemplate", data: params)
         return try JSONDecoder().decode(String.self, from: result)
     }
     
     func updateTemplate(id: String, template: WorkoutTemplate) async throws {
         let data = try JSONEncoder().encode(template)
-        let params = ["id": id, "template": String(data: data, encoding: .utf8)!]
+        let params = ["id": id, "template": String(data: data, encoding: .utf8) ?? ""]
         _ = try await callFunction(name: "updateTemplate", data: params)
     }
     
@@ -98,14 +98,14 @@ class CloudFunctionService: CloudFunctionServiceProtocol {
     
     func createWorkout(workout: Workout) async throws -> String {
         let data = try JSONEncoder().encode(workout)
-        let params = ["workout": String(data: data, encoding: .utf8)!]
+        let params = ["workout": String(data: data, encoding: .utf8) ?? ""]
         let result = try await callFunction(name: "createWorkout", data: params)
         return try JSONDecoder().decode(String.self, from: result)
     }
     
     func updateWorkout(id: String, workout: Workout) async throws {
         let data = try JSONEncoder().encode(workout)
-        let params = ["id": id, "workout": String(data: data, encoding: .utf8)!]
+        let params = ["id": id, "workout": String(data: data, encoding: .utf8) ?? ""]
         _ = try await callFunction(name: "updateWorkout", data: params)
     }
     
