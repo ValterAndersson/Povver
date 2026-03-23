@@ -18,13 +18,18 @@ const logger = require('firebase-functions/logger');
 const { withApiKey } = require('../auth/middleware');
 const { applyProgression: applyProgressionCore } = require('../shared/progressions');
 const { ValidationError, NotFoundError } = require('../shared/errors');
+const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 
 async function applyProgressionHandler(req, res) {
   const startTime = Date.now();
 
   try {
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: 'UNAUTHORIZED', message: 'Authentication required' });
+    }
+
     const {
-      userId,
       targetType,
       targetId,
       changes,
@@ -77,7 +82,6 @@ async function applyProgressionHandler(req, res) {
 
 // Export handler — API key required (called by agent system only)
 const applyProgression = onRequest({
-  cors: true,
   region: 'us-central1',
 }, withApiKey(applyProgressionHandler));
 
