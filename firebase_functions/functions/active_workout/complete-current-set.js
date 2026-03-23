@@ -163,7 +163,7 @@ async function completeCurrentSetHandler(req, res) {
       return fail(res, error.code, error.message, error.details || null, error.httpCode);
     }
     console.error('complete-current-set error:', error);
-    return fail(res, 'INTERNAL', 'Failed to complete current set', { message: error.message }, 500);
+    return fail(res, 'INTERNAL', 'An internal error occurred', null, 500);
   }
 }
 

@@ -1006,7 +1006,7 @@ async function streamAgentNormalizedHandler(req, res) {
     clearInterval(hb);
     if (!clientDisconnected) {
       if (err) {
-        sse.write({ type: 'error', error: String(err.message || err) });
+        sse.write({ type: 'error', error: { code: 'INTERNAL_ERROR', message: 'An error occurred' } });
       }
       sse.write({ type: 'done' });
     }
@@ -1082,7 +1082,7 @@ async function streamAgentNormalizedHandler(req, res) {
     const streamStartTime = Date.now();
 
     if (!conversationId) {
-      sse.write({ type: 'error', error: 'conversationId is required' });
+      sse.write({ type: 'error', error: { code: 'INVALID_ARGUMENT', message: 'Invalid request' } });
       done(false, new Error('conversationId is required'));
       return;
     }
@@ -1167,7 +1167,7 @@ async function streamAgentNormalizedHandler(req, res) {
           return;
         }
         logger.error('[streamAgentNormalized] Cloud Run agent error', { error: err.message, userId });
-        sse.write({ type: 'error', error: { code: 'UPSTREAM_ERROR', message: err.message } });
+        sse.write({ type: 'error', error: { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' } });
         done(false);
       }
       return;
@@ -1256,16 +1256,16 @@ async function streamAgentNormalizedHandler(req, res) {
         response.data.on('error', () => { resolve(data); });
       });
       logger.error('[streamAgentNormalized] Vertex AI returned error', { status: response.status, body: errorBody.slice(0, 1000) });
-      
+
       // Invalidate token cache on auth errors (401/403)
       if (response.status === 401 || response.status === 403) {
         invalidateTokenCache();
-        sse.write({ type: 'error', error: 'Authentication failed. Please try again.', text: 'Authentication failed. Please try again.' });
+        sse.write({ type: 'error', error: { code: 'AUTHENTICATION_FAILED', message: 'Authentication failed. Please try again.' } });
         done(false, new Error(`Vertex AI returned ${response.status}`));
         return;
       }
-      
-      sse.write({ type: 'error', error: `Vertex AI error: ${response.status} - ${errorBody.slice(0, 200)}` });
+
+      sse.write({ type: 'error', error: { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' } });
       done(false, new Error(`Vertex AI returned ${response.status}`));
       return;
     }
@@ -1593,7 +1593,7 @@ async function streamAgentNormalizedHandler(req, res) {
       // If no data chunks received, something went wrong
       if (dataChunkCount === 0) {
         logger.warn('[streamAgentNormalized] Stream ended with NO data', { sessionId: sessionToUse });
-        sse.write({ type: 'error', error: 'No response received. Please try again.' });
+        sse.write({ type: 'error', error: { code: 'SERVICE_UNAVAILABLE', message: 'No response received. Please try again.' } });
       }
 
       logger.info('stream_completed', {

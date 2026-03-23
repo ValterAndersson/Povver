@@ -510,7 +510,7 @@ async function patchActiveWorkoutHandler(req, res) {
       return fail(res, error.code, error.message, error.details || null, error.httpCode);
     }
     console.error('patch-active-workout error:', error);
-    return fail(res, 'INTERNAL', 'Failed to patch workout', { message: error.message }, 500);
+    return fail(res, 'INTERNAL', 'An internal error occurred', null, 500);
   }
 }
 

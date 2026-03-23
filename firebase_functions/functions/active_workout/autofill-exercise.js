@@ -254,7 +254,7 @@ async function autofillExerciseHandler(req, res) {
       return fail(res, error.code, error.message, error.details || null, error.httpCode);
     }
     console.error('autofill-exercise error:', error);
-    return fail(res, 'INTERNAL', 'Failed to autofill exercise', { message: error.message }, 500);
+    return fail(res, 'INTERNAL', 'An internal error occurred', null, 500);
   }
 }
 
