@@ -17,7 +17,7 @@ class RecommendationRepository: ObservableObject {
             .addSnapshotListener { [weak self] snapshot, error in
                 guard let self = self, let snapshot = snapshot else {
                     if let error = error {
-                        print("[RecommendationRepository] Listener error: \(error)")
+                        AppLogger.shared.error(.store, "Recommendation listener error", error)
                     }
                     return
                 }

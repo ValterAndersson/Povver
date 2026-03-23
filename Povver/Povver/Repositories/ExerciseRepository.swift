@@ -12,7 +12,7 @@ class ExerciseRepository: FirestoreRepository<Exercise> {
     /// missing status to "approved", so client-side filtering handles both cases correctly.
     override func list() async throws -> [Exercise] {
         let snapshot = try await collection.getDocuments()
-        print("[ExerciseRepository] Fetched \(snapshot.documents.count) documents from Firestore")
+        AppLogger.shared.info(.store, "Fetched \(snapshot.documents.count) exercise documents from Firestore")
 
         var exercises: [Exercise] = []
         var errorCount = 0
@@ -31,15 +31,15 @@ class ExerciseRepository: FirestoreRepository<Exercise> {
             } catch {
                 errorCount += 1
                 if errorCount <= 5 {
-                    print("[ExerciseRepository] Failed to decode \(document.documentID): \(error)")
+                    AppLogger.shared.error(.store, "Failed to decode exercise document \(document.documentID)", error)
                 }
             }
         }
 
         if errorCount > 0 {
-            print("[ExerciseRepository] Total decode errors: \(errorCount) / \(snapshot.documents.count)")
+            AppLogger.shared.info(.store, "Total exercise decode errors: \(errorCount) / \(snapshot.documents.count)")
         }
-        print("[ExerciseRepository] Successfully decoded \(exercises.count) exercises")
+        AppLogger.shared.info(.store, "Successfully decoded \(exercises.count) exercises")
 
         return exercises
     }
@@ -56,7 +56,7 @@ class ExerciseRepository: FirestoreRepository<Exercise> {
             }
             return exercise
         } catch {
-            print("[ExerciseRepository] Failed to decode \(id): \(error)")
+            AppLogger.shared.error(.store, "Failed to decode exercise \(id)", error)
             throw error
         }
     }
