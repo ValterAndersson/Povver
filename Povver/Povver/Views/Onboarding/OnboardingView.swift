@@ -2,7 +2,7 @@ import SwiftUI
 
 struct OnboardingView: View {
     @StateObject private var vm = OnboardingViewModel()
-    let onComplete: (_ adjustWithCoach: Bool) -> Void
+    let onComplete: () -> Void
 
     var body: some View {
         ZStack {
@@ -69,6 +69,8 @@ struct OnboardingView: View {
             OnboardingAuthScreen(
                 onAuthenticated: {
                     AnalyticsService.shared.screenViewed("onboarding_auth_completed")
+                    // Pre-load StoreKit products early so they're ready for Showcase
+                    Task { await SubscriptionService.shared.loadProducts() }
                     vm.advance()
                 },
                 onSignIn: {
@@ -76,8 +78,9 @@ struct OnboardingView: View {
                     Task {
                         if await checkExistingAttributes() {
                             vm.completeOnboarding()
-                            onComplete(false)
+                            onComplete()
                         } else {
+                            Task { await SubscriptionService.shared.loadProducts() }
                             vm.advance()
                         }
                     }
@@ -101,6 +104,7 @@ struct OnboardingView: View {
             EquipmentScreen(vm: vm) {
                 Task {
                     let _ = await vm.saveUserAttributes()
+                    vm.triggerRoutineGeneration()
                     vm.advance()
                 }
             }
@@ -109,38 +113,28 @@ struct OnboardingView: View {
                 removal: .opacity.combined(with: .offset(y: -12))
             ))
 
-        case .trial:
-            TrialScreen(
+        case .routineGeneration:
+            RoutineGenerationScreen(
+                vm: vm,
+                onContinue: {
+                    vm.advance()
+                }
+            )
+            .transition(.opacity)
+
+        case .showcase:
+            ShowcaseScreen(
                 vm: vm,
                 onTrialStarted: {
-                    vm.advance()
-                    vm.triggerRoutineGeneration()
-                },
-                onSkipped: {
-                    vm.skipToBasicLogging()
-                    onComplete(false)
+                    vm.completeOnboarding()
+                    AnalyticsService.shared.onboardingCompleted()
+                    onComplete()
                 }
             )
             .transition(.asymmetric(
                 insertion: .opacity.combined(with: .offset(y: 20)),
-                removal: .opacity.combined(with: .offset(y: -12))
+                removal: .opacity
             ))
-
-        case .routineGeneration:
-            RoutineGenerationScreen(
-                vm: vm,
-                onStartTraining: {
-                    vm.completeOnboarding()
-                    AnalyticsService.shared.onboardingCompleted(trialStarted: true, adjustWithCoach: false)
-                    onComplete(false)
-                },
-                onAdjustWithCoach: {
-                    vm.completeOnboarding()
-                    AnalyticsService.shared.onboardingCompleted(trialStarted: true, adjustWithCoach: true)
-                    onComplete(true)
-                }
-            )
-            .transition(.opacity)
         }
     }
 
@@ -161,7 +155,7 @@ struct OnboardingView: View {
 #if DEBUG
 struct OnboardingView_Previews: PreviewProvider {
     static var previews: some View {
-        OnboardingView(onComplete: { _ in })
+        OnboardingView(onComplete: {})
     }
 }
 #endif
