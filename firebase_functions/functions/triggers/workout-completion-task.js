@@ -36,8 +36,10 @@ exports.processWorkoutCompletionTask = onRequest(
       const result = await processWorkoutCompletion(userId, workoutId);
       res.status(200).json(result);
     } catch (err) {
-      logger.error('Task failed', { userId, workoutId, error: err.message });
-      res.status(500).send(err.message);
+      logger.error('[workout-completion-task] processing_failed', {
+        userId, workoutId, error: err.message,
+      });
+      res.status(500).send('Internal processing error');
     }
   }
 );
