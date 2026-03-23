@@ -56,6 +56,11 @@ async function addExerciseHandler(req, res) {
       return fail(res, 'INVALID_ARGUMENT', 'Missing instance_id', null, 400);
     }
 
+    // Validate name length
+    if (name && typeof name === 'string' && name.length > 200) {
+      return fail(res, 'INVALID_ARGUMENT', 'Exercise name too long', null, 400);
+    }
+
     // 2. Process and validate sets outside transaction (pure transformation)
     const processedSets = [];
     for (const set of (sets || [])) {
@@ -72,6 +77,9 @@ async function addExerciseHandler(req, res) {
       }
       if (weight !== null && weight < 0) {
         return fail(res, 'INVALID_ARGUMENT', 'Weight must be >= 0', { weight }, 400);
+      }
+      if (weight !== null && weight > 1500) {
+        return fail(res, 'INVALID_ARGUMENT', 'Weight exceeds maximum', null, 400);
       }
 
       processedSets.push({

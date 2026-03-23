@@ -24,6 +24,11 @@ async function swapExerciseHandler(req, res) {
       return fail(res, 'INVALID_ARGUMENT', 'Missing parameters', { required: ['workout_id','from_exercise_id','to_exercise_id'] }, 400);
     }
 
+    // Validate reason length
+    if (reason && typeof reason === 'string' && reason.length > 5000) {
+      return fail(res, 'INVALID_ARGUMENT', 'Reason too long', null, 400);
+    }
+
     const workoutRef = db.doc(`users/${userId}/active_workouts/${workout_id}`);
     const eventRef = db.collection(`users/${userId}/active_workouts/${workout_id}/events`).doc();
 
