@@ -3,6 +3,7 @@ const admin = require('firebase-admin');
 const { requireFlexibleAuth } = require('../auth/middleware');
 const { calculateTemplateAnalytics } = require('../utils/analytics-calculator');
 const { ok, fail } = require('../utils/response');
+const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const { createTemplate } = require('../shared/templates');
 const { mapErrorToResponse } = require('../shared/errors');
 
@@ -14,8 +15,9 @@ const db = admin.firestore();
  * Thin HTTP wrapper — business logic lives in shared/templates.js
  */
 async function createTemplateHandler(req, res) {
-  const { userId, template } = req.body;
-  if (!userId) return fail(res, 'INVALID_ARGUMENT', 'Missing userId', null, 400);
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return fail(res, 'UNAUTHORIZED', 'Authentication required', null, 401);
+  const { template } = req.body || {};
 
   try {
     const result = await createTemplate(db, userId, template, {

@@ -2,6 +2,7 @@ const { onRequest } = require('firebase-functions/v2/https');
 const admin = require('firebase-admin');
 const { requireFlexibleAuth } = require('../auth/middleware');
 const { ok, fail } = require('../utils/response');
+const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const { deleteTemplate } = require('../shared/templates');
 const { mapErrorToResponse } = require('../shared/errors');
 
@@ -13,7 +14,9 @@ const db = admin.firestore();
  * Thin HTTP wrapper — business logic lives in shared/templates.js
  */
 async function deleteTemplateHandler(req, res) {
-  const { userId, templateId } = req.body || {};
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return fail(res, 'UNAUTHORIZED', 'Authentication required', null, 401);
+  const { templateId } = req.body || {};
 
   try {
     const result = await deleteTemplate(db, userId, templateId);

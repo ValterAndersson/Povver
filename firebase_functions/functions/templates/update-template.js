@@ -3,6 +3,7 @@ const { requireFlexibleAuth } = require('../auth/middleware');
 const FirestoreHelper = require('../utils/firestore-helper');
 const { calculateTemplateAnalytics } = require('../utils/analytics-calculator');
 const { ok, fail } = require('../utils/response');
+const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const { TemplateSchema } = require('../utils/validators');
 const admin = require('firebase-admin');
 
@@ -14,13 +15,15 @@ const db = new FirestoreHelper();
  * Description: Updates an existing workout template with analytics recalculated
  */
 async function updateTemplateHandler(req, res) {
-  const { templateId: bodyTemplateId, userId, template } = req.body || {};
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return fail(res, 'UNAUTHORIZED', 'Authentication required', null, 401);
+  const { templateId: bodyTemplateId, template } = req.body || {};
   const { templateId: queryTemplateId } = req.query || {};
   // Accept templateId from params (if router ever sets it), body, or query for compatibility
   const templateId = (req.params && req.params.templateId) || bodyTemplateId || queryTemplateId;
-  
-  if (!userId || !templateId || !template) {
-    return fail(res, 'INVALID_ARGUMENT', 'Missing required parameters', ['userId','templateId','template'], 400);
+
+  if (!templateId || !template) {
+    return fail(res, 'INVALID_ARGUMENT', 'Missing required parameters', ['templateId','template'], 400);
   }
   const parsed = TemplateSchema.safeParse(template);
   if (!parsed.success) return fail(res, 'INVALID_ARGUMENT', 'Invalid template data', parsed.error.flatten(), 400);

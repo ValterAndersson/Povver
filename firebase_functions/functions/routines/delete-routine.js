@@ -1,6 +1,7 @@
 const { onRequest } = require('firebase-functions/v2/https');
 const { requireFlexibleAuth } = require('../auth/middleware');
-const { ok } = require('../utils/response');
+const { ok, fail } = require('../utils/response');
+const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const { deleteRoutine } = require('../shared/routines');
 const { mapErrorToResponse } = require('../shared/errors');
 const admin = require('firebase-admin');
@@ -9,11 +10,11 @@ const admin = require('firebase-admin');
  * Firebase Function: Delete Routine
  *
  * Thin HTTP wrapper — business logic lives in shared/routines.js
- *
- * Note: This handler reads userId from req.body (API-key lane pattern).
  */
 async function deleteRoutineHandler(req, res) {
-  const { userId, routineId } = req.body || {};
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return fail(res, 'UNAUTHORIZED', 'Authentication required', null, 401);
+  const { routineId } = req.body || {};
 
   try {
     const result = await deleteRoutine(admin.firestore(), userId, routineId);

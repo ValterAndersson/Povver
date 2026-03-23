@@ -2,6 +2,7 @@ const { onRequest } = require('firebase-functions/v2/https');
 const { requireFlexibleAuth } = require('../auth/middleware');
 const FirestoreHelper = require('../utils/firestore-helper');
 const { ok, fail } = require('../utils/response');
+const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const { RoutineSchema } = require('../utils/validators');
 const { formatValidationResponse } = require('../utils/validation-response');
 const admin = require('firebase-admin');
@@ -15,8 +16,10 @@ const firestore = admin.firestore();
  * IMPORTANT: Validates that all template_ids reference existing templates.
  */
 async function updateRoutineHandler(req, res) {
-  const { userId, routineId, routine } = req.body || {};
-  if (!userId || !routineId || !routine) return fail(res, 'INVALID_ARGUMENT', 'Missing required parameters', ['userId','routineId','routine'], 400);
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return fail(res, 'UNAUTHORIZED', 'Authentication required', null, 401);
+  const { routineId, routine } = req.body || {};
+  if (!routineId || !routine) return fail(res, 'INVALID_ARGUMENT', 'Missing required parameters', ['routineId','routine'], 400);
   const parsed = RoutineSchema.safeParse(routine);
   if (!parsed.success) {
     const details = formatValidationResponse(routine, parsed.error.errors, null);

@@ -1,7 +1,8 @@
 const { onRequest } = require('firebase-functions/v2/https');
 const { logger } = require('firebase-functions');
 const { requireFlexibleAuth } = require('../auth/middleware');
-const { ok } = require('../utils/response');
+const { ok, fail } = require('../utils/response');
+const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const { createRoutine } = require('../shared/routines');
 const { mapErrorToResponse } = require('../shared/errors');
 const admin = require('firebase-admin');
@@ -10,12 +11,11 @@ const admin = require('firebase-admin');
  * Firebase Function: Create Routine
  *
  * Thin HTTP wrapper — business logic lives in shared/routines.js
- *
- * Note: This handler reads userId from req.body (API-key lane pattern),
- * not from getAuthenticatedUserId. Preserving original behavior.
  */
 async function createRoutineHandler(req, res) {
-  const { userId, routine } = req.body || {};
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return fail(res, 'UNAUTHORIZED', 'Authentication required', null, 401);
+  const { routine } = req.body || {};
 
   try {
     const result = await createRoutine(admin.firestore(), userId, routine);
