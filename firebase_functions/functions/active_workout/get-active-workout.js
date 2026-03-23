@@ -51,6 +51,7 @@ const { requireFlexibleAuth } = require('../auth/middleware');
 const { ok, fail } = require('../utils/response');
 const admin = require('firebase-admin');
 const { logger } = require('firebase-functions');
+const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 
 const firestore = admin.firestore();
 
@@ -60,10 +61,7 @@ async function getActiveWorkoutHandler(req, res) {
       return res.status(405).json({ success: false, error: 'Method Not Allowed' });
     }
 
-    const userId = req.user?.uid || req.auth?.uid;
-    if (!userId) {
-      return fail(res, 'UNAUTHENTICATED', 'Unauthorized', null, 401);
-    }
+    const userId = getAuthenticatedUserId(req);
 
     const lockRef = firestore.collection('users').doc(userId).collection('meta').doc('active_workout_state');
     const activeWorkoutsRef = firestore.collection('users').doc(userId).collection('active_workouts');

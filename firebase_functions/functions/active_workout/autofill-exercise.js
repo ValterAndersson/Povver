@@ -16,6 +16,7 @@ const { requireFlexibleAuth } = require('../auth/middleware');
 const admin = require('firebase-admin');
 const { fail, ok } = require('../utils/response');
 const { AutofillExerciseSchema } = require('../utils/validators');
+const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const {
   ensureWorkoutIdempotent,
   storeWorkoutIdempotentTx
@@ -33,10 +34,7 @@ async function autofillExerciseHandler(req, res) {
     }
 
     // User ID from Firebase Auth or API key middleware
-    const userId = req.user?.uid || req.auth?.uid;
-    if (!userId) {
-      return res.status(401).json({ success: false, error: 'Unauthorized' });
-    }
+    const userId = getAuthenticatedUserId(req);
 
     // 1. Validate request (pure — no Firestore reads)
     const parsed = AutofillExerciseSchema.safeParse(req.body || {});
