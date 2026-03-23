@@ -63,6 +63,7 @@ const { ok, fail } = require('../utils/response');
 const admin = require('firebase-admin');
 const { v4: uuidv4 } = require('uuid');
 const { templateToExercises, planBlocksToExercises, normalizePlan } = require('../utils/workout-seed-mapper');
+const { writeLimiter } = require('../utils/rate-limiter');
 
 const firestore = admin.firestore();
 
@@ -75,6 +76,10 @@ async function startActiveWorkoutHandler(req, res) {
     // User ID from Firebase Auth or API key middleware
     const userId = req.user?.uid || req.auth?.uid;
     if (!userId) return fail(res, 'UNAUTHENTICATED', 'Unauthorized', null, 401);
+
+    if (!writeLimiter.check(userId)) {
+      return fail(res, 'RATE_LIMITED', 'Too many requests', null, 429);
+    }
 
     // ==========================================================================
     // NORMALIZE REQUEST KEYS (accept both variants for backward compatibility)

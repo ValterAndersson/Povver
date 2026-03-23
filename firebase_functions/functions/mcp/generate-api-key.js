@@ -22,6 +22,7 @@ const { isPremiumUser } = require('../utils/subscription-gate');
 const { ok, fail } = require('../utils/response');
 const admin = require('firebase-admin');
 const crypto = require('crypto');
+const { authLimiter } = require('../utils/rate-limiter');
 
 const db = admin.firestore();
 
@@ -33,6 +34,10 @@ async function generateMcpApiKeyHandler(req, res) {
   const userId = getAuthenticatedUserId(req);
   if (!userId) {
     return fail(res, 'UNAUTHENTICATED', 'Authentication required', null, 401);
+  }
+
+  if (!authLimiter.check(userId)) {
+    return fail(res, 'RATE_LIMITED', 'Too many requests', null, 429);
   }
 
   if (!(await isPremiumUser(userId))) {

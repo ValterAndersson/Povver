@@ -19,6 +19,7 @@ const { logger } = require('firebase-functions');
 const admin = require('firebase-admin');
 const { ok, fail } = require('../utils/response');
 const { verifySignedTransaction } = require('./apple-verifier');
+const { authLimiter } = require('../utils/rate-limiter');
 
 const db = admin.firestore();
 
@@ -31,6 +32,10 @@ async function syncSubscriptionStatusHandler(req, res) {
   const userId = req.auth?.uid;
   if (!userId || req.auth?.type === 'api_key') {
     return fail(res, 'UNAUTHENTICATED', 'Bearer token required', null, 401);
+  }
+
+  if (!authLimiter.check(userId)) {
+    return fail(res, 'RATE_LIMITED', 'Too many requests', null, 429);
   }
 
   const { status, tier, autoRenewEnabled, inGracePeriod, productId, signedTransactionInfo } = req.body;

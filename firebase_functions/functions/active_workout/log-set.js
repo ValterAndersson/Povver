@@ -22,6 +22,7 @@ const {
   storeWorkoutIdempotentTx
 } = require('../utils/idempotency');
 const { computeTotals, findExerciseAndSet } = require('../utils/active-workout-helpers');
+const { writeLimiter } = require('../utils/rate-limiter');
 
 const db = admin.firestore();
 
@@ -35,6 +36,10 @@ async function logSetHandler(req, res) {
     const userId = req.user?.uid || req.auth?.uid;
     if (!userId) {
       return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    if (!writeLimiter.check(userId)) {
+      return fail(res, 'RATE_LIMITED', 'Too many requests', null, 429);
     }
 
     // 1. Validate request body (pure validation — no Firestore reads)
