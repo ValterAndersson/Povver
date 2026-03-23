@@ -129,8 +129,11 @@ async function createRoutine(db, userId, routineInput) {
     throw new ValidationError('Invalid routine data', details);
   }
 
+  // Use validated data — prevents arbitrary extra fields from bypassing Zod
+  const validatedInput = parsed.data;
+
   // Collect template IDs from either format
-  const templateIds = routineInput.template_ids || routineInput.templateIds || [];
+  const templateIds = validatedInput.template_ids || validatedInput.templateIds || [];
 
   // Declare outside the if-block so it's always available for enhancedRoutine
   let templateNames = {};
@@ -172,8 +175,8 @@ async function createRoutine(db, userId, routineInput) {
 
   const now = admin.firestore.FieldValue.serverTimestamp();
   const enhancedRoutine = {
-    ...routineInput,
-    frequency: routineInput.frequency || 3,
+    ...validatedInput,
+    frequency: validatedInput.frequency || 3,
     template_ids: templateIds,
     template_names: templateNames,
     created_at: now,

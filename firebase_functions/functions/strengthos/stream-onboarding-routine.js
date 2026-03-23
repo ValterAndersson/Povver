@@ -202,7 +202,7 @@ async function streamOnboardingRoutineHandler(req, res) {
   const done = (err) => {
     clearInterval(hb);
     if (!clientDisconnected) {
-      if (err) sse.write({ type: 'error', error: { code: 'GENERATION_FAILED', message: String(err.message || err) } });
+      if (err) sse.write({ type: 'error', error: { code: 'GENERATION_FAILED', message: 'An error occurred' } });
       sse.write({ type: 'done' });
     }
     sse.close();

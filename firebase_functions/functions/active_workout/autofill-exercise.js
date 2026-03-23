@@ -39,7 +39,7 @@ async function autofillExerciseHandler(req, res) {
     // 1. Validate request (pure — no Firestore reads)
     const parsed = AutofillExerciseSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return fail(res, 'INVALID_ARGUMENT', 'Invalid request', parsed.error.flatten(), 400);
+      return fail(res, 'INVALID_ARGUMENT', 'Invalid request', null, 400);
     }
 
     const {
