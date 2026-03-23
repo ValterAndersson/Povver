@@ -204,7 +204,7 @@ final class WorkoutSessionLogger {
         do {
             let data = try encoder.encode(snapshot)
             try data.write(to: fileURL, options: .atomic)
-            try? (fileURL as NSURL).setResourceValue(
+            try (fileURL as NSURL).setResourceValue(
                 URLFileProtection.complete,
                 forKey: .fileProtectionKey
             )
@@ -250,11 +250,15 @@ final class WorkoutSessionLogger {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         let dir = caches.appendingPathComponent("workout_logs", isDirectory: true)
         if !FileManager.default.fileExists(atPath: dir.path) {
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            try? FileManager.default.setAttributes(
-                [.protectionKey: FileProtectionType.complete],
-                ofItemAtPath: dir.path
-            )
+            do {
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                try FileManager.default.setAttributes(
+                    [.protectionKey: FileProtectionType.complete],
+                    ofItemAtPath: dir.path
+                )
+            } catch {
+                AppLogger.shared.error(.work, "Failed to create/protect workout log directory", error)
+            }
         }
         return dir
     }

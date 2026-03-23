@@ -128,7 +128,7 @@ struct ExercisePerformanceSheet: View {
             }
         } catch {
             self.error = "Could not load history"
-            print("[ExercisePerformanceSheet] Query failed: \(error)")
+            AppLogger.shared.error(.app, "ExercisePerformanceSheet query failed", error)
         }
 
         isLoading = false

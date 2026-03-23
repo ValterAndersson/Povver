@@ -202,7 +202,7 @@ struct HistoryView: View {
             workouts = Array(initialItems)
             hasMorePages = allWorkouts.count > initialPageSize
         } catch {
-            print("[HistoryView] Failed to load workouts: \(error)")
+            AppLogger.shared.error(.app, "Failed to load workouts", error)
         }
         
         isLoading = false
@@ -496,7 +496,7 @@ struct WorkoutDetailView: View {
         do {
             workout = try await WorkoutRepository().getWorkout(id: workoutId, userId: userId)
         } catch {
-            print("[WorkoutDetailView] Failed to load workout: \(error)")
+            AppLogger.shared.error(.app, "Failed to load workout", error)
         }
 
         isLoading = false
@@ -507,7 +507,7 @@ struct WorkoutDetailView: View {
         do {
             workout = try await WorkoutRepository().getWorkout(id: workoutId, userId: userId)
         } catch {
-            print("[WorkoutDetailView] Failed to reload workout: \(error)")
+            AppLogger.shared.error(.app, "Failed to reload workout", error)
         }
     }
 
@@ -524,7 +524,7 @@ struct WorkoutDetailView: View {
             onDelete?(workoutId)
             dismiss()
         } catch {
-            print("[WorkoutDetailView] Failed to delete workout: \(error)")
+            AppLogger.shared.error(.app, "Failed to delete workout", error)
             isDeleting = false
         }
     }

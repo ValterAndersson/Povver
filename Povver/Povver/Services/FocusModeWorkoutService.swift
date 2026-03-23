@@ -178,7 +178,7 @@ class FocusModeWorkoutService: ObservableObject {
                 do {
                     try await sync()
                 } catch {
-                    print("[clearUndo] Deferred sync failed: \(error)")
+                    AppLogger.shared.error(.work, "Deferred sync failed on clearUndo", error)
                 }
             }
         }
@@ -247,19 +247,19 @@ class FocusModeWorkoutService: ObservableObject {
     private func handleMutationStateChange(_ change: MutationStateChange, sessionId: UUID) async {
         // Session scoping: ignore callbacks from old sessions
         guard sessionId == currentSessionId else {
-            print("[FocusModeWorkoutService] Ignoring stale callback for old session")
+            AppLogger.shared.info(.work, "Ignoring stale callback for old session")
             return
         }
         
         switch change {
         case .syncSuccess(let mutation):
-            print("[FocusModeWorkoutService] Mutation synced: \(mutation)")
+            AppLogger.shared.info(.work, "Mutation synced: \(mutation)")
             sessionLog.log(.syncSuccess, details: ["mutation": String(describing: mutation)])
             // Update entity sync state on success
             updateEntitySyncState(mutation: mutation, state: .synced)
 
         case .syncFailed(let mutation, let error):
-            print("[FocusModeWorkoutService] Mutation failed: \(mutation), error: \(error)")
+            AppLogger.shared.error(.work, "Mutation failed: \(mutation), error: \(error)")
             sessionLog.log(.syncFailed, details: [
                 "mutation": String(describing: mutation),
                 "error": error
@@ -271,7 +271,7 @@ class FocusModeWorkoutService: ObservableObject {
             rollbackMutation(mutation)
             
         case .needsReconcile:
-            print("[FocusModeWorkoutService] Reconciliation needed - fetching latest state")
+            AppLogger.shared.info(.work, "Reconciliation needed - fetching latest state")
             sessionLog.log(.reconciliation, details: ["trigger": "TARGET_NOT_FOUND"])
             await performReconciliation()
         }
@@ -307,7 +307,7 @@ class FocusModeWorkoutService: ObservableObject {
             // Remove optimistically added exercise
             workout.exercises.removeAll { $0.instanceId == instanceId }
             self.workout = workout
-            print("[FocusModeWorkoutService] Rolled back exercise: \(instanceId)")
+            AppLogger.shared.info(.work, "Rolled back exercise: \(instanceId)")
             
         case .addSet(let exId, let setId, _, _, _, _):
             // Remove optimistically added set
@@ -372,10 +372,10 @@ class FocusModeWorkoutService: ObservableObject {
                 // Complete reconciliation
                 await mutationCoordinator.finishReconcile(exerciseIds: exerciseIds, setKeys: setKeys)
                 
-                print("[FocusModeWorkoutService] Reconciliation complete (selective hydration)")
+                AppLogger.shared.info(.work, "Reconciliation complete (selective hydration)")
             }
         } catch {
-            print("[FocusModeWorkoutService] Reconciliation failed: \(error)")
+            AppLogger.shared.error(.work, "Reconciliation failed", error)
             self.error = "Failed to sync with server"
         }
     }
@@ -562,7 +562,7 @@ class FocusModeWorkoutService: ObservableObject {
         
         // Check if this was a resume
         if response.resumed {
-            print("[FocusModeWorkoutService] Resumed existing workout \(response.workoutId ?? "unknown")")
+            AppLogger.shared.info(.work, "Resumed existing workout \(response.workoutId ?? "unknown")")
         }
         
         // Parse workout from response
@@ -671,7 +671,7 @@ class FocusModeWorkoutService: ObservableObject {
         } catch {
             // Log sync failure but don't rollback local state
             // User can continue working offline
-            print("[FocusModeWorkoutService] logSet sync failed: \(error)")
+            AppLogger.shared.error(.work, "logSet sync failed", error)
             sessionLog.log(.syncFailed, details: ["op": "logSet", "error": error.localizedDescription])
             FirebaseConfig.shared.recordError(error, context: ["op": "logSet"])
             self.error = "Set sync failed - tap to retry"
@@ -842,7 +842,7 @@ class FocusModeWorkoutService: ObservableObject {
         // Haptic feedback immediately on tap
         HapticManager.modeToggle()
 
-        print("[addExercise] Optimistically added exercise: \(newInstanceId) with sets: \(defaultSets.map { $0.id })")
+        AppLogger.shared.info(.work, "Optimistically added exercise: \(newInstanceId) with sets: \(defaultSets.map { $0.id })")
 
         // 2. Build mutation for coordinator
         let mutationSets = defaultSets.map { set in
@@ -964,7 +964,7 @@ class FocusModeWorkoutService: ObservableObject {
         // Store undo state (Tier 1: immediate removal + undo toast, no haptic)
         pendingUndo = .exerciseRemoved(exercise: removedExercise, index: removedIndex, previousTotals: previousTotals)
 
-        print("[removeExercise] Optimistically removed exercise: \(exerciseInstanceId)")
+        AppLogger.shared.info(.work, "Optimistically removed exercise: \(exerciseInstanceId)")
 
         // 3. Fire analytics event
         AnalyticsService.shared.exerciseRemoved(workoutId: workout.id)
@@ -996,9 +996,9 @@ class FocusModeWorkoutService: ObservableObject {
         deferredSync = { [weak self] in
             do {
                 let _ = try await self?.syncPatch(request)
-                print("[removeExercise] Synced to backend")
+                AppLogger.shared.info(.work, "removeExercise synced to backend")
             } catch {
-                print("[removeExercise] Deferred sync failed: \(error)")
+                AppLogger.shared.error(.work, "removeExercise deferred sync failed", error)
             }
         }
     }
@@ -1223,7 +1223,7 @@ class FocusModeWorkoutService: ObservableObject {
             try await patchTemplate(templateId: templateId, patch: patch, changeSource: "workout_save", workoutId: workout.id)
         } catch {
             // Non-blocking — workout completion should not be affected
-            print("[saveChangesToTemplate] Failed to update template: \(error)")
+            AppLogger.shared.error(.work, "Failed to update template", error)
             self.error = "Template could not be updated"
         }
     }
@@ -1391,7 +1391,7 @@ class FocusModeWorkoutService: ObservableObject {
             await syncReorderToBackend(workoutId: workout.id, order: newOrder)
         }
 
-        print("[FocusModeWorkoutService] Reordered exercises: \(newOrder)")
+        AppLogger.shared.info(.work, "Reordered exercises: \(newOrder)")
     }
     
     /// Sync exercise reorder to backend
@@ -1407,9 +1407,9 @@ class FocusModeWorkoutService: ObservableObject {
         
         do {
             let _: PatchActiveWorkoutResponse = try await apiClient.postJSON("patchActiveWorkout", body: request)
-            print("[FocusModeWorkoutService] Reorder synced to backend")
+            AppLogger.shared.info(.work, "Reorder synced to backend")
         } catch {
-            print("[FocusModeWorkoutService] Reorder sync failed: \(error)")
+            AppLogger.shared.error(.work, "Reorder sync failed", error)
             // Don't rollback - local state is source of truth during session
             // Order will be preserved when workout is completed
         }
@@ -1946,7 +1946,7 @@ class FocusModeWorkoutService: ObservableObject {
             self.cachedRoutines = r
         } catch {
             // Prefetch failure is non-fatal — views will fetch on demand
-            print("[FocusModeWorkoutService] Library prefetch failed: \(error)")
+            AppLogger.shared.error(.work, "Library prefetch failed", error)
         }
 
         // These are independent — store results even if library fetch failed

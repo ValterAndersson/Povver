@@ -269,7 +269,7 @@ class SubscriptionService: ObservableObject {
                 appAccountToken: subscriptionState.appAccountToken
             )
         } catch {
-            print("[SubscriptionService] Failed to load override from Firestore: \(error)")
+            AppLogger.shared.error(.store, "Failed to load override from Firestore", error)
         }
     }
 
@@ -374,7 +374,7 @@ class SubscriptionService: ObservableObject {
                     await transaction.finish()
                     await self.syncToFirestore()
                 } catch {
-                    print("[SubscriptionService] Transaction update verification failed: \(error)")
+                    AppLogger.shared.error(.store, "Transaction update verification failed", error)
                 }
             }
         }

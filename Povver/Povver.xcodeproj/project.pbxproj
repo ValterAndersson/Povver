@@ -159,7 +159,6 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 0AF8B4AF2DF6E7020037B0F1 /* Build configuration list for PBXNativeTarget "PovverTests" */;
 			buildPhases = (
-			3A9F8E7D6C5B4A3F2E1D0C9B /* Lint: No bare print() */,
 				0AF8B4942DF6E7020037B0F1 /* Sources */,
 				0AF8B4952DF6E7020037B0F1 /* Frameworks */,
 				0AF8B4962DF6E7020037B0F1 /* Resources */,
@@ -183,7 +182,6 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 0AF8B4B22DF6E7020037B0F1 /* Build configuration list for PBXNativeTarget "PovverUITests" */;
 			buildPhases = (
-			3A9F8E7D6C5B4A3F2E1D0C9B /* Lint: No bare print() */,
 				0AF8B49E2DF6E7020037B0F1 /* Sources */,
 				0AF8B49F2DF6E7020037B0F1 /* Frameworks */,
 				0AF8B4A02DF6E7020037B0F1 /* Resources */,
@@ -289,7 +287,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ \"$CONFIGURATION\" = \"Release\" ]; then\n  FOUND=$(grep -rn \"print(\" \"$SRCROOT/Povver\" --include=\"*.swift\" \\\n    | grep -v \"//.*print(\" \\\n    | grep -v \"#if DEBUG\" \\\n    | grep -v \"Preview\" \\\n    | grep -v \"AppLogger\" \\\n    | grep -v \".build/\" || true)\n  if [ -n \"$FOUND\" ]; then\n    echo \"error: Bare print() found in release code. Use AppLogger instead:\"\n    echo \"$FOUND\"\n    exit 1\n  fi\nfi\n";
+			shellScript = "if [ \"$CONFIGURATION\" = \"Release\" ]; then\n  FOUND=$(find \"$SRCROOT/Povver\" -name '*.swift' -not -path '*/.build/*' -print0 | xargs -0 awk '\n    /^#if DEBUG/ || /^#Preview/ { skip++ }\n    /^#endif/ && skip > 0 { skip--; next }\n    skip > 0 { next }\n    /PreviewProvider/ || /Previews:/ { next }\n    /\\/\\/.*print\\(/ { next }\n    /AppLogger/ { next }\n    /debugPrint/ { next }\n    /print\\(/ { printf \"%s:%d: %s\\n\", FILENAME, NR, $0 }\n  ' 2>/dev/null || true)\n  if [ -n \"$FOUND\" ]; then\n    echo \"error: Bare print() found in release code. Use AppLogger instead:\"\n    echo \"$FOUND\"\n    exit 1\n  fi\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

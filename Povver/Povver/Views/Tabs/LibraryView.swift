@@ -401,7 +401,7 @@ struct RoutinesListView: View {
                 )
             }
         } catch {
-            print("[RoutinesListView] Failed to load routines: \(error)")
+            AppLogger.shared.error(.app, "Failed to load routines", error)
         }
         isLoading = false
     }
@@ -512,7 +512,7 @@ struct TemplatesListView: View {
                 )
             }
         } catch {
-            print("[TemplatesListView] Failed to load templates: \(error)")
+            AppLogger.shared.error(.app, "Failed to load templates", error)
         }
         isLoading = false
     }
@@ -1256,7 +1256,7 @@ struct TemplateDetailView: View {
                 planExercises = convertToPlanExercises(template)
             }
         } catch {
-            print("[TemplateDetailView] Failed to load template: \(error)")
+            AppLogger.shared.error(.app, "Failed to load template", error)
         }
         isLoading = false
     }
@@ -1296,7 +1296,7 @@ struct TemplateDetailView: View {
                 try await FocusModeWorkoutService.shared.deleteTemplate(templateId: templateId)
                 await MainActor.run { dismiss() }
             } catch {
-                print("[TemplateDetailView] Failed to delete template: \(error)")
+                AppLogger.shared.error(.app, "Failed to delete template", error)
                 isDeleting = false
             }
         }
@@ -1755,7 +1755,7 @@ struct RoutineDetailView: View {
                 try await FocusModeWorkoutService.shared.deleteRoutine(routineId: routineId)
                 await MainActor.run { dismiss() }
             } catch {
-                print("[RoutineDetailView] Failed to delete routine: \(error)")
+                AppLogger.shared.error(.app, "Failed to delete routine", error)
                 isDeleting = false
             }
         }
@@ -1856,7 +1856,7 @@ struct RoutineDetailView: View {
                 )
             }
         } catch {
-            print("[RoutineDetailView] Failed to load routine: \(error)")
+            AppLogger.shared.error(.app, "Failed to load routine", error)
         }
         isLoading = false
     }
@@ -1932,7 +1932,7 @@ private struct TemplatePickerSheet: View {
                 )
             }
         } catch {
-            print("[TemplatePickerSheet] Failed to load templates: \(error)")
+            AppLogger.shared.error(.app, "Failed to load templates", error)
         }
         isLoading = false
     }

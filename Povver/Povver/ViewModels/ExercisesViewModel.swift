@@ -82,7 +82,7 @@ class ExercisesViewModel: ObservableObject {
         do {
             return try await repository.fetchUsageStats(userId: userId)
         } catch {
-            print("[ExercisesViewModel] Failed to load usage stats, falling back to empty: \(error.localizedDescription)")
+            AppLogger.shared.error(.app, "Failed to load usage stats, falling back to empty", error)
             return [:]
         }
     }

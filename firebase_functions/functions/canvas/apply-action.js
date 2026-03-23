@@ -81,6 +81,7 @@
  */
 
 const admin = require('firebase-admin');
+const { logger } = require('firebase-functions');
 const { ok, fail } = require('../utils/response');
 const FirestoreHelper = require('../utils/firestore-helper');
 const { validateApplyActionRequest } = require('./validators');
@@ -624,10 +625,10 @@ async function applyAction(req, res) {
   } catch (err) {
     const http = err?.http || 500;
     const code = err?.code || 'INTERNAL';
-    const message = err?.message || 'Failed to apply action';
     const details = err?.details;
-    console.error('applyAction error:', { code, message, http, details, stack: err?.stack });
-    return fail(res, code, message, details, http);
+    logger.error('[applyAction] Error', { code, message: err?.message, http, details, stack: err?.stack });
+    const userMessage = http >= 500 ? 'Failed to apply action' : (err?.message || 'Failed to apply action');
+    return fail(res, code, userMessage, http >= 500 ? null : details, http);
   }
 }
 

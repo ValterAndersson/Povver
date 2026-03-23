@@ -1,4 +1,5 @@
 const { onRequest } = require('firebase-functions/v2/https');
+const { logger } = require('firebase-functions');
 const { requireFlexibleAuth } = require('../auth/middleware');
 const { ok, fail } = require('../utils/response');
 const { getAuthenticatedUserId } = require('../utils/auth-helpers');
@@ -61,7 +62,7 @@ async function updateUserHandler(req, res) {
     });
 
   } catch (error) {
-    console.error('update-user function error:', error);
+    logger.error('[updateUser] Failed', { error: error.message });
     return fail(res, 'INTERNAL', 'Failed to update user', null, 500);
   }
 }

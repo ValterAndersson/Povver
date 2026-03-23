@@ -187,7 +187,7 @@ struct WorkoutCompletionSummary: View {
         do {
             workout = try await WorkoutRepository().getWorkout(id: workoutId, userId: userId)
         } catch {
-            print("[WorkoutCompletionSummary] Failed to load workout: \(error)")
+            AppLogger.shared.error(.work, "Failed to load workout", error)
         }
         isLoading = false
 

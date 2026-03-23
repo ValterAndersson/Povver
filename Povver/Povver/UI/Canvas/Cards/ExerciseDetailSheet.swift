@@ -352,49 +352,49 @@ public struct ExerciseDetailSheet: View {
         isLoading = true
         error = nil
         
-        print("[ExerciseDetailSheet] Loading exercise: id=\(exerciseId ?? "nil") name=\(exerciseName)")
-        
+        AppLogger.shared.info(.app, "Loading exercise: id=\(exerciseId ?? "nil") name=\(exerciseName)")
+
         do {
             // Try by ID first
             if let id = exerciseId, !id.isEmpty {
-                print("[ExerciseDetailSheet] Trying to read by ID: \(id)")
+                AppLogger.shared.info(.app, "Trying to read exercise by ID: \(id)")
                 exercise = try await repository.read(id: id)
                 if exercise != nil {
-                    print("[ExerciseDetailSheet] Found by ID: \(exercise!.name)")
+                    AppLogger.shared.info(.app, "Found by ID: \(exercise!.name)")
                 } else {
-                    print("[ExerciseDetailSheet] Not found by ID, will try name search")
+                    AppLogger.shared.info(.app, "Not found by ID, will try name search")
                 }
             }
-            
+
             // If not found by ID, search by name (case-insensitive)
             if exercise == nil {
-                print("[ExerciseDetailSheet] Searching all exercises...")
+                AppLogger.shared.info(.app, "Searching all exercises...")
                 let allExercises = try await repository.list()
-                print("[ExerciseDetailSheet] Got \(allExercises.count) exercises from list()")
-                
+                AppLogger.shared.info(.app, "Got \(allExercises.count) exercises from list()")
+
                 let searchName = exerciseName.lowercased()
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                
+
                 // Exact match first
                 exercise = allExercises.first { $0.name.lowercased() == searchName }
                 if exercise != nil {
-                    print("[ExerciseDetailSheet] Found by exact name match: \(exercise!.name)")
+                    AppLogger.shared.info(.app, "Found by exact name match: \(exercise!.name)")
                 }
-                
+
                 // Contains match fallback
                 if exercise == nil {
                     exercise = allExercises.first { $0.name.lowercased().contains(searchName) || searchName.contains($0.name.lowercased()) }
                     if exercise != nil {
-                        print("[ExerciseDetailSheet] Found by contains match: \(exercise!.name)")
+                        AppLogger.shared.info(.app, "Found by contains match: \(exercise!.name)")
                     }
                 }
-                
+
                 if exercise == nil {
-                    print("[ExerciseDetailSheet] Exercise not found. Sample names: \(allExercises.prefix(5).map { $0.name })")
+                    AppLogger.shared.info(.app, "Exercise not found. Sample names: \(allExercises.prefix(5).map { $0.name })")
                 }
             }
         } catch {
-            print("[ExerciseDetailSheet] Error: \(error)")
+            AppLogger.shared.error(.app, "ExerciseDetailSheet load failed", error)
             self.error = "Couldn't load exercise details"
         }
         

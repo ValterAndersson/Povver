@@ -54,7 +54,7 @@ class UserService: ObservableObject {
                 // Don't reset to defaults — keep whatever was previously loaded.
                 // Resetting here would clobber a just-saved preference if the
                 // reload Firestore read hits a transient network error.
-                AppLogger.shared.error(.store, "Failed to load user preferences: \(error)")
+                AppLogger.shared.error(.store, "Failed to load user preferences", error)
             }
         }
     }
@@ -83,7 +83,7 @@ class UserService: ObservableObject {
             self.heightUnit = HeightUnit(firestoreFormat: heightFormat)
             AppLogger.shared.info(.work, "ensurePreferencesLoaded — units applied")
         } catch {
-            AppLogger.shared.error(.store, "Failed to load user preferences: \(error)")
+            AppLogger.shared.error(.store, "Failed to load user preferences", error)
         }
     }
 

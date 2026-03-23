@@ -14,9 +14,11 @@ actor IdempotencyKeyStore {
     }
 }
 
+// Diagnostic-only logging — no-ops in Release via AppLogger (acceptable since
+// idempotency issues surface as user-visible duplicates, not silent failures).
 struct Log {
-    static func info(_ message: String) { print("ℹ️  \(message)") }
-    static func error(_ message: String) { print("❌  \(message)") }
+    static func info(_ message: String) { AppLogger.shared.info(.work, message) }
+    static func error(_ message: String) { AppLogger.shared.error(.work, message) }
 }
 
 

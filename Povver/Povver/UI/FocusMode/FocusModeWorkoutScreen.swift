@@ -318,7 +318,7 @@ struct FocusModeWorkoutScreen: View {
                     }
                     resetTimerForNewWorkout()
                 } catch {
-                    print("Failed to discard and start new: \(error)")
+                    AppLogger.shared.error(.work, "Failed to discard and start new", error)
                 }
             }
         }
@@ -386,7 +386,7 @@ struct FocusModeWorkoutScreen: View {
                         do {
                             try await service.updateWorkoutNotes(note)
                         } catch {
-                            print("Failed to update workout notes: \(error)")
+                            AppLogger.shared.error(.work, "Failed to update workout notes", error)
                         }
                     }
                 },
@@ -403,7 +403,7 @@ struct FocusModeWorkoutScreen: View {
                         do {
                             try await service.updateExerciseNotes(exerciseInstanceId: exerciseInstanceId, notes: note)
                         } catch {
-                            print("Failed to update exercise notes: \(error)")
+                            AppLogger.shared.error(.work, "Failed to update exercise notes", error)
                         }
                     }
                 },
@@ -436,7 +436,7 @@ struct FocusModeWorkoutScreen: View {
                                 newExerciseName: replacement.name
                             )
                         } catch {
-                            print("[ExerciseSwap] Failed: \(error)")
+                            AppLogger.shared.error(.work, "Exercise swap failed", error)
                         }
                     }
                 },
@@ -632,13 +632,13 @@ struct FocusModeWorkoutScreen: View {
         async let templatesTask: [FocusModeWorkoutService.TemplateInfo] = {
             if let cached = cachedTemplates { return cached }
             do { return try await service.getUserTemplates() }
-            catch { print("[FocusModeWorkoutScreen] getUserTemplates failed: \(error)"); return [] }
+            catch { AppLogger.shared.error(.work, "getUserTemplates failed", error); return [] }
         }()
 
         async let nextWorkoutTask: FocusModeWorkoutService.NextWorkoutInfo? = {
             if let cached = cachedNext { return cached }
             do { return try await service.getNextWorkout() }
-            catch { print("[FocusModeWorkoutScreen] getNextWorkout failed: \(error)"); return nil }
+            catch { AppLogger.shared.error(.work, "getNextWorkout failed", error); return nil }
         }()
 
         templates = await templatesTask
@@ -662,7 +662,7 @@ struct FocusModeWorkoutScreen: View {
             )
             resetTimerForNewWorkout()
         } catch {
-            print("Failed to start from next workout: \(error)")
+            AppLogger.shared.error(.work, "Failed to start from next workout", error)
         }
     }
     
@@ -681,7 +681,7 @@ struct FocusModeWorkoutScreen: View {
             )
             resetTimerForNewWorkout()
         } catch {
-            print("Failed to start from template: \(error)")
+            AppLogger.shared.error(.work, "Failed to start from template", error)
         }
     }
     
@@ -808,19 +808,19 @@ struct FocusModeWorkoutScreen: View {
                             // Hero is considered "properly visible" when bottom > expandThreshold
                             if heroBottom > expandThreshold {
                                 hasInitializedScroll = true
-                                print("🔍 [ScrollDebug] ✅ Scroll initialized (heroBottom=\(Int(heroBottom)))")
+                                AppLogger.shared.info(.app, "Scroll initialized (heroBottom=\(Int(heroBottom)))")
                             }
                             return  // Skip collapse detection until initialized
                         }
                         
                         // Hysteresis-based collapse detection (only after initialization)
                         if heroBottom < collapseThreshold && !isHeroCollapsed {
-                            print("🔍 [ScrollDebug] → COLLAPSING")
+                            AppLogger.shared.info(.app, "ScrollDebug -> COLLAPSING")
                             withAnimation(.easeInOut(duration: 0.15)) {
                                 isHeroCollapsed = true
                             }
                         } else if heroBottom > expandThreshold && isHeroCollapsed {
-                            print("🔍 [ScrollDebug] → EXPANDING")
+                            AppLogger.shared.info(.app, "ScrollDebug -> EXPANDING")
                             withAnimation(.easeInOut(duration: 0.15)) {
                                 isHeroCollapsed = false
                             }
@@ -1045,9 +1045,9 @@ struct FocusModeWorkoutScreen: View {
                 Task {
                     do {
                         try await service.updateStartTime(editingStartTime)
-                        print("✅ Start time updated to: \(editingStartTime)")
+                        AppLogger.shared.info(.work, "Start time updated to: \(editingStartTime)")
                     } catch {
-                        print("❌ Failed to update start time: \(error)")
+                        AppLogger.shared.error(.work, "Failed to update start time", error)
                     }
                 }
                 activeSheet = nil
@@ -1109,9 +1109,9 @@ struct FocusModeWorkoutScreen: View {
         Task {
             do {
                 try await service.updateWorkoutName(name)
-                print("✅ Workout name updated to: \(name)")
+                AppLogger.shared.info(.work, "Workout name updated to: \(name)")
             } catch {
-                print("❌ Failed to update workout name: \(error)")
+                AppLogger.shared.error(.work, "Failed to update workout name", error)
             }
         }
     }
@@ -1121,13 +1121,13 @@ struct FocusModeWorkoutScreen: View {
         Task {
             do {
                 try await service.cancelWorkout()
-                print("✅ Workout discarded")
+                AppLogger.shared.info(.work, "Workout discarded")
                 // Dismiss after successful cancel
                 await MainActor.run {
                     dismiss()
                 }
             } catch {
-                print("❌ Failed to discard workout: \(error)")
+                AppLogger.shared.error(.work, "Failed to discard workout", error)
                 // Still dismiss even on error (local state is cleared)
                 await MainActor.run {
                     dismiss()
@@ -1149,7 +1149,7 @@ struct FocusModeWorkoutScreen: View {
                     completedWorkout = CompletedWorkoutRef(id: archivedId)
                 }
             } catch {
-                print("Failed to complete workout: \(error)")
+                AppLogger.shared.error(.work, "Failed to complete workout", error)
                 await MainActor.run {
                     showError("Couldn't save workout — try again")
                 }
@@ -1293,7 +1293,7 @@ struct FocusModeWorkoutScreen: View {
         async let activeWorkoutCheck: FocusModeWorkout? = {
             do { return try await service.getActiveWorkout() }
             catch {
-                print("[FocusModeWorkoutScreen] getActiveWorkout failed: \(error)")
+                AppLogger.shared.error(.work, "getActiveWorkout failed", error)
                 return nil
             }
         }()
@@ -1323,11 +1323,11 @@ struct FocusModeWorkoutScreen: View {
                 )
                 resetTimerForNewWorkout()
             } catch {
-                print("Failed to start workout: \(error)")
+                AppLogger.shared.error(.work, "Failed to start workout", error)
             }
         }
     }
-    
+
     private func startEmptyWorkout() async {
         // Guard against duplicate concurrent starts
         guard !isStartingWorkout else { return }
@@ -1339,7 +1339,7 @@ struct FocusModeWorkoutScreen: View {
             _ = try await service.startWorkout(name: "Workout")
             resetTimerForNewWorkout()
         } catch {
-            print("Failed to start workout: \(error)")
+            AppLogger.shared.error(.work, "Failed to start empty workout", error)
         }
     }
     
@@ -1348,7 +1348,7 @@ struct FocusModeWorkoutScreen: View {
             do {
                 try await service.addExercise(exercise: exercise)
             } catch {
-                print("Add exercise failed: \(error)")
+                AppLogger.shared.error(.work, "Add exercise failed", error)
                 showError("Couldn't add that exercise — try again")
             }
         }
@@ -1401,7 +1401,7 @@ struct FocusModeWorkoutScreen: View {
                 )
                 // Haptic fires immediately in doneCell on tap — no duplicate here
             } catch {
-                print("Log set failed: \(error)")
+                AppLogger.shared.error(.work, "Log set failed", error)
                 showError("Couldn't save — will retry automatically")
             }
         }
@@ -1417,7 +1417,7 @@ struct FocusModeWorkoutScreen: View {
                     value: value
                 )
             } catch {
-                print("Patch failed: \(error)")
+                AppLogger.shared.error(.work, "Patch failed", error)
                 showError("Couldn't save — will retry automatically")
             }
         }
@@ -1429,7 +1429,7 @@ struct FocusModeWorkoutScreen: View {
                 _ = try await service.addSet(exerciseInstanceId: exerciseId, weight: weight, reps: reps, rir: rir)
                 HapticManager.selectionTick()
             } catch {
-                print("Add set failed: \(error)")
+                AppLogger.shared.error(.work, "Add set failed", error)
                 showError("Couldn't add the set — try again")
             }
         }
@@ -1440,7 +1440,7 @@ struct FocusModeWorkoutScreen: View {
             do {
                 _ = try await service.removeSet(exerciseInstanceId: exerciseId, setId: setId)
             } catch {
-                print("Remove set failed: \(error)")
+                AppLogger.shared.error(.work, "Remove set failed", error)
                 showError("Couldn't remove — try again")
             }
         }
@@ -1451,7 +1451,7 @@ struct FocusModeWorkoutScreen: View {
             do {
                 try await service.removeExercise(exerciseInstanceId: exerciseId)
             } catch {
-                print("Remove exercise failed: \(error)")
+                AppLogger.shared.error(.work, "Remove exercise failed", error)
                 showError("Couldn't remove — try again")
             }
         }

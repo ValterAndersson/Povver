@@ -325,7 +325,7 @@ extension ConversationScreen {
                                     showFocusMode = true
                                 }
                             } catch {
-                                print("[ConversationScreen] Failed to start workout from plan: \(error)")
+                                AppLogger.shared.error(.app, "Failed to start workout from plan", error)
                                 // Fallback: pass plan directly (client-side parsing)
                                 await MainActor.run {
                                     planBlocksForFocusMode = blocks
@@ -348,7 +348,7 @@ extension ConversationScreen {
                             _ = try await AgentsApi.artifactAction(userId: uid, conversationId: conversationId, artifactId: artifactId, action: "save_template")
                             await MainActor.run { toastText = "Template saved" }
                         } catch {
-                            print("[ConversationScreen] Failed to save template: \(error)")
+                            AppLogger.shared.error(.app, "Failed to save template", error)
                             await MainActor.run { toastText = "Failed to save template" }
                         }
                     }
@@ -392,7 +392,7 @@ extension ConversationScreen {
                    let field = action.payload?["field"],
                    let currentValue = action.payload?["current_value"] {
                     // For now, just log - TODO: implement inline number picker
-                    print("[ConversationScreen] edit_set: \(exerciseName) \(field)=\(currentValue)")
+                    AppLogger.shared.info(.app, "edit_set: \(exerciseName) \(field)=\(currentValue)")
                 }
                 
             case "adjust_workout":
@@ -427,7 +427,7 @@ extension ConversationScreen {
                                 }
                             }
                         } catch {
-                            print("[ConversationScreen] save_routine failed: \(error)")
+                            AppLogger.shared.error(.app, "save_routine failed", error)
                             await MainActor.run { vm.errorMessage = "Failed to save routine: \(error.localizedDescription)" }
                         }
                     }
