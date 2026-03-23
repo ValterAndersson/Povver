@@ -37,9 +37,16 @@ async function updateUserHandler(req, res) {
     ];
     
     const sanitizedData = {};
+    const MAX_FIELD_SIZE = 10000; // bytes
     Object.keys(userData).forEach(key => {
       if (allowedFields.includes(key)) {
-        sanitizedData[key] = userData[key];
+        const val = userData[key];
+        // Reject oversized nested objects
+        if (val !== null && typeof val === 'object') {
+          const size = JSON.stringify(val).length;
+          if (size > MAX_FIELD_SIZE) return; // silently skip oversized fields
+        }
+        sanitizedData[key] = val;
       }
     });
 

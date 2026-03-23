@@ -38,13 +38,13 @@ describe('getAuthenticatedUserId', () => {
     assert.equal(getAuthenticatedUserId(req), 'header-user-123');
   });
 
-  test('API key lane: returns userId from query', () => {
+  test('API key lane: ignores userId from query params (security: prevents log leakage)', () => {
     const req = {
       auth: { type: 'api_key', uid: undefined },
       body: {},
       query: { userId: 'query-user-123' },
     };
-    assert.equal(getAuthenticatedUserId(req), 'query-user-123');
+    assert.equal(getAuthenticatedUserId(req), null);
   });
 
   test('No auth: returns null', () => {

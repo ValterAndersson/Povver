@@ -45,8 +45,8 @@ function createRateLimiter({ windowMs, max }) {
      */
     check(key) {
       if (!key) {
-        logger.warn('[rate_limit] check called with empty key — allowing but not tracking');
-        return true;
+        logger.warn('[rate_limit] check called with empty key — denying');
+        return false;
       }
       const now = Date.now();
       const cutoff = now - windowMs;

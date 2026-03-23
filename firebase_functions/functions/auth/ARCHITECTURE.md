@@ -13,8 +13,8 @@ Authentication middleware and token exchange for Firebase Functions. Provides th
 
 | Middleware | User ID Source | Use Case | Wrapped In |
 |-----------|---------------|----------|------------|
-| `withApiKey` | `req.body.userId` or `req.query.userId` (trusted) | Agent/service-to-service calls | `index.js` |
-| `requireFlexibleAuth` | Bearer → `req.auth.uid`; API key → `req.body.userId` | Endpoints called by both iOS and agents | `index.js` |
+| `withApiKey` | `X-User-Id` header or `req.body.userId` (trusted) | Agent/service-to-service calls | `index.js` |
+| `requireFlexibleAuth` | Bearer → `req.auth.uid`; API key → `X-User-Id` header or `req.body.userId` | Endpoints called by both iOS and agents | `index.js` |
 | `requireAuth` | `req.auth.uid` only | iOS-only endpoints (strict) | `index.js` |
 
 ## Security Model
@@ -28,8 +28,8 @@ Authentication middleware and token exchange for Firebase Functions. Provides th
 
 **Service Lane (API Key):**
 - Used by agent system and service-to-service calls
-- `userId` from `req.body.userId` or `req.query.userId` (trusted)
-- Authenticated via `X-API-Key` header against `VALID_API_KEYS` env var
+- `userId` from `X-User-Id` header (via `req.auth.uid`) or `req.body.userId` (trusted)
+- Authenticated via `X-API-Key` header only (query param `apiKey` not accepted — prevents leakage in access logs)
 - Invalid API key attempts logged with key prefix + IP
 
 **Why Bearer endpoints never trust request params:**

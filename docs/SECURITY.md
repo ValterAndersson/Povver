@@ -20,6 +20,9 @@ These are non-negotiable. If a change would require violating one, stop and disc
 | S7 | **App Store webhook payloads are JWS-verified in production** | `SignedDataVerifier` via shared `apple-verifier.js` module |
 | S8 | **Subscription sync requires Apple-signed proof** | `syncSubscriptionStatus` verifies JWS before writing |
 | S9 | **Conversation messages are Admin SDK only** | Firestore rules: `allow write: if false` on messages subcollection |
+| S10 | **API keys and userId passed via headers only, never query params** | Middleware reads `X-API-Key` header and `X-User-Id` header; query param fallbacks removed |
+| S11 | **Agent service rejects requests when API key env var is unconfigured** | Fail-closed: returns 500 if `MYON_API_KEY` is empty |
+| S12 | **Rate limiter denies requests with null/empty keys** | Fail-closed: `check(null)` returns false |
 
 ---
 
@@ -32,7 +35,7 @@ Every Firebase Function endpoint uses exactly one of these middlewares. They are
 | Middleware | Who calls it | userId source | When to use |
 |------------|-------------|---------------|-------------|
 | `requireFlexibleAuth(handler)` | iOS app OR agent system | Bearer: `req.auth.uid` (token-verified). API key: `req.body.userId` (trusted service) | Most endpoints |
-| `withApiKey(handler)` | Agent system, scripts | `req.body.userId` or `req.query.userId` (trusted service) | Agent-only endpoints |
+| `withApiKey(handler)` | Agent system, scripts | `X-User-Id` header or `req.body.userId` (trusted service) | Agent-only endpoints |
 | `requireAuth(handler)` | iOS app only | `req.user.uid` (token-verified) | Strict iOS-only endpoints |
 
 ### IDOR Prevention
@@ -41,7 +44,7 @@ Every Firebase Function endpoint uses exactly one of these middlewares. They are
 
 **How it works:**
 - **Bearer lane**: Returns `req.user.uid` or `req.auth.uid` from the decoded Firebase ID token. Ignores any `userId` in request body/query. Logs IDOR attempts when a client tries to pass a different userId.
-- **API key lane**: Returns `req.auth.uid` (set by middleware from `X-User-Id` header) or falls back to `req.body.userId` / `req.query.userId`. This is safe because API key callers are authenticated services.
+- **API key lane**: Returns `req.auth.uid` (set by middleware from `X-User-Id` header) or falls back to `req.body.userId`. Query parameter userId is NOT accepted (prevents key/userId leakage in access logs). This is safe because API key callers are authenticated services.
 
 **When adding a new endpoint:**
 ```javascript
@@ -265,6 +268,10 @@ The LLM (Gemini via Vertex AI Agent Engine) operates within constrained boundari
 - Bypass input validation (all tool calls go through Firebase Functions with Zod validation)
 - Execute arbitrary code (tools are predefined Python functions with specific parameters)
 
+### Session Variable Safety
+
+`set_session_var` and `delete_session_var` validate key names against `^[a-zA-Z_][a-zA-Z0-9_]{0,63}$`. This prevents Firestore path injection — since session vars are stored via dot-notation (`session_vars.{key}`), an unvalidated key containing dots could write to arbitrary Firestore fields.
+
 ### Prompt Injection Posture
 
 **Risk level**: Low for this domain (fitness app, not financial).
@@ -344,6 +351,18 @@ gcloud firestore fields ttls update expires_at \
 ### Default Query Limits
 
 `getDocumentsFromSubcollection()` in `utils/firestore-helper.js` enforces a default limit of 500 documents when no explicit limit is provided. This prevents accidental unbounded reads.
+
+---
+
+## Supply Chain
+
+### Docker Base Images
+
+All Dockerfiles pin base images to SHA256 digests for supply-chain safety. When upgrading a base image, update the digest in all Dockerfiles that use it. Current base images:
+- `python:3.11-slim` — used by agent_service, training_analyst, catalog_orchestrator, catalog_dashboard
+- `node:20-slim` — used by mcp_server
+
+All Dockerfiles specify `--platform=linux/amd64` for Cloud Run compatibility.
 
 ---
 

@@ -9,8 +9,8 @@ const { logger } = require('firebase-functions');
  *
  * API key lane (service-to-service):
  *   userId comes from X-User-Id header (via req.auth.uid) or
- *   req.body.userId / req.query.userId. The caller is a trusted
- *   service (agent system) that has been authenticated by API key.
+ *   req.body.userId. The caller is a trusted service (agent system)
+ *   that has been authenticated by API key.
  *
  * @param {Object} req - Express request with auth middleware applied
  * @returns {string|null} - Authenticated userId or null
@@ -35,7 +35,7 @@ function getAuthenticatedUserId(req) {
   if (req.auth) {
     // API key lane: trusted service caller provides userId
     if (req.auth.type === 'api_key') {
-      const candidate = req.auth.uid || req.body?.userId || req.query?.userId || null;
+      const candidate = req.auth.uid || req.body?.userId || null;
       // Validate non-empty string to prevent null/empty bypass
       if (candidate && typeof candidate === 'string' && candidate.trim()) {
         return candidate.trim();

@@ -128,7 +128,22 @@ const reviewRecommendation = onRequest(
 
           const recData = recSnap.data();
 
-          if (recData.state !== 'pending_review') {
+          // Allow retry if stuck in 'accepting' for >5 minutes (crashed previous attempt)
+          if (recData.state === 'accepting') {
+            const lastHistory = (recData.state_history || []).slice(-1)[0];
+            const stuckSince = lastHistory?.at ? new Date(lastHistory.at).getTime() : Date.now();
+            const STUCK_THRESHOLD_MS = 5 * 60 * 1000;
+            if (Date.now() - stuckSince < STUCK_THRESHOLD_MS) {
+              const err = new Error('Recommendation is currently being processed');
+              err.code = 'INVALID_STATE';
+              err.currentState = recData.state;
+              throw err;
+            }
+            logger.warn('[reviewRecommendation] Recovering stuck accepting state', {
+              userId, recommendationId, stuckSinceMs: Date.now() - stuckSince,
+            });
+            // Fall through to re-process
+          } else if (recData.state !== 'pending_review') {
             const err = new Error(
               `Recommendation is not pending review (current state: ${recData.state})`
             );
@@ -140,7 +155,7 @@ const reviewRecommendation = onRequest(
           // Transition state atomically
           const newState = action === 'reject' ? 'rejected' : 'accepting';
           const stateHistoryEntry = {
-            from: 'pending_review',
+            from: recData.state,
             to: newState,
             at: new Date().toISOString(),
             by: 'user',

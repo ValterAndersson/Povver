@@ -37,9 +37,12 @@ async def stream_handler(request: Request) -> StreamingResponse:
     }
     Response: SSE stream
     """
-    # Defense-in-depth: API key check (non-blocking if env var not set)
+    # Defense-in-depth: API key check
     api_key = request.headers.get("x-api-key", "")
-    if VALID_API_KEYS and api_key not in VALID_API_KEYS:
+    if not VALID_API_KEYS:
+        logger.error("MYON_API_KEY not configured — rejecting request")
+        return JSONResponse(status_code=500, content={"error": "Server misconfigured"})
+    if api_key not in VALID_API_KEYS:
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
 
     try:
@@ -56,6 +59,13 @@ async def stream_handler(request: Request) -> StreamingResponse:
     if not all([user_id, conversation_id, message]):
         return JSONResponse(
             {"error": "user_id, conversation_id, and message are required"},
+            status_code=400,
+        )
+
+    MAX_MESSAGE_LENGTH = 10_000
+    if isinstance(message, str) and len(message) > MAX_MESSAGE_LENGTH:
+        return JSONResponse(
+            {"error": f"message exceeds maximum length of {MAX_MESSAGE_LENGTH}"},
             status_code=400,
         )
 
