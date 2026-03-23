@@ -789,7 +789,7 @@ class TextNormalizer {
 // CLOUD RUN AGENT SERVICE (Phase 3a — replaces Vertex AI when AGENT_SERVICE_URL is set)
 // ============================================================================
 
-async function callAgentService(userId, conversationId, message, correlationId, workoutId) {
+async function callAgentService(userId, conversationId, message, correlationId, workoutId, signal) {
   const auth = new GoogleAuth();
   const client = await auth.getIdTokenClient(AGENT_SERVICE_URL);
   const response = await client.request({
@@ -804,6 +804,7 @@ async function callAgentService(userId, conversationId, message, correlationId, 
     },
     responseType: 'stream',
     timeout: 180000,
+    signal,
   });
   return response.data;
 }
@@ -999,12 +1000,13 @@ async function streamAgentNormalizedHandler(req, res) {
 
   const finalizeWorkspaceWrites = () => Promise.allSettled(workspaceWrites).catch(() => {});
   let clientDisconnected = false;
+  const abortController = new AbortController();
 
   const done = (ok = true, err) => {
     clearInterval(hb);
     if (!clientDisconnected) {
       if (err) {
-        sse.write({ type: 'error', error: String(err.message || err) });
+        sse.write({ type: 'error', error: { code: 'INTERNAL_ERROR', message: 'An error occurred' } });
       }
       sse.write({ type: 'done' });
     }
@@ -1012,10 +1014,12 @@ async function streamAgentNormalizedHandler(req, res) {
   };
 
   // Clean up on client disconnect — prevents zombie connections from exhausting maxInstances
+  // AbortController cancels the upstream HTTP call so we stop wasting LLM tokens (H6)
   req.on('close', () => {
     if (!clientDisconnected) {
       clientDisconnected = true;
       clearInterval(hb);
+      abortController.abort();
       logger.info('[streamAgentNormalized] client_disconnected', { userId: 'pending' });
     }
   });
@@ -1078,7 +1082,7 @@ async function streamAgentNormalizedHandler(req, res) {
     const streamStartTime = Date.now();
 
     if (!conversationId) {
-      sse.write({ type: 'error', error: 'conversationId is required' });
+      sse.write({ type: 'error', error: { code: 'INVALID_ARGUMENT', message: 'Invalid request' } });
       done(false, new Error('conversationId is required'));
       return;
     }
@@ -1153,12 +1157,17 @@ async function streamAgentNormalizedHandler(req, res) {
       logger.info('[streamAgentNormalized] Using Cloud Run agent service', { url: AGENT_SERVICE_URL });
 
       try {
-        const agentStream = await callAgentService(userId, conversationId, message, correlationId, workoutId);
+        const agentStream = await callAgentService(userId, conversationId, message, correlationId, workoutId, abortController.signal);
         await relayCloudRunStream(agentStream, sse, persistWorkspaceEntry, normalizer, userId, conversationId, correlationId);
         done(true);
       } catch (err) {
+        // AbortError (google-auth-library/fetch) or CanceledError (gaxios) on client disconnect
+        if (err.name === 'AbortError' || err.name === 'CanceledError' || err.code === 'ERR_CANCELED') {
+          logger.info('[stream] upstream_canceled_on_disconnect', { correlationId, userId });
+          return;
+        }
         logger.error('[streamAgentNormalized] Cloud Run agent error', { error: err.message, userId });
-        sse.write({ type: 'error', error: { code: 'UPSTREAM_ERROR', message: err.message } });
+        sse.write({ type: 'error', error: { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' } });
         done(false);
       }
       return;
@@ -1222,6 +1231,7 @@ async function streamAgentNormalizedHandler(req, res) {
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
         validateStatus: (status) => status >= 200 && status < 500,
+        signal: abortController.signal,
       });
     } catch (axiosErr) {
       logger.error('[streamAgentNormalized] Axios request failed', { 
@@ -1246,16 +1256,16 @@ async function streamAgentNormalizedHandler(req, res) {
         response.data.on('error', () => { resolve(data); });
       });
       logger.error('[streamAgentNormalized] Vertex AI returned error', { status: response.status, body: errorBody.slice(0, 1000) });
-      
+
       // Invalidate token cache on auth errors (401/403)
       if (response.status === 401 || response.status === 403) {
         invalidateTokenCache();
-        sse.write({ type: 'error', error: 'Authentication failed. Please try again.', text: 'Authentication failed. Please try again.' });
+        sse.write({ type: 'error', error: { code: 'AUTHENTICATION_FAILED', message: 'Authentication failed. Please try again.' } });
         done(false, new Error(`Vertex AI returned ${response.status}`));
         return;
       }
-      
-      sse.write({ type: 'error', error: `Vertex AI error: ${response.status} - ${errorBody.slice(0, 200)}` });
+
+      sse.write({ type: 'error', error: { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' } });
       done(false, new Error(`Vertex AI returned ${response.status}`));
       return;
     }
@@ -1583,7 +1593,7 @@ async function streamAgentNormalizedHandler(req, res) {
       // If no data chunks received, something went wrong
       if (dataChunkCount === 0) {
         logger.warn('[streamAgentNormalized] Stream ended with NO data', { sessionId: sessionToUse });
-        sse.write({ type: 'error', error: 'No response received. Please try again.' });
+        sse.write({ type: 'error', error: { code: 'SERVICE_UNAVAILABLE', message: 'No response received. Please try again.' } });
       }
 
       logger.info('stream_completed', {
@@ -1605,6 +1615,11 @@ async function streamAgentNormalizedHandler(req, res) {
       done(false, err);
     });
   } catch (err) {
+    // AbortError/CanceledError on client disconnect — not an error, just stop
+    if (err.name === 'AbortError' || err.name === 'CanceledError' || err.code === 'ERR_CANCELED') {
+      logger.info('[stream] upstream_canceled_on_disconnect', { correlationId: req.body?.correlationId });
+      return;
+    }
     logger.error('[streamAgentNormalized] handler error', { error: String(err?.message || err) });
     done(false, err);
   }

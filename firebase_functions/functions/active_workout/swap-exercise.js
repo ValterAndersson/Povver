@@ -4,6 +4,7 @@ const admin = require('firebase-admin');
 const { ensureIdempotent } = require('../utils/idempotency');
 const { ok, fail } = require('../utils/response');
 const { logger } = require('firebase-functions');
+const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 
 const db = admin.firestore();
 
@@ -12,8 +13,7 @@ async function swapExerciseHandler(req, res) {
     if (req.method !== 'POST') {
       return fail(res, 'METHOD_NOT_ALLOWED', 'Method Not Allowed', null, 405);
     }
-    const userId = req.user?.uid || req.auth?.uid;
-    if (!userId) return fail(res, 'UNAUTHORIZED', 'Unauthorized', null, 401);
+    const userId = getAuthenticatedUserId(req);
 
     const { workout_id, from_exercise_id, to_exercise_id, reason } = req.body || {};
     const idempotencyKey = req.body?.idempotency_key;

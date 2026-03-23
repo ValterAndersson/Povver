@@ -13,8 +13,6 @@ async function healthHandler(req, res) {
   return ok(res, {
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    version: '1.0.0',
-    services: { firebase: 'online', firestore: 'online' },
   });
 }
 

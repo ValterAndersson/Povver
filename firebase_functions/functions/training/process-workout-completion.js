@@ -499,21 +499,30 @@ async function processWorkoutCompletion(userId, workoutId) {
   try {
     const hasPremium = await isPremiumUser(userId);
     if (hasPremium) {
-      await db.collection('training_analysis_jobs').add({
-        type: 'POST_WORKOUT',
-        status: 'queued',
-        priority: 100,
-        payload: {
-          user_id: userId,
-          workout_id: workoutId,
-          window_weeks: 4,
-        },
-        attempts: 0,
-        max_attempts: 3,
-        created_at: admin.firestore.FieldValue.serverTimestamp(),
-        updated_at: admin.firestore.FieldValue.serverTimestamp(),
-      });
-      logger.info(`Enqueued training analysis job for premium user ${userId}`);
+      const jobId = `pw-${userId}-${workoutId}`;
+      const jobRef = db.collection('training_analysis_jobs').doc(jobId);
+
+      // Check if already completed before overwriting
+      const existing = await jobRef.get();
+      if (existing.exists && existing.data().status === 'completed') {
+        logger.info('[process-workout-completion] job_already_completed', { jobId });
+      } else {
+        await jobRef.set({
+          type: 'POST_WORKOUT',
+          status: 'queued',
+          priority: 100,
+          payload: {
+            user_id: userId,
+            workout_id: workoutId,
+            window_weeks: 4,
+          },
+          attempts: 0,
+          max_attempts: 3,
+          created_at: admin.firestore.FieldValue.serverTimestamp(),
+          updated_at: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        logger.info(`Enqueued training analysis job for premium user ${userId}`, { jobId });
+      }
     } else {
       logger.info(`Skipping training analysis job for free user ${userId}`);
     }

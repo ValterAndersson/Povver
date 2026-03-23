@@ -13,13 +13,45 @@ const { onRequest } = require('firebase-functions/v2/https');
 const { requireFlexibleAuth } = require('../auth/middleware');
 const admin = require('firebase-admin');
 const { ok, fail } = require('../utils/response');
+const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const {
   ensureWorkoutIdempotent,
   storeWorkoutIdempotentTx
 } = require('../utils/idempotency');
 const { logger } = require('firebase-functions');
+const { z } = require('zod');
+const { IdSchema } = require('../utils/validators');
 
 const db = admin.firestore();
+
+// Constants from validators.js
+const MAX_NAME_LENGTH = 200;
+const MAX_SETS_PER_EXERCISE = 100;
+const MAX_REPS = 500;
+const MAX_WEIGHT_KG = 1500;
+
+// Validation schema for add-exercise request
+const AddExerciseSchema = z.object({
+  workout_id: IdSchema,
+  instance_id: IdSchema,
+  exercise_id: IdSchema,
+  name: z.string().max(MAX_NAME_LENGTH).optional(),
+  position: z.number().int().nonnegative().optional(),
+  sets: z.array(z.object({
+    id: IdSchema.optional(),
+    set_type: z.enum(['warmup', 'working', 'dropset']).optional(),
+    status: z.enum(['planned', 'in_progress', 'completed', 'skipped']).optional(),
+    target_reps: z.number().int().min(0).max(MAX_REPS).optional(),
+    reps: z.number().int().min(0).max(MAX_REPS).optional(),
+    target_rir: z.number().int().min(0).max(5).optional(),
+    rir: z.number().int().min(0).max(5).optional(),
+    target_weight: z.number().nonnegative().max(MAX_WEIGHT_KG).nullable().optional(),
+    weight: z.number().nonnegative().max(MAX_WEIGHT_KG).nullable().optional(),
+    tags: z.record(z.any()).optional(),
+  })).max(MAX_SETS_PER_EXERCISE).optional(),
+  idempotency_key: IdSchema.optional(),
+  client_timestamp: z.string().optional(),
+});
 
 // Function options - allow public invocations (auth handled at application level)
 const functionOptions = {
@@ -32,9 +64,12 @@ async function addExerciseHandler(req, res) {
       return res.status(405).json({ success: false, error: 'Method Not Allowed' });
     }
 
-    const userId = req.user?.uid || req.auth?.uid;
-    if (!userId) {
-      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    const userId = getAuthenticatedUserId(req);
+
+    // Validate input
+    const parseResult = AddExerciseSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      return fail(res, 'INVALID_INPUT', 'Invalid request data', null, 400);
     }
 
     // 1. Parse and validate required fields (pure — no Firestore reads)
@@ -47,41 +82,14 @@ async function addExerciseHandler(req, res) {
       sets,
       idempotency_key: idempotencyKey,
       client_timestamp: clientTimestamp,
-    } = req.body || {};
+    } = parseResult.data;
 
-    if (!workoutId || !exerciseId) {
-      return fail(res, 'INVALID_ARGUMENT', 'Missing workout_id or exercise_id', null, 400);
-    }
-
-    if (!instanceId) {
-      return fail(res, 'INVALID_ARGUMENT', 'Missing instance_id', null, 400);
-    }
-
-    // Validate name length
-    if (name && typeof name === 'string' && name.length > 200) {
-      return fail(res, 'INVALID_ARGUMENT', 'Exercise name too long', null, 400);
-    }
-
-    // 2. Process and validate sets outside transaction (pure transformation)
+    // 2. Process sets outside transaction (pure transformation)
     const processedSets = [];
     for (const set of (sets || [])) {
       const reps = set.target_reps ?? set.reps ?? null;
       const rir = set.target_rir ?? set.rir ?? null;
       const weight = set.target_weight ?? set.weight ?? null;
-
-      // Validate bounds
-      if (reps !== null && (reps < 0 || reps > 100)) {
-        return fail(res, 'INVALID_ARGUMENT', 'Reps must be between 0 and 100', { reps }, 400);
-      }
-      if (rir !== null && (rir < 0 || rir > 5)) {
-        return fail(res, 'INVALID_ARGUMENT', 'RIR must be between 0 and 5', { rir }, 400);
-      }
-      if (weight !== null && weight < 0) {
-        return fail(res, 'INVALID_ARGUMENT', 'Weight must be >= 0', { weight }, 400);
-      }
-      if (weight !== null && weight > 1500) {
-        return fail(res, 'INVALID_ARGUMENT', 'Weight exceeds maximum', null, 400);
-      }
 
       processedSets.push({
         id: set.id,

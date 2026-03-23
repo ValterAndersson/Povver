@@ -193,6 +193,9 @@ struct WorkoutCompletionSummary: View {
 
         guard let w = workout else { return }
 
+        // Clear onboarding complete flag — first workout means onboarding is fully done
+        OnboardingCompleteFlag.clear()
+
         // Set post-workout flag so Coach tab shows post-workout state
         CoachTabViewModel.setPostWorkoutFlag(
             workoutId: w.id,

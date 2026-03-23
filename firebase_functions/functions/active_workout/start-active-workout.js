@@ -61,12 +61,38 @@ const { onRequest } = require('firebase-functions/v2/https');
 const { requireFlexibleAuth } = require('../auth/middleware');
 const { ok, fail } = require('../utils/response');
 const admin = require('firebase-admin');
+const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const { v4: uuidv4 } = require('uuid');
 const { templateToExercises, planBlocksToExercises, normalizePlan } = require('../utils/workout-seed-mapper');
 const { writeLimiter } = require('../utils/rate-limiter');
 const { logger } = require('firebase-functions');
+const { z } = require('zod');
+const { IdSchema, PlanSchema } = require('../utils/validators');
 
 const firestore = admin.firestore();
+
+// Constants from validators.js
+const MAX_NAME_LENGTH = 200;
+const MAX_EXERCISES_PER_WORKOUT = 50;
+const MAX_SETS_PER_EXERCISE = 100;
+
+// Validation schema for start-active-workout request
+const StartActiveWorkoutSchema = z.object({
+  template_id: IdSchema.optional(),
+  source_template_id: IdSchema.optional(),
+  source_routine_id: IdSchema.optional(),
+  routine_id: IdSchema.optional(),
+  force_new: z.boolean().optional(),
+  plan: PlanSchema.optional(),
+  name: z.string().max(MAX_NAME_LENGTH).optional(),
+  exercises: z.array(z.object({
+    instance_id: IdSchema,
+    exercise_id: IdSchema,
+    name: z.string().max(MAX_NAME_LENGTH).optional(),
+    position: z.number().int().nonnegative().optional(),
+    sets: z.array(z.any()).max(MAX_SETS_PER_EXERCISE).optional(),
+  })).max(MAX_EXERCISES_PER_WORKOUT).optional(),
+});
 
 async function startActiveWorkoutHandler(req, res) {
   try {
@@ -75,11 +101,16 @@ async function startActiveWorkoutHandler(req, res) {
     }
 
     // User ID from Firebase Auth or API key middleware
-    const userId = req.user?.uid || req.auth?.uid;
-    if (!userId) return fail(res, 'UNAUTHENTICATED', 'Unauthorized', null, 401);
+    const userId = getAuthenticatedUserId(req);
 
     if (!writeLimiter.check(userId)) {
       return fail(res, 'RATE_LIMITED', 'Too many requests', null, 429);
+    }
+
+    // Validate input
+    const parseResult = StartActiveWorkoutSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      return fail(res, 'INVALID_INPUT', 'Invalid request data', null, 400);
     }
 
     // ==========================================================================

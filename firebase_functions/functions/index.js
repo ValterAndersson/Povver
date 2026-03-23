@@ -8,12 +8,18 @@ const { refineExercise } = require('./exercises/refine-exercise');
 const { searchAliases } = require('./exercises/search-aliases');
 const functions = require('firebase-functions');
 const { onRequest: onRequestV2 } = require('firebase-functions/v2/https');
+const { setGlobalOptions } = require('firebase-functions/v2');
 const admin = require('firebase-admin');
 
 // Initialize admin if not already initialized
 if (!admin.apps.length) {
   admin.initializeApp();
 }
+
+// Cost protection: cap all functions at 30 instances by default.
+// v2 functions can override with their own maxInstances (e.g. streamAgentNormalized: 20).
+// firebase-functions v6 dropped runWith(), so setGlobalOptions is the only way to cap v1 functions.
+setGlobalOptions({ maxInstances: 30 });
 
 // Middleware
 const { withApiKey } = require('./auth/middleware');
@@ -88,6 +94,7 @@ const { completeCurrentSet } = require('./active_workout/complete-current-set');
 
 // StrengthOS Operations
 const { streamAgentNormalizedHandler } = require('./strengthos/stream-agent-normalized');
+const { streamOnboardingRoutineHandler } = require('./strengthos/stream-onboarding-routine');
 const { requireFlexibleAuth } = require('./auth/middleware');
 const { upsertProgressReport, getProgressReports } = require('./strengthos/progress-reports');
 
@@ -235,6 +242,10 @@ exports.completeCurrentSet = completeCurrentSet;
 exports.streamAgentNormalized = onRequestV2(
   { timeoutSeconds: 300, memory: '512MiB', maxInstances: 20, concurrency: 1 },
   requireFlexibleAuth(streamAgentNormalizedHandler)
+);
+exports.streamOnboardingRoutine = onRequestV2(
+  { timeoutSeconds: 120, memory: '256MiB', maxInstances: 10, concurrency: 1 },
+  requireFlexibleAuth(streamOnboardingRoutineHandler)
 );
 exports.upsertProgressReport = functions.https.onRequest((req, res) => withApiKey(upsertProgressReport)(req, res));
 exports.getProgressReports = functions.https.onRequest((req, res) => requireFlexibleAuth(getProgressReports)(req, res));

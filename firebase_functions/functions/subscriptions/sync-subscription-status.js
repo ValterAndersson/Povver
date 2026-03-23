@@ -81,13 +81,31 @@ async function syncSubscriptionStatusHandler(req, res) {
 
   try {
     const userRef = db.collection('users').doc(userId);
-    await userRef.update({
-      subscription_status: status,
-      subscription_tier: tier,
-      subscription_auto_renew_enabled: autoRenewEnabled || false,
-      subscription_in_grace_period: inGracePeriod || false,
-      subscription_product_id: productId || null,
-      subscription_updated_at: admin.firestore.FieldValue.serverTimestamp(),
+    await db.runTransaction(async (t) => {
+      const userDoc = await t.get(userRef);
+      const currentData = userDoc.data() || {};
+
+      // Timestamp-based conflict resolution:
+      // If subscription was updated more recently than this sync's source data,
+      // the webhook has already set authoritative state — don't overwrite.
+      const currentUpdatedAt = currentData.subscription_updated_at?.toMillis?.() || 0;
+      const transactionTimestamp = decodedTransaction.signedDate || 0;
+
+      if (currentUpdatedAt > transactionTimestamp) {
+        logger.info('[syncSubscriptionStatus] skipping_stale_sync', {
+          userId, currentUpdatedAt, transactionTimestamp,
+        });
+        return;
+      }
+
+      t.update(userRef, {
+        subscription_status: status,
+        subscription_tier: tier,
+        subscription_auto_renew_enabled: autoRenewEnabled || false,
+        subscription_in_grace_period: inGracePeriod || false,
+        subscription_product_id: productId || null,
+        subscription_updated_at: admin.firestore.FieldValue.serverTimestamp(),
+      });
     });
 
     logger.info('[syncSubscriptionStatus] synced', {

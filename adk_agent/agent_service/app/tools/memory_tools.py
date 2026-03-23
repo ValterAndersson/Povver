@@ -28,8 +28,14 @@ async def list_memories(*, ctx: RequestContext, limit: int = 50) -> dict:
     return {"memories": memories, "count": len(memories)}
 
 
+import re
+_SESSION_VAR_KEY_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,63}$")
+
+
 async def set_session_var(*, ctx: RequestContext, key: str, value: str) -> dict:
     """Set a session variable on the current conversation."""
+    if not _SESSION_VAR_KEY_RE.match(key):
+        raise ValueError(f"Invalid session var key: must match [a-zA-Z_][a-zA-Z0-9_]{{0,63}}")
     from app.firestore_client import get_firestore_client
     fs = get_firestore_client()
     coll = fs.CONVERSATION_COLLECTION
@@ -41,6 +47,8 @@ async def set_session_var(*, ctx: RequestContext, key: str, value: str) -> dict:
 
 async def delete_session_var(*, ctx: RequestContext, key: str) -> dict:
     """Delete a session variable from the current conversation."""
+    if not _SESSION_VAR_KEY_RE.match(key):
+        raise ValueError(f"Invalid session var key: must match [a-zA-Z_][a-zA-Z0-9_]{{0,63}}")
     from google.cloud.firestore import DELETE_FIELD
     from app.firestore_client import get_firestore_client
     fs = get_firestore_client()

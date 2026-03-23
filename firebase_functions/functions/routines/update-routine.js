@@ -27,12 +27,15 @@ async function updateRoutineHandler(req, res) {
     return fail(res, 'INVALID_ARGUMENT', 'Invalid routine data', details, 400);
   }
 
+  // Use validated data — prevents arbitrary extra fields from bypassing Zod
+  const validatedRoutine = parsed.data;
+
   try {
     const existingRoutine = await db.getDocumentFromSubcollection('users', userId, 'routines', routineId);
     if (!existingRoutine) return fail(res, 'NOT_FOUND', 'Routine not found', null, 404);
 
     // Collect template IDs from either format
-    const templateIds = routine.template_ids || routine.templateIds || [];
+    const templateIds = validatedRoutine.template_ids || validatedRoutine.templateIds || [];
     
     // =========================================================================
     // CRITICAL: Validate all template_ids exist before updating routine
@@ -64,11 +67,11 @@ async function updateRoutineHandler(req, res) {
     }
 
     const updatedRoutine = {
-      ...routine,
+      ...validatedRoutine,
       // Normalize to snake_case
       template_ids: templateIds,
       // Guarantee an `id` field inside the document
-      id: routine.id || routineId
+      id: validatedRoutine.id || routineId
     };
     
     // Remove camelCase version if it exists

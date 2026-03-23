@@ -36,6 +36,7 @@ const { requireFlexibleAuth } = require('../auth/middleware');
 const admin = require('firebase-admin');
 const logger = require('firebase-functions/logger');
 const { ok, fail } = require('../utils/response');
+const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const { isPremiumUser } = require('../utils/subscription-gate');
 const {
   applyChangesToTarget,
@@ -77,13 +78,13 @@ const db = admin.firestore();
  * }
  */
 const reviewRecommendation = onRequest(
-  { cors: true, region: 'us-central1' },
+  { region: 'us-central1' },
   requireFlexibleAuth(async (req, res) => {
     const startTime = Date.now();
 
     try {
       // 1. Extract userId from auth token (NEVER trust client-provided userId)
-      const userId = req.auth.uid;
+      const userId = getAuthenticatedUserId(req);
       if (!userId) {
         logger.warn('[reviewRecommendation] Missing userId from auth');
         return fail(res, 'UNAUTHORIZED', 'Authentication required', null, 401);
@@ -109,36 +110,92 @@ const reviewRecommendation = onRequest(
         return fail(res, 'PREMIUM_REQUIRED', 'Premium subscription required', null, 403);
       }
 
-      // 4. Read recommendation
+      // 4. Atomically read recommendation, validate state, and transition state
+      //    inside a transaction to prevent double-apply race condition.
+      //    Side effects (applyChangesToTarget) happen AFTER the transaction.
       const recRef = db.doc(`users/${userId}/agent_recommendations/${recommendationId}`);
-      const recSnap = await recRef.get();
 
-      if (!recSnap.exists) {
-        logger.warn('[reviewRecommendation] Recommendation not found', { userId, recommendationId });
-        return fail(res, 'NOT_FOUND', 'Recommendation not found', null, 404);
-      }
+      let recommendation;
+      try {
+        recommendation = await db.runTransaction(async (t) => {
+          const recSnap = await t.get(recRef);
 
-      const recommendation = recSnap.data();
+          if (!recSnap.exists) {
+            const err = new Error('Recommendation not found');
+            err.code = 'NOT_FOUND';
+            throw err;
+          }
 
-      // 5. Validate state
-      if (recommendation.state !== 'pending_review') {
-        logger.warn('[reviewRecommendation] Invalid state', {
-          userId,
-          recommendationId,
-          currentState: recommendation.state,
+          const recData = recSnap.data();
+
+          // Allow retry if stuck in 'accepting' for >5 minutes (crashed previous attempt)
+          if (recData.state === 'accepting') {
+            const lastHistory = (recData.state_history || []).slice(-1)[0];
+            const stuckSince = lastHistory?.at ? new Date(lastHistory.at).getTime() : Date.now();
+            const STUCK_THRESHOLD_MS = 5 * 60 * 1000;
+            if (Date.now() - stuckSince < STUCK_THRESHOLD_MS) {
+              const err = new Error('Recommendation is currently being processed');
+              err.code = 'INVALID_STATE';
+              err.currentState = recData.state;
+              throw err;
+            }
+            logger.warn('[reviewRecommendation] Recovering stuck accepting state', {
+              userId, recommendationId, stuckSinceMs: Date.now() - stuckSince,
+            });
+            // Fall through to re-process
+          } else if (recData.state !== 'pending_review') {
+            const err = new Error(
+              `Recommendation is not pending review (current state: ${recData.state})`
+            );
+            err.code = 'INVALID_STATE';
+            err.currentState = recData.state;
+            throw err;
+          }
+
+          // Transition state atomically
+          const newState = action === 'reject' ? 'rejected' : 'accepting';
+          const stateHistoryEntry = {
+            from: recData.state,
+            to: newState,
+            at: new Date().toISOString(),
+            by: 'user',
+            note: action === 'reject'
+              ? 'User rejected recommendation'
+              : 'User accepted recommendation (applying changes)',
+          };
+
+          t.update(recRef, {
+            state: newState,
+            state_history: admin.firestore.FieldValue.arrayUnion(stateHistoryEntry),
+          });
+
+          return recData;
         });
-        return fail(
-          res,
-          'INVALID_STATE',
-          `Recommendation is not pending review (current state: ${recommendation.state})`,
-          { currentState: recommendation.state },
-          409
-        );
+      } catch (txError) {
+        if (txError.code === 'NOT_FOUND') {
+          logger.warn('[reviewRecommendation] Recommendation not found', { userId, recommendationId });
+          return fail(res, 'NOT_FOUND', 'Recommendation not found', null, 404);
+        }
+        if (txError.code === 'INVALID_STATE') {
+          logger.warn('[reviewRecommendation] Invalid state', {
+            userId,
+            recommendationId,
+            currentState: txError.currentState,
+          });
+          return fail(
+            res,
+            'INVALID_STATE',
+            txError.message,
+            { currentState: txError.currentState },
+            409
+          );
+        }
+        throw txError; // re-throw unexpected errors to outer catch
       }
 
-      // 6. Handle action
+      // 5. Handle post-transaction side effects
       if (action === 'reject') {
-        return await handleReject(res, userId, recRef, recommendation);
+        return handleReject(res, userId, recRef);
       } else {
         return await handleAccept(res, userId, recRef, recommendation, startTime);
       }
@@ -154,22 +211,10 @@ const reviewRecommendation = onRequest(
 );
 
 /**
- * Handle reject action
+ * Handle reject action.
+ * State already transitioned to 'rejected' inside the transaction.
  */
-async function handleReject(res, userId, recRef, recommendation) {
-  const { FieldValue } = admin.firestore;
-
-  await recRef.update({
-    state: 'rejected',
-    state_history: FieldValue.arrayUnion({
-      from: 'pending_review',
-      to: 'rejected',
-      at: new Date().toISOString(),
-      by: 'user',
-      note: 'User rejected recommendation',
-    }),
-  });
-
+function handleReject(res, userId, recRef) {
   logger.info('[reviewRecommendation] Recommendation rejected', {
     userId,
     recommendationId: recRef.id,
@@ -179,7 +224,9 @@ async function handleReject(res, userId, recRef, recommendation) {
 }
 
 /**
- * Handle accept action
+ * Handle accept action.
+ * State already transitioned to 'accepting' inside the transaction.
+ * Side effects (template mutations) happen here, outside the transaction.
  */
 async function handleAccept(res, userId, recRef, recommendation, startTime) {
   const { FieldValue } = admin.firestore;
@@ -196,7 +243,7 @@ async function handleAccept(res, userId, recRef, recommendation, startTime) {
       applied_by: 'user',
       applied_at: FieldValue.serverTimestamp(),
       state_history: FieldValue.arrayUnion({
-        from: 'pending_review',
+        from: 'accepting',
         to: 'acknowledged',
         at: new Date().toISOString(),
         by: 'user',
@@ -222,7 +269,7 @@ async function handleAccept(res, userId, recRef, recommendation, startTime) {
       applied_by: 'user',
       applied_at: FieldValue.serverTimestamp(),
       state_history: FieldValue.arrayUnion({
-        from: 'pending_review',
+        from: 'accepting',
         to: 'acknowledged',
         at: new Date().toISOString(),
         by: 'user',
@@ -285,7 +332,7 @@ async function handleAccept(res, userId, recRef, recommendation, startTime) {
     );
   }
 
-  // 3. Apply changes
+  // 3. Apply changes (outside transaction — applyChangesToTarget uses batch internally)
   let result;
   try {
     result = await applyChangesToTarget(db, userId, 'template', templateId, changes, { recommendation_id: recRef.id });
@@ -306,7 +353,7 @@ async function handleAccept(res, userId, recRef, recommendation, startTime) {
     await recRef.update({
       state: 'failed',
       state_history: FieldValue.arrayUnion({
-        from: 'pending_review',
+        from: 'accepting',
         to: 'failed',
         at: new Date().toISOString(),
         by: 'system',
@@ -324,11 +371,11 @@ async function handleAccept(res, userId, recRef, recommendation, startTime) {
     applied_at: FieldValue.serverTimestamp(),
     result,
     state_history: FieldValue.arrayUnion({
-      from: 'pending_review',
+      from: 'accepting',
       to: 'applied',
       at: new Date().toISOString(),
       by: 'user',
-      note: 'User accepted recommendation',
+      note: 'User accepted and changes applied',
     }),
   });
 

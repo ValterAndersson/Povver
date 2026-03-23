@@ -97,10 +97,10 @@ service cloud.firestore {
         allow write: if false;
       }
 
-      // Subscription events: read-only audit log
+      // Subscription events: read-only audit log, delete allowed for account cleanup
       match /subscription_events/{eventId} {
-        allow read: if request.auth != null && request.auth.uid == uid;
-        allow write: if false;
+        allow read, delete: if request.auth != null && request.auth.uid == uid;
+        allow create, update: if false;
       }
 
       // Agent memory: owner can read, server-only writes
@@ -115,8 +115,39 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // Server-computed subcollections: owner can read and delete (account cleanup),
+      // but create/update is Admin SDK only.
+      match /set_facts/{docId} {
+        allow read, delete: if request.auth != null && request.auth.uid == uid;
+        allow create, update: if false;
+      }
+      match /analytics_series_exercise/{docId} {
+        allow read, delete: if request.auth != null && request.auth.uid == uid;
+        allow create, update: if false;
+      }
+      match /analytics_series_muscle/{docId} {
+        allow read, delete: if request.auth != null && request.auth.uid == uid;
+        allow create, update: if false;
+      }
+      match /analytics_series_muscle_group/{docId} {
+        allow read, delete: if request.auth != null && request.auth.uid == uid;
+        allow create, update: if false;
+      }
+      match /analytics_rollups/{docId} {
+        allow read, delete: if request.auth != null && request.auth.uid == uid;
+        allow create, update: if false;
+      }
+      match /analytics_state/{docId} {
+        allow read, delete: if request.auth != null && request.auth.uid == uid;
+        allow create, update: if false;
+      }
+      match /weekly_stats/{docId} {
+        allow read, delete: if request.auth != null && request.auth.uid == uid;
+        allow create, update: if false;
+      }
+
       // All other user subcollections: owner read/write
-      // (workouts, templates, routines, set_facts, weekly_stats, etc.)
+      // (workouts, templates, routines, active_workouts, etc.)
       match /{collection}/{document=**} {
         allow read: if request.auth != null && request.auth.uid == uid;
         allow write: if request.auth != null && request.auth.uid == uid
@@ -128,7 +159,14 @@ service cloud.firestore {
           && collection != "agent_memory"
           && collection != "mcp_change_log"
           && collection != "analysis_insights"
-          && collection != "weekly_reviews";
+          && collection != "weekly_reviews"
+          && collection != "set_facts"
+          && collection != "analytics_series_exercise"
+          && collection != "analytics_series_muscle"
+          && collection != "analytics_series_muscle_group"
+          && collection != "analytics_rollups"
+          && collection != "analytics_state"
+          && collection != "weekly_stats";
       }
     }
 
@@ -185,6 +223,23 @@ service cloud.firestore {
 
     // MCP OAuth tokens — server-only (Admin SDK reads/writes)
     match /mcp_tokens/{doc} {
+      allow read, write: if false;
+    }
+
+    // Root collections: explicit deny (defense-in-depth, not relying on fallback alone)
+    match /catalog_locks/{document=**} {
+      allow read, write: if false;
+    }
+    match /catalog_changes/{document=**} {
+      allow read, write: if false;
+    }
+    match /catalog_idempotency/{document=**} {
+      allow read, write: if false;
+    }
+    match /exercise_families/{document=**} {
+      allow read, write: if false;
+    }
+    match /llm_usage/{document=**} {
       allow read, write: if false;
     }
 

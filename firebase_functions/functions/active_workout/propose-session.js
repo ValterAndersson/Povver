@@ -1,5 +1,6 @@
 const { onRequest } = require('firebase-functions/v2/https');
 const { requireFlexibleAuth } = require('../auth/middleware');
+const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 
 /**
  * Propose a session plan based on constraints.
@@ -11,10 +12,7 @@ async function proposeSessionHandler(req, res) {
       return res.status(405).json({ success: false, error: 'Method Not Allowed' });
     }
 
-    const userId = req.user?.uid || req.auth?.uid;
-    if (!userId) {
-      return res.status(401).json({ success: false, error: 'Unauthorized' });
-    }
+    const userId = getAuthenticatedUserId(req);
 
     const constraints = req.body?.constraints || {};
 

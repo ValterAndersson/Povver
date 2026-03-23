@@ -26,6 +26,7 @@ const { requireFlexibleAuth } = require('../auth/middleware');
 const admin = require('firebase-admin');
 const { fail, ok } = require('../utils/response');
 const { computeTotals } = require('../utils/active-workout-helpers');
+const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 
 const db = admin.firestore();
 
@@ -36,10 +37,7 @@ async function completeCurrentSetHandler(req, res) {
     }
 
     // User ID from Firebase Auth or API key middleware
-    const userId = req.user?.uid || req.auth?.uid;
-    if (!userId) {
-      return res.status(401).json({ success: false, error: 'Unauthorized' });
-    }
+    const userId = getAuthenticatedUserId(req);
 
     const { workout_id: workoutId } = req.body || {};
     if (!workoutId) {
@@ -165,7 +163,7 @@ async function completeCurrentSetHandler(req, res) {
       return fail(res, error.code, error.message, error.details || null, error.httpCode);
     }
     console.error('complete-current-set error:', error);
-    return fail(res, 'INTERNAL', 'Failed to complete current set', { message: error.message }, 500);
+    return fail(res, 'INTERNAL', 'An internal error occurred', null, 500);
   }
 }
 

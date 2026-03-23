@@ -115,12 +115,12 @@ async function verifyAuth(req, res) {
  * @returns {Object|null} - API key info or null if authentication fails
  */
 async function verifyApiKey(req, res) {
-  const apiKey = req.get('X-API-Key') || req.query.apiKey;
-  
+  const apiKey = req.get('X-API-Key');
+
   if (!apiKey) {
-    res.status(401).json({ 
-      success: false, 
-      error: 'Missing API key. Please provide X-API-Key header or apiKey query parameter.' 
+    res.status(401).json({
+      success: false,
+      error: 'Missing API key. Please provide X-API-Key header.'
     });
     return null;
   }
@@ -149,7 +149,7 @@ async function verifyApiKey(req, res) {
       res.status(403).json({ success: false, error: 'Invalid API key' });
       return null;
     }
-    const uidHeader = req.get('X-User-Id') || req.query.userId;
+    const uidHeader = req.get('X-User-Id');
     return { type: 'api_key', key: apiKey, uid: uidHeader || undefined, source: 'third_party_agent' };
   } catch (error) {
     logger.error('[auth] api_key_verification_error', {
@@ -176,7 +176,7 @@ async function verifyFlexibleAuth(req, res) {
   }
   
   // Try API key authentication
-  const apiKey = req.get('X-API-Key') || req.query.apiKey;
+  const apiKey = req.get('X-API-Key');
   if (apiKey) {
     return await verifyApiKey(req, res);
   }

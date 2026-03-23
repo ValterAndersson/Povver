@@ -1,48 +1,45 @@
 import SwiftUI
 
-struct TrialScreen: View {
+struct ShowcaseScreen: View {
     @ObservedObject var vm: OnboardingViewModel
     let onTrialStarted: () -> Void
-    let onSkipped: () -> Void
 
     @State private var showFeatures = false
 
-    private let features = [
-        "Program generation",
-        "Session analysis",
-        "Progressive overload tracking",
-        "900+ exercises"
+    private let features: [(icon: String, title: String, description: String)] = [
+        ("brain.head.profile", "AI Coach", "Chat, plan, and get personalized advice"),
+        ("figure.strengthtraining.traditional", "Smart Programs", "Routines that adapt to your progress"),
+        ("chart.bar.fill", "Workout Tracking", "Log sets, track PRs, see trends"),
+        ("link", "Open Platform", "Connect with other AI tools via MCP"),
     ]
 
     var body: some View {
         VStack(spacing: Space.zero) {
             Spacer()
 
-            // Content area (center-bottom)
             VStack(spacing: Space.xl) {
-                // Title
-                Text("Powered by AI")
+                Text("Everything you need")
                     .textStyle(.appTitle)
                     .foregroundColor(.textPrimary)
 
-                // Body text
-                Text("Povver uses AI to build your programs and coach your sessions. A free trial starts today.")
-                    .textStyle(.body)
-                    .foregroundColor(.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                // Feature list with checkmarks
-                VStack(alignment: .leading, spacing: Space.sm) {
+                // Feature rows
+                VStack(alignment: .leading, spacing: Space.lg) {
                     ForEach(Array(features.enumerated()), id: \.offset) { index, feature in
-                        HStack(spacing: Space.md) {
-                            Image(systemName: "checkmark.circle.fill")
+                        HStack(alignment: .top, spacing: Space.md) {
+                            Image(systemName: feature.icon)
                                 .foregroundColor(.accent)
                                 .font(.system(size: 20))
+                                .frame(width: 28)
 
-                            Text(feature)
-                                .textStyle(.body)
-                                .foregroundColor(.textPrimary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(feature.title)
+                                    .textStyle(.bodyStrong)
+                                    .foregroundColor(.textPrimary)
+
+                                Text(feature.description)
+                                    .textStyle(.secondary)
+                                    .foregroundColor(.textSecondary)
+                            }
                         }
                         .opacity(showFeatures ? 1 : 0)
                         .animation(
@@ -52,12 +49,6 @@ struct TrialScreen: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-
-                // Fine print
-                Text("After your trial, logging stays free.")
-                    .textStyle(.secondary)
-                    .foregroundColor(.textTertiary)
-                    .multilineTextAlignment(.center)
             }
             .padding(.horizontal, Space.xl)
 
@@ -65,7 +56,25 @@ struct TrialScreen: View {
 
             // CTA area
             VStack(spacing: Space.md) {
-                // Start Free Trial button
+                // Subscription info
+                if let product = SubscriptionService.shared.availableProducts.first {
+                    let periodLabel: String = {
+                        guard let period = product.subscription?.subscriptionPeriod else { return "month" }
+                        switch period.unit {
+                        case .day: return period.value == 7 ? "week" : "\(period.value) days"
+                        case .week: return period.value == 1 ? "week" : "\(period.value) weeks"
+                        case .month: return period.value == 1 ? "month" : "\(period.value) months"
+                        case .year: return period.value == 1 ? "year" : "\(period.value) years"
+                        @unknown default: return "month"
+                        }
+                    }()
+                    Text("\(product.displayPrice) / \(periodLabel) · Cancel anytime")
+                        .textStyle(.secondary)
+                        .foregroundColor(.textSecondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                // Start Free Trial
                 Button {
                     HapticManager.modeToggle()
                     startTrial()
@@ -95,18 +104,18 @@ struct TrialScreen: View {
                         .multilineTextAlignment(.center)
                 }
 
-                // Fine print
+                // Cancel anytime
                 Text("Cancel anytime in App Store settings")
                     .textStyle(.micro)
                     .foregroundColor(.textTertiary)
                     .multilineTextAlignment(.center)
 
-                // Skip option
+                // Restore purchases
                 Button {
-                    onSkipped()
+                    restorePurchases()
                 } label: {
-                    Text("Continue with basic logging")
-                        .textStyle(.secondary)
+                    Text("Restore purchases")
+                        .textStyle(.micro)
                         .foregroundColor(.textTertiary)
                 }
                 .disabled(vm.isLoadingTrial)
@@ -115,12 +124,6 @@ struct TrialScreen: View {
             .padding(.bottom, Space.xl)
         }
         .onAppear {
-            // Pre-load products
-            Task {
-                await SubscriptionService.shared.loadProducts()
-            }
-
-            // Stagger feature list
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                 showFeatures = true
             }
@@ -131,19 +134,35 @@ struct TrialScreen: View {
         Task {
             let success = await vm.startFreeTrial()
             if success {
+                // Auto-save the routine after purchase
+                let _ = await vm.autoSaveRoutine()
                 onTrialStarted()
             }
+        }
+    }
+
+    private func restorePurchases() {
+        Task {
+            vm.isLoadingTrial = true
+            vm.trialError = nil
+            await SubscriptionService.shared.restorePurchases()
+            if SubscriptionService.shared.isPremium {
+                let _ = await vm.autoSaveRoutine()
+                onTrialStarted()
+            } else {
+                vm.trialError = "No active subscription found"
+            }
+            vm.isLoadingTrial = false
         }
     }
 }
 
 #if DEBUG
-struct TrialScreen_Previews: PreviewProvider {
+struct ShowcaseScreen_Previews: PreviewProvider {
     static var previews: some View {
-        TrialScreen(
+        ShowcaseScreen(
             vm: OnboardingViewModel(),
-            onTrialStarted: {},
-            onSkipped: {}
+            onTrialStarted: {}
         )
         .background(Color.bg)
     }

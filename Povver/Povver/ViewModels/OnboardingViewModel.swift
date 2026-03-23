@@ -1,6 +1,42 @@
 import Foundation
 import SwiftUI
 
+/// Time-bounded flag for the post-onboarding Coach tab state.
+/// Expires after 24 hours or when the first workout is completed.
+struct OnboardingCompleteFlag: Codable {
+    let timestamp: Date
+    let routineName: String
+    let conversationId: String?
+
+    private static let key = "onboardingCompleteFlag"
+    private static let ttl: TimeInterval = 86400 // 24 hours
+
+    static func set(routineName: String, conversationId: String?) {
+        let flag = OnboardingCompleteFlag(
+            timestamp: Date(),
+            routineName: routineName,
+            conversationId: conversationId
+        )
+        if let data = try? JSONEncoder().encode(flag) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    static func load() -> OnboardingCompleteFlag? {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let flag = try? JSONDecoder().decode(OnboardingCompleteFlag.self, from: data),
+              Date().timeIntervalSince(flag.timestamp) < ttl
+        else {
+            return nil
+        }
+        return flag
+    }
+
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+}
+
 /// Central state management for the onboarding flow.
 /// Holds user selections, persists to Firestore, handles trial purchase, and manages flow state.
 @MainActor
@@ -13,8 +49,8 @@ final class OnboardingViewModel: ObservableObject {
         case auth
         case trainingProfile
         case equipment
-        case trial
         case routineGeneration
+        case showcase
     }
 
     @Published var currentStep: Step = .welcome
@@ -37,6 +73,23 @@ final class OnboardingViewModel: ObservableObject {
     @Published var generatedRoutineName: String?
     @Published var generatedDays: [(day: Int, title: String, exerciseCount: Int, duration: Int)] = []
     @Published var generationComplete = false
+
+    // MARK: - Onboarding State for Deferred Save
+    // Persisted to UserDefaults so force-quit doesn't lose them
+
+    @Published var onboardingConversationId: String? {
+        didSet { UserDefaults.standard.set(onboardingConversationId, forKey: "onboardingConversationId") }
+    }
+    @Published var onboardingArtifactId: String? {
+        didSet { UserDefaults.standard.set(onboardingArtifactId, forKey: "onboardingArtifactId") }
+    }
+    @Published var generationFailed = false
+
+    init() {
+        // Restore persisted onboarding IDs (survives force-quit)
+        onboardingConversationId = UserDefaults.standard.string(forKey: "onboardingConversationId")
+        onboardingArtifactId = UserDefaults.standard.string(forKey: "onboardingArtifactId")
+    }
 
     // MARK: - Computed Properties
 
@@ -65,7 +118,7 @@ final class OnboardingViewModel: ObservableObject {
     }
 
     var glowIntensity: Double {
-        if currentStep == .trial {
+        if currentStep == .showcase {
             return 0.18
         } else if currentStep == .routineGeneration && generationComplete {
             return 0.25
@@ -79,8 +132,8 @@ final class OnboardingViewModel: ObservableObject {
 
     var progressFraction: CGFloat? {
         switch currentStep {
-        case .trainingProfile: return 0.5
-        case .equipment: return 1.0
+        case .trainingProfile: return 0.33
+        case .equipment: return 0.66
         default: return nil
         }
     }
@@ -219,14 +272,16 @@ final class OnboardingViewModel: ObservableObject {
         return true
     }
 
-    /// Triggers AI routine generation via the shell agent.
-    /// Opens a canvas, streams a hyper-specific prompt, and parses the routine_summary artifact.
-    /// Falls back to fallback data if generation fails.
+    /// Triggers AI routine generation via the dedicated onboarding endpoint.
+    /// Server builds the prompt from structured parameters.
+    /// Stores conversationId and artifactId for deferred save_routine after purchase.
     func triggerRoutineGeneration() {
         isGenerating = true
+        generationFailed = false
         generationTask = Task {
             guard let uid = AuthService.shared.currentUser?.uid else {
                 isGenerating = false
+                generationFailed = true
                 return
             }
 
@@ -234,42 +289,28 @@ final class OnboardingViewModel: ObservableObject {
             let freq = selectedFrequency ?? 4
             let equipment = equipmentPreference ?? "full_gym"
 
-            // Hyper-specific prompt: gives the agent all context upfront so it can
-            // call propose_routine directly without follow-up questions.
-            let prompt = """
-            New user onboarding. Create a training routine with these exact parameters:
-            - Experience level: \(level)
-            - Training frequency: \(freq) days per week
-            - Equipment access: \(equipment)
-            - Goal: hypertrophy (muscle building)
-
-            Use propose_routine to build it. Pick an appropriate split for the frequency \
-            (\(freq <= 3 ? "full body" : freq <= 4 ? "upper/lower" : "push/pull/legs or upper/lower")). \
-            Choose exercises from the catalog appropriate for the equipment level. \
-            Set reps in the 8-12 range, RIR 2-3 for \(level) level. \
-            Do not ask any questions — generate the routine immediately.
-            """
+            let canvasId = UUID().uuidString
+            onboardingConversationId = canvasId
 
             do {
-                // Generate conversation ID client-side (agent service creates doc on first message)
-                let canvasId = UUID().uuidString
-
-                let correlationId = UUID().uuidString
-
                 var foundArtifact = false
-                for try await event in DirectStreamingService.shared.streamQuery(
+                for try await event in DirectStreamingService.shared.streamOnboardingRoutine(
                     userId: uid,
                     conversationId: canvasId,
-                    message: prompt,
-                    correlationId: correlationId,
-                    timeoutSeconds: 60
+                    fitnessLevel: level,
+                    frequency: freq,
+                    equipment: equipment
                 ) {
-                    // Check for cancellation between events
                     if Task.isCancelled { return }
 
                     if event.eventType == .artifact {
                         let artifactType = event.content?["artifact_type"]?.value as? String
                         guard artifactType == "routine_summary" else { continue }
+
+                        // Capture artifact ID for deferred save
+                        if let artId = event.content?["artifact_id"]?.value as? String {
+                            onboardingArtifactId = artId
+                        }
 
                         let artifactContent = event.content?["artifact_content"]?.value as? [String: Any] ?? [:]
 
@@ -302,14 +343,46 @@ final class OnboardingViewModel: ObservableObject {
 
                 if !foundArtifact {
                     AppLogger.shared.error(.app, "Onboarding routine generation: no artifact received")
-                    applyFallbackRoutine(freq: freq)
+                    generationFailed = true
+                    generationComplete = true
+                    isGenerating = false
+                    AnalyticsService.shared.onboardingGenerationFailed()
                 }
             } catch {
                 if !Task.isCancelled {
                     AppLogger.shared.error(.app, "Onboarding routine generation failed", error)
-                    applyFallbackRoutine(freq: freq)
+                    generationFailed = true
+                    generationComplete = true
+                    isGenerating = false
+                    AnalyticsService.shared.onboardingGenerationFailed()
                 }
             }
+        }
+    }
+
+    /// Auto-saves the generated routine after trial purchase.
+    /// Calls the existing save_routine artifact action.
+    /// Returns true on success.
+    func autoSaveRoutine() async -> Bool {
+        guard let uid = AuthService.shared.currentUser?.uid,
+              let conversationId = onboardingConversationId,
+              let artifactId = onboardingArtifactId else {
+            return false
+        }
+
+        do {
+            _ = try await AgentsApi.artifactAction(
+                userId: uid,
+                conversationId: conversationId,
+                artifactId: artifactId,
+                action: "save_routine"
+            )
+            AnalyticsService.shared.onboardingRoutineAutoSaved()
+            return true
+        } catch {
+            AppLogger.shared.error(.app, "Onboarding auto-save routine failed", error)
+            AnalyticsService.shared.onboardingRoutineAutoSaveFailed()
+            return false
         }
     }
 
@@ -319,31 +392,20 @@ final class OnboardingViewModel: ObservableObject {
         generationTask = nil
     }
 
-    /// Fallback routine data when agent generation fails.
-    private func applyFallbackRoutine(freq: Int) {
-        generatedRoutineName = freq <= 3 ? "Full Body \(freq)x" : "Upper / Lower"
-        generatedDays = (1...freq).map { day in
-            let title: String
-            if freq <= 3 {
-                title = "Full Body \(["A", "B", "C"][min(day - 1, 2)])"
-            } else {
-                title = day % 2 == 1 ? "Upper" : "Lower"
-            }
-            return (day: day, title: title, exerciseCount: 5, duration: 45)
-        }
-        generationComplete = true
-        isGenerating = false
-    }
-
-    /// Marks onboarding as complete and logs analytics.
+    /// Marks onboarding as complete. Sets OnboardingCompleteFlag only when
+    /// generation succeeded (artifactId != nil) so the Coach tab shows
+    /// "You're all set" instead of "Let's build your program".
     func completeOnboarding() {
         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
-    }
-
-    /// Skips to basic logging and marks onboarding as complete.
-    func skipToBasicLogging() {
-        UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
-        AnalyticsService.shared.onboardingSkippedToBasic()
+        if !generationFailed, let routineName = generatedRoutineName {
+            OnboardingCompleteFlag.set(
+                routineName: routineName,
+                conversationId: onboardingConversationId
+            )
+        }
+        // Clear persisted onboarding IDs — no longer needed
+        UserDefaults.standard.removeObject(forKey: "onboardingConversationId")
+        UserDefaults.standard.removeObject(forKey: "onboardingArtifactId")
     }
 
     /// Checks if onboarding should be shown.

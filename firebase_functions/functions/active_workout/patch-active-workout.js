@@ -21,6 +21,7 @@ const functionOptions = {
 const admin = require('firebase-admin');
 const { fail, ok } = require('../utils/response');
 const { PatchActiveWorkoutSchema } = require('../utils/validators');
+const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const {
   ensureWorkoutIdempotent,
   storeWorkoutIdempotentTx
@@ -170,15 +171,12 @@ async function patchActiveWorkoutHandler(req, res) {
     }
 
     // User ID from Firebase Auth or API key middleware
-    const userId = req.user?.uid || req.auth?.uid;
-    if (!userId) {
-      return res.status(401).json({ success: false, error: 'Unauthorized' });
-    }
+    const userId = getAuthenticatedUserId(req);
 
     // 1. Validate request (pure — no Firestore reads)
     const parsed = PatchActiveWorkoutSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return fail(res, 'INVALID_ARGUMENT', 'Invalid request', parsed.error.flatten(), 400);
+      return fail(res, 'INVALID_ARGUMENT', 'Invalid request', null, 400);
     }
 
     const {
@@ -512,7 +510,7 @@ async function patchActiveWorkoutHandler(req, res) {
       return fail(res, error.code, error.message, error.details || null, error.httpCode);
     }
     console.error('patch-active-workout error:', error);
-    return fail(res, 'INTERNAL', 'Failed to patch workout', { message: error.message }, 500);
+    return fail(res, 'INTERNAL', 'An internal error occurred', null, 500);
   }
 }
 

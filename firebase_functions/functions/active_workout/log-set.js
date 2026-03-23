@@ -17,6 +17,7 @@ const { requireFlexibleAuth } = require('../auth/middleware');
 const admin = require('firebase-admin');
 const { fail, ok } = require('../utils/response');
 const { LogSetSchemaV2 } = require('../utils/validators');
+const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const {
   ensureWorkoutIdempotent,
   storeWorkoutIdempotentTx
@@ -34,10 +35,7 @@ async function logSetHandler(req, res) {
     }
 
     // User ID from Firebase Auth or API key middleware
-    const userId = req.user?.uid || req.auth?.uid;
-    if (!userId) {
-      return res.status(401).json({ success: false, error: 'Unauthorized' });
-    }
+    const userId = getAuthenticatedUserId(req);
 
     if (!writeLimiter.check(userId)) {
       return fail(res, 'RATE_LIMITED', 'Too many requests', null, 429);
@@ -46,7 +44,7 @@ async function logSetHandler(req, res) {
     // 1. Validate request body (pure validation — no Firestore reads)
     const parsed = LogSetSchemaV2.safeParse(req.body || {});
     if (!parsed.success) {
-      return fail(res, 'INVALID_ARGUMENT', 'Invalid request', parsed.error.flatten(), 400);
+      return fail(res, 'INVALID_ARGUMENT', 'Invalid request', null, 400);
     }
 
     const {

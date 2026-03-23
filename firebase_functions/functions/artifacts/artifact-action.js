@@ -11,19 +11,39 @@ const admin = require('firebase-admin');
 const { logger } = require('firebase-functions');
 const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const { executeArtifactAction } = require('../shared/artifacts');
+const { writeLimiter } = require('../utils/rate-limiter');
+const { fail } = require('../utils/response');
+const { z } = require('zod');
+const { IdSchema } = require('../utils/validators');
 
 if (!admin.apps.length) {
   admin.initializeApp();
 }
 const db = admin.firestore();
 
+// Validation schema for artifact-action request
+const ArtifactActionSchema = z.object({
+  conversationId: IdSchema,
+  artifactId: IdSchema,
+  action: z.enum(['accept', 'dismiss', 'save_routine', 'start_workout', 'save_template', 'save_as_new']),
+  day: z.number().int().min(1).max(14).optional(), // Used by start_workout for routine_summary artifacts
+});
+
 async function artifactActionHandler(req, res) {
   // Secure userId derivation — prevents IDOR via auth-helpers
   const userId = getAuthenticatedUserId(req);
-  const conversationId = req.body?.conversationId;
-  const artifactId = req.body?.artifactId;
-  const action = req.body?.action;
-  const day = req.body?.day;
+
+  if (!writeLimiter.check(userId)) {
+    return fail(res, 'RATE_LIMITED', 'Too many requests', null, 429);
+  }
+
+  // Validate input
+  const parseResult = ArtifactActionSchema.safeParse(req.body);
+  if (!parseResult.success) {
+    return fail(res, 'INVALID_INPUT', 'Invalid request data', null, 400);
+  }
+
+  const { conversationId, artifactId, action, day } = parseResult.data;
 
   try {
     const result = await executeArtifactAction(db, userId, conversationId, artifactId, action, { day });

@@ -16,6 +16,7 @@ const { requireFlexibleAuth } = require('../auth/middleware');
 const admin = require('firebase-admin');
 const { fail, ok } = require('../utils/response');
 const { AutofillExerciseSchema } = require('../utils/validators');
+const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const {
   ensureWorkoutIdempotent,
   storeWorkoutIdempotentTx
@@ -33,15 +34,12 @@ async function autofillExerciseHandler(req, res) {
     }
 
     // User ID from Firebase Auth or API key middleware
-    const userId = req.user?.uid || req.auth?.uid;
-    if (!userId) {
-      return res.status(401).json({ success: false, error: 'Unauthorized' });
-    }
+    const userId = getAuthenticatedUserId(req);
 
     // 1. Validate request (pure — no Firestore reads)
     const parsed = AutofillExerciseSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return fail(res, 'INVALID_ARGUMENT', 'Invalid request', parsed.error.flatten(), 400);
+      return fail(res, 'INVALID_ARGUMENT', 'Invalid request', null, 400);
     }
 
     const {
@@ -256,7 +254,7 @@ async function autofillExerciseHandler(req, res) {
       return fail(res, error.code, error.message, error.details || null, error.httpCode);
     }
     console.error('autofill-exercise error:', error);
-    return fail(res, 'INTERNAL', 'Failed to autofill exercise', { message: error.message }, 500);
+    return fail(res, 'INTERNAL', 'An internal error occurred', null, 500);
   }
 }
 

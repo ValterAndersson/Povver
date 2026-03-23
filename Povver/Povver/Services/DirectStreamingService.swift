@@ -234,7 +234,111 @@ class DirectStreamingService: ObservableObject {
             }
         }
     }
-    
+
+    // MARK: - Onboarding Streaming
+
+    /// Onboarding-specific streaming — calls the dedicated endpoint with no premium check.
+    /// Server builds the prompt from structured parameters.
+    func streamOnboardingRoutine(
+        userId: String,
+        conversationId: String,
+        fitnessLevel: String,
+        frequency: Int,
+        equipment: String
+    ) -> AsyncThrowingStream<StreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            // Dedicated session — invalidated after use to prevent leaks
+            let onboardingSession = URLSession(configuration: .default)
+            let task = Task {
+                do {
+                    guard let currentUser = AuthService.shared.currentUser else {
+                        continuation.finish(throwing: StreamingError.notAuthenticated)
+                        return
+                    }
+
+                    // No premium check — this endpoint is free for onboarding
+
+                    let idToken = try await currentUser.getIDToken()
+
+                    let url = URL(string: "https://us-central1-myon-53d85.cloudfunctions.net/streamOnboardingRoutine")!
+                    var request = URLRequest(url: url)
+                    request.httpMethod = "POST"
+                    request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+
+                    let body: [String: Any] = [
+                        "conversationId": conversationId,
+                        "fitnessLevel": fitnessLevel,
+                        "frequency": frequency,
+                        "equipment": equipment,
+                    ]
+                    request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+                    let (asyncBytes, response) = try await onboardingSession.bytes(for: request)
+
+                    let timeoutTask = Task {
+                        try await Task.sleep(nanoseconds: 120 * 1_000_000_000) // 2min
+                        onboardingSession.invalidateAndCancel()
+                    }
+                    defer { timeoutTask.cancel() }
+
+                    guard let httpResponse = response as? HTTPURLResponse,
+                          httpResponse.statusCode == 200 else {
+                        let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+                        throw StreamingError.httpError(statusCode: code)
+                    }
+
+                    for try await line in asyncBytes.lines {
+                        if line.hasPrefix("data: ") {
+                            let jsonStr = String(line.dropFirst(6))
+
+                            if let data = jsonStr.data(using: .utf8),
+                               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+
+                                // Server sends { type: "done" } when complete
+                                if json["type"] as? String == "done" {
+                                    break
+                                }
+
+                                var contentDict: [String: AnyCodable]? = nil
+                                if let rawContent = json["content"] as? [String: Any] {
+                                    contentDict = rawContent.mapValues { AnyCodable($0) }
+                                } else if let rawError = json["error"] as? [String: Any] {
+                                    contentDict = rawError.mapValues { AnyCodable($0) }
+                                }
+
+                                var metadataDict: [String: AnyCodable]? = nil
+                                if let rawMeta = json["metadata"] as? [String: Any] {
+                                    metadataDict = rawMeta.mapValues { AnyCodable($0) }
+                                }
+
+                                let event = StreamEvent(
+                                    type: json["type"] as? String ?? "unknown",
+                                    agent: json["agent"] as? String,
+                                    content: contentDict,
+                                    timestamp: json["timestamp"] as? Double,
+                                    metadata: metadataDict
+                                )
+                                continuation.yield(event)
+                            }
+                        }
+                    }
+
+                    onboardingSession.finishTasksAndInvalidate()
+                    continuation.finish()
+                } catch {
+                    onboardingSession.invalidateAndCancel()
+                    continuation.finish(throwing: error)
+                }
+            }
+
+            continuation.onTermination = { @Sendable _ in
+                task.cancel()
+            }
+        }
+    }
+
 }
 
 // MARK: - Error Types

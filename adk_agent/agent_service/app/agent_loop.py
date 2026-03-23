@@ -251,7 +251,7 @@ async def run_agent_loop(
 
     except Exception as e:
         logger.exception("Agent loop error")
-        yield sse_event("error", {"code": "AGENT_ERROR", "message": str(e)})
+        yield sse_event("error", {"code": "AGENT_ERROR", "message": "An internal error occurred"})
 
 
 async def _heartbeat_loop(stop: asyncio.Event) -> list[SSEEvent]:

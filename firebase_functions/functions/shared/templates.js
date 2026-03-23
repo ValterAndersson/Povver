@@ -144,18 +144,21 @@ async function listTemplates(db, userId, opts = {}) {
 async function createTemplate(db, userId, templateData, options = {}) {
   const parsed = TemplateSchema.safeParse(templateData);
   if (!parsed.success) {
-    throw new ValidationError('Invalid template data', parsed.error.flatten());
+    throw new ValidationError('Invalid template data');
   }
 
+  // Use validated data — prevents arbitrary extra fields from bypassing Zod
+  const validatedData = parsed.data;
+
   // Resolve missing exercise names from catalog
-  if (Array.isArray(templateData.exercises)) {
-    const idsToResolve = templateData.exercises
+  if (Array.isArray(validatedData.exercises)) {
+    const idsToResolve = validatedData.exercises
       .filter(ex => !ex.name && ex.exercise_id)
       .map(ex => ex.exercise_id);
 
     if (idsToResolve.length > 0) {
       const exerciseNames = await resolveExerciseNames(db, idsToResolve);
-      templateData.exercises = templateData.exercises.map(ex => {
+      validatedData.exercises = validatedData.exercises.map(ex => {
         if (!ex.name && ex.exercise_id && exerciseNames[ex.exercise_id]) {
           return { ...ex, name: exerciseNames[ex.exercise_id] };
         }
@@ -166,7 +169,7 @@ async function createTemplate(db, userId, templateData, options = {}) {
 
   const col = templatesCol(db, userId);
   const docRef = await col.add({
-    ...templateData,
+    ...validatedData,
     created_at: admin.firestore.FieldValue.serverTimestamp(),
     updated_at: admin.firestore.FieldValue.serverTimestamp(),
   });

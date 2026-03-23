@@ -68,10 +68,12 @@ const { onRequest } = require('firebase-functions/v2/https');
 const { requireFlexibleAuth } = require('../auth/middleware');
 const { ok, fail } = require('../utils/response');
 const admin = require('firebase-admin');
+const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const AnalyticsCalc = require('../utils/analytics-calculator');
 const { generateTemplateDiff } = require('../utils/template-diff-generator');
 const { logger } = require('firebase-functions');
 const { enqueueWorkoutCompletion } = require('../utils/enqueue-workout-task');
+const { writeLimiter } = require('../utils/rate-limiter');
 
 const firestore = admin.firestore();
 
@@ -149,8 +151,11 @@ async function completeActiveWorkoutHandler(req, res) {
     if (req.method !== 'POST') {
       return res.status(405).json({ success: false, error: 'Method Not Allowed' });
     }
-    const userId = req.user?.uid || req.auth?.uid;
-    if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
+    const userId = getAuthenticatedUserId(req);
+
+    if (!writeLimiter.check(userId)) {
+      return fail(res, 'RATE_LIMITED', 'Too many requests', null, 429);
+    }
 
     const { workout_id } = req.body || {};
     if (!workout_id) return fail(res, 'INVALID_ARGUMENT', 'Missing workout_id', null, 400);

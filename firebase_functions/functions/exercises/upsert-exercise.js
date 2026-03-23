@@ -156,7 +156,7 @@ async function upsertExerciseHandler(req, res) {
     const { exercise, mode } = req.body || {};
     const parsed = ExerciseUpsertSchema.safeParse({ ...exercise });
     if (!parsed.success) {
-      return fail(res, 'INVALID_ARGUMENT', 'Invalid exercise payload', parsed.error.flatten(), 400);
+      return fail(res, 'INVALID_ARGUMENT', 'Invalid exercise payload', null, 400);
     }
     const ex = parsed.data;
 

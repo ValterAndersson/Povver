@@ -2,8 +2,7 @@ import SwiftUI
 
 struct RoutineGenerationScreen: View {
     @ObservedObject var vm: OnboardingViewModel
-    let onStartTraining: () -> Void
-    let onAdjustWithCoach: () -> Void
+    let onContinue: () -> Void
 
     @State private var phase = 1
     @State private var showTitle = false
@@ -82,43 +81,59 @@ struct RoutineGenerationScreen: View {
 
     // MARK: - Phase 2: Reveal
 
+    private var ctaVisible: Bool {
+        if vm.generationFailed { return showRoutineName }
+        return showDayCards.allSatisfy({ $0 }) && !vm.generatedDays.isEmpty
+    }
+
     private var revealPhase: some View {
         VStack(spacing: Space.xl) {
             // Title
             if showTitle {
-                Text("Your program")
+                Text(vm.generationFailed ? "We'll build your program" : "Your program")
                     .textStyle(.screenTitle)
                     .foregroundColor(.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .transition(.opacity)
             }
 
-            // Routine name with gradient
-            if showRoutineName, let name = vm.generatedRoutineName {
-                Text(name)
-                    .font(.system(size: 34, weight: .semibold))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [
-                                Color(hex: "22C59A"),
-                                Color(hex: "7CEFCE"),
-                                Color(hex: "22C59A")
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
+            if vm.generationFailed {
+                // Failure state — reassuring subtitle
+                if showRoutineName {
+                    Text("Your coach will create a personalized routine once you're in.")
+                        .textStyle(.secondary)
+                        .foregroundColor(.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .transition(.opacity)
+                }
+            } else {
+                // Routine name with gradient
+                if showRoutineName, let name = vm.generatedRoutineName {
+                    Text(name)
+                        .font(.system(size: 34, weight: .semibold))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [
+                                    Color(hex: "22C59A"),
+                                    Color(hex: "7CEFCE"),
+                                    Color(hex: "22C59A")
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
                         )
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .transition(.opacity)
-            }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .transition(.opacity)
+                }
 
-            // Day cards
-            ScrollView {
-                VStack(spacing: Space.md) {
-                    ForEach(Array(vm.generatedDays.enumerated()), id: \.offset) { index, day in
-                        if index < showDayCards.count && showDayCards[index] {
-                            dayCard(day: day)
-                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                // Day cards
+                ScrollView {
+                    VStack(spacing: Space.md) {
+                        ForEach(Array(vm.generatedDays.enumerated()), id: \.offset) { index, day in
+                            if index < showDayCards.count && showDayCards[index] {
+                                dayCard(day: day)
+                                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                            }
                         }
                     }
                 }
@@ -126,20 +141,18 @@ struct RoutineGenerationScreen: View {
 
             Spacer()
 
-            // Dual CTA
-            if showDayCards.allSatisfy({ $0 }) && !vm.generatedDays.isEmpty {
-                VStack(spacing: Space.md) {
-                    PovverButton("Start training", style: .primary) {
+            // Single CTA + reassuring copy
+            if ctaVisible {
+                VStack(spacing: Space.sm) {
+                    PovverButton("Continue", style: .primary) {
                         HapticManager.modeToggle()
-                        onStartTraining()
+                        onContinue()
                     }
 
-                    Button {
-                        onAdjustWithCoach()
-                    } label: {
-                        Text("Adjust with coach")
-                            .textStyle(.body)
-                            .foregroundColor(.accent)
+                    if !vm.generationFailed {
+                        Text("You can fine-tune this with your coach")
+                            .textStyle(.secondary)
+                            .foregroundColor(.textTertiary)
                     }
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -185,9 +198,9 @@ struct RoutineGenerationScreen: View {
 
         let startTime = Date()
 
-        // Poll for generation completion (60s timeout, matching server timeoutSeconds)
+        // Poll for generation completion (120s timeout, matching server timeoutSeconds)
         var elapsed: TimeInterval = 0
-        while !vm.generationComplete && elapsed < 60 {
+        while !vm.generationComplete && elapsed < 120 {
             try? await Task.sleep(nanoseconds: 200_000_000) // 200ms
             elapsed = Date().timeIntervalSince(startTime)
         }
@@ -255,8 +268,7 @@ struct RoutineGenerationScreen_Previews: PreviewProvider {
 
         return RoutineGenerationScreen(
             vm: vm,
-            onStartTraining: {},
-            onAdjustWithCoach: {}
+            onContinue: {}
         )
         .background(Color.bg)
     }

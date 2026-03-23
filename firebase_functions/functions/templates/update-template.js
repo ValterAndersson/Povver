@@ -27,7 +27,10 @@ async function updateTemplateHandler(req, res) {
     return fail(res, 'INVALID_ARGUMENT', 'Missing required parameters', ['templateId','template'], 400);
   }
   const parsed = TemplateSchema.safeParse(template);
-  if (!parsed.success) return fail(res, 'INVALID_ARGUMENT', 'Invalid template data', parsed.error.flatten(), 400);
+  if (!parsed.success) return fail(res, 'INVALID_ARGUMENT', 'Invalid template data', null, 400);
+
+  // Use validated data — prevents arbitrary extra fields from bypassing Zod
+  const validatedTemplate = parsed.data;
 
   try {
     // Check if template exists
@@ -36,7 +39,7 @@ async function updateTemplateHandler(req, res) {
 
     // Update the template
     await db.updateDocumentInSubcollection('users', userId, 'templates', templateId, {
-      ...template,
+      ...validatedTemplate,
       updated_at: admin.firestore.FieldValue.serverTimestamp(),
     });
     
@@ -44,7 +47,7 @@ async function updateTemplateHandler(req, res) {
     const updatedTemplate = await db.getDocumentFromSubcollection('users', userId, 'templates', templateId);
 
     // Recalculate analytics if exercises changed (for AI updates)
-    if (req.auth?.source === 'third_party_agent' && template.exercises) {
+    if (req.auth?.source === 'third_party_agent' && validatedTemplate.exercises) {
       try {
         const analytics = await calculateTemplateAnalytics(updatedTemplate);
         await db.updateDocumentInSubcollection('users', userId, 'templates', templateId, { analytics });
