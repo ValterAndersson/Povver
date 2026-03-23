@@ -78,7 +78,7 @@ async function compactUserSeries(userId, days = 90) {
   const thresholdIso = cutoff.toISOString().split('T')[0];
 
   const seriesCol = db.collection('users').doc(userId).collection('analytics_series_exercise');
-  const seriesSnap = await seriesCol.get();
+  const seriesSnap = await seriesCol.limit(10000).get();
   let docsChanged = 0;
 
   // Process in parallel with concurrency limit of 5

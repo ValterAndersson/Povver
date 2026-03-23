@@ -214,6 +214,9 @@ async function applyAction(req, res) {
       if (action.type === 'ADD_INSTRUCTION') {
         const cardRef = admin.firestore().collection(`${canvasPath}/cards`).doc();
         const text = String(action?.payload?.text || '');
+        if (text && text.length > 5000) {
+          throw { http: 400, code: 'INVALID_ARGUMENT', message: 'Text too long' };
+        }
         tx.set(cardRef, {
           type: 'instruction',
           status: 'active',
@@ -354,11 +357,15 @@ async function applyAction(req, res) {
 
       if (action.type === 'ADD_NOTE') {
         const cardRef = admin.firestore().collection(`${canvasPath}/cards`).doc();
+        const text = action?.payload?.text || '';
+        if (text && text.length > 5000) {
+          throw { http: 400, code: 'INVALID_ARGUMENT', message: 'Text too long' };
+        }
         tx.set(cardRef, {
           type: 'note',
           status: 'active',
           lane: 'workout',
-          content: { text: action?.payload?.text || '' },
+          content: { text },
           by: 'user',
           created_at: now,
           updated_at: now,
@@ -601,7 +608,7 @@ async function applyAction(req, res) {
     // Best-effort up_next cap enforcement outside the transaction (reads after writes are not allowed inside txn)
     try {
       const upCol = admin.firestore().collection(`users/${uid}/canvases/${canvasId}/up_next`);
-      const upSnap = await upCol.orderBy('priority', 'desc').orderBy('inserted_at', 'asc').get();
+      const upSnap = await upCol.orderBy('priority', 'desc').orderBy('inserted_at', 'asc').limit(500).get();
       const MAX = 20;
       if (upSnap.size > MAX) {
         const overflow = upSnap.docs.slice(MAX);

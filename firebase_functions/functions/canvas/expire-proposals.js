@@ -50,7 +50,7 @@ async function expireProposals(req, res) {
       await processCanvas(`users/${userId}/canvases/${canvasId}`);
     } else {
       // Process all canvases for user
-      const canvasesSnap = await db.collection(`users/${userId}/canvases`).get();
+      const canvasesSnap = await db.collection(`users/${userId}/canvases`).limit(500).get();
       for (const c of canvasesSnap.docs) {
         await processCanvas(`users/${userId}/canvases/${c.id}`);
       }
