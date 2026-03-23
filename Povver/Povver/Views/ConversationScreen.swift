@@ -296,7 +296,13 @@ extension ConversationScreen {
                 if let artifactId = card.meta?.artifactId,
                    let conversationId = card.meta?.conversationId ?? vm.canvasId ?? canvasId,
                    let uid = AuthService.shared.currentUser?.uid {
-                    Task { _ = try? await AgentsApi.artifactAction(userId: uid, conversationId: conversationId, artifactId: artifactId, action: "accept") }
+                    Task {
+                        do {
+                            _ = try await AgentsApi.artifactAction(userId: uid, conversationId: conversationId, artifactId: artifactId, action: "accept")
+                        } catch {
+                            await MainActor.run { vm.errorMessage = "Failed to accept plan. Please try again." }
+                        }
+                    }
                 } else if let cid = vm.canvasId ?? canvasId {
                     Task { await vm.applyAction(canvasId: cid, type: "ACCEPT_PROPOSAL", cardId: card.id) }
                 }
@@ -433,9 +439,15 @@ extension ConversationScreen {
                 if let artifactId = card.meta?.artifactId,
                    let conversationId = card.meta?.conversationId ?? vm.canvasId ?? canvasId,
                    let uid = AuthService.shared.currentUser?.uid {
-                    Task { _ = try? await AgentsApi.artifactAction(userId: uid, conversationId: conversationId, artifactId: artifactId, action: "dismiss") }
-                    // Remove card from local state
-                    vm.cards.removeAll { $0.id == card.id }
+                    Task {
+                        do {
+                            _ = try await AgentsApi.artifactAction(userId: uid, conversationId: conversationId, artifactId: artifactId, action: "dismiss")
+                            // Remove card from local state
+                            await MainActor.run { vm.cards.removeAll { $0.id == card.id } }
+                        } catch {
+                            await MainActor.run { vm.errorMessage = "Failed to dismiss. Please try again." }
+                        }
+                    }
                 } else if let cid = vm.canvasId ?? canvasId {
                     Task { await vm.applyAction(canvasId: cid, type: "DISMISS_DRAFT", cardId: card.id) }
                 }
