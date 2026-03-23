@@ -144,10 +144,12 @@ async def run_agent_loop(
                 _heartbeat_loop(heartbeat_stop)
             )
 
+            text_emitted = False
             async for chunk in llm_client.stream(model, messages, tools, config):
                 if chunk.usage:
                     last_usage = chunk.usage
                 if chunk.is_text:
+                    text_emitted = True
                     yield sse_event("message", chunk.text)
                 elif chunk.is_tool_call:
                     tool_calls.append(chunk.tool_call)
@@ -181,8 +183,31 @@ async def run_agent_loop(
 
             # No tool calls — model is done
             if not tool_calls:
+                # Guard: if model produced no text after tool results, retry once
+                if not text_emitted and turn > 0:
+                    logger.warning("Empty response after tool results (turn %d), retrying", turn)
+                    turn += 1
+                    continue
                 yield sse_event("done", {"usage": {"input_tokens": total_input_tokens, "output_tokens": total_output_tokens, "thinking_tokens": total_thinking_tokens}})
                 return
+
+            # Append model's function calls to messages so subsequent LLM
+            # rounds (within this request) see what was called.
+            messages.append({
+                "role": "assistant",
+                "tool_calls": [
+                    {"name": tc.tool_name, "call_id": tc.call_id, "args": tc.args}
+                    for tc in tool_calls
+                ],
+            })
+
+            # Fire-and-forget: persist tool calls for multi-turn history
+            if fs and ctx.user_id and ctx.conversation_id:
+                asyncio.create_task(_save_tool_calls(
+                    fs, ctx.user_id, ctx.conversation_id,
+                    [{"name": tc.tool_name, "call_id": tc.call_id, "args": tc.args}
+                     for tc in tool_calls],
+                ))
 
             # Execute all tool calls from this turn
             for tc in tool_calls:
@@ -234,6 +259,13 @@ async def run_agent_loop(
                     yield sse_event("done", {"usage": {"input_tokens": total_input_tokens, "output_tokens": total_output_tokens, "thinking_tokens": total_thinking_tokens}})
                     return
 
+                # Fire-and-forget: persist tool result for multi-turn history
+                if fs and ctx.user_id and ctx.conversation_id:
+                    asyncio.create_task(_save_tool_result(
+                        fs, ctx.user_id, ctx.conversation_id,
+                        tc.tool_name, tc.call_id, result,
+                    ))
+
                 # Append tool result to messages for next LLM turn
                 messages.append({
                     "role": "tool",
@@ -279,3 +311,48 @@ def _build_messages(instruction: str, history: list[dict], message: str) -> list
     messages.extend(history)
     messages.append({"role": "user", "content": message})
     return messages
+
+
+# -- Tool interaction persistence for multi-turn history --
+
+MAX_RESULT_BYTES = 50_000  # Truncate tool results larger than 50KB
+
+
+def _truncate_result(result: Any) -> Any:
+    """Truncate large tool results before Firestore persistence."""
+    serialized = json.dumps(result, default=str)
+    if len(serialized) <= MAX_RESULT_BYTES:
+        return result
+    # Keep a truncated version with a marker
+    return {"_truncated": True, "_summary": serialized[:MAX_RESULT_BYTES]}
+
+
+async def _save_tool_calls(fs: Any, user_id: str, conversation_id: str, calls: list[dict]) -> None:
+    """Fire-and-forget: persist model's function calls to conversation history."""
+    try:
+        from datetime import datetime, timezone
+        await fs.save_message(user_id, conversation_id, {
+            "type": "tool_calls",
+            "content": json.dumps(calls, default=str),
+            "created_at": datetime.now(timezone.utc),
+        })
+    except Exception as e:
+        logger.warning("Failed to save tool calls: %s", e)
+
+
+async def _save_tool_result(
+    fs: Any, user_id: str, conversation_id: str,
+    tool_name: str, call_id: str, result: Any,
+) -> None:
+    """Fire-and-forget: persist a tool result to conversation history."""
+    try:
+        from datetime import datetime, timezone
+        await fs.save_message(user_id, conversation_id, {
+            "type": "tool_result",
+            "tool_name": tool_name,
+            "call_id": call_id,
+            "content": json.dumps(_truncate_result(result), default=str),
+            "created_at": datetime.now(timezone.utc),
+        })
+    except Exception as e:
+        logger.warning("Failed to save tool result: %s", e)
