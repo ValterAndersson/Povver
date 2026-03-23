@@ -165,11 +165,6 @@ final class AnalyticsService {
         log("onboarding_trial_started")
     }
 
-    func onboardingSkippedToBasic() {
-        log("onboarding_skipped_to_basic")
-    }
-
-    // Stubs — full implementation in Task 9
     func onboardingGenerationFailed() {
         log("onboarding_generation_failed")
     }
@@ -182,11 +177,8 @@ final class AnalyticsService {
         log("onboarding_routine_auto_save_failed")
     }
 
-    func onboardingCompleted(trialStarted: Bool, adjustWithCoach: Bool) {
-        log("onboarding_completed", params: [
-            "trial_started": String(trialStarted),
-            "adjust_with_coach": String(adjustWithCoach),
-        ])
+    func onboardingCompleted() {
+        log("onboarding_completed")
     }
 
     // =========================================================================
