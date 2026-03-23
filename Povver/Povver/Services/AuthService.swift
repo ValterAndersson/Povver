@@ -401,7 +401,13 @@ class AuthService: ObservableObject {
         if linkedProviders.contains(.apple) {
             if let userDoc = try? await UserRepository.shared.getUser(userId: userId),
                let authCode = userDoc.appleAuthorizationCode {
-                try? await Auth.auth().revokeToken(withAuthorizationCode: authCode)
+                do {
+                    try await Auth.auth().revokeToken(withAuthorizationCode: authCode)
+                } catch {
+                    // Token revocation failed — auth code may have been consumed already
+                    // (Apple auth codes are single-use). Log but proceed with deletion.
+                    AppLogger.shared.error(.app, "Apple token revocation failed", error)
+                }
             }
         }
 
