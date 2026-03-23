@@ -789,7 +789,7 @@ class TextNormalizer {
 // CLOUD RUN AGENT SERVICE (Phase 3a — replaces Vertex AI when AGENT_SERVICE_URL is set)
 // ============================================================================
 
-async function callAgentService(userId, conversationId, message, correlationId, workoutId) {
+async function callAgentService(userId, conversationId, message, correlationId, workoutId, signal) {
   const auth = new GoogleAuth();
   const client = await auth.getIdTokenClient(AGENT_SERVICE_URL);
   const response = await client.request({
@@ -804,6 +804,7 @@ async function callAgentService(userId, conversationId, message, correlationId, 
     },
     responseType: 'stream',
     timeout: 180000,
+    signal,
   });
   return response.data;
 }
@@ -999,6 +1000,7 @@ async function streamAgentNormalizedHandler(req, res) {
 
   const finalizeWorkspaceWrites = () => Promise.allSettled(workspaceWrites).catch(() => {});
   let clientDisconnected = false;
+  const abortController = new AbortController();
 
   const done = (ok = true, err) => {
     clearInterval(hb);
@@ -1012,10 +1014,12 @@ async function streamAgentNormalizedHandler(req, res) {
   };
 
   // Clean up on client disconnect — prevents zombie connections from exhausting maxInstances
+  // AbortController cancels the upstream HTTP call so we stop wasting LLM tokens (H6)
   req.on('close', () => {
     if (!clientDisconnected) {
       clientDisconnected = true;
       clearInterval(hb);
+      abortController.abort();
       logger.info('[streamAgentNormalized] client_disconnected', { userId: 'pending' });
     }
   });
@@ -1153,10 +1157,15 @@ async function streamAgentNormalizedHandler(req, res) {
       logger.info('[streamAgentNormalized] Using Cloud Run agent service', { url: AGENT_SERVICE_URL });
 
       try {
-        const agentStream = await callAgentService(userId, conversationId, message, correlationId, workoutId);
+        const agentStream = await callAgentService(userId, conversationId, message, correlationId, workoutId, abortController.signal);
         await relayCloudRunStream(agentStream, sse, persistWorkspaceEntry, normalizer, userId, conversationId, correlationId);
         done(true);
       } catch (err) {
+        // AbortError (google-auth-library/fetch) or CanceledError (gaxios) on client disconnect
+        if (err.name === 'AbortError' || err.name === 'CanceledError' || err.code === 'ERR_CANCELED') {
+          logger.info('[stream] upstream_canceled_on_disconnect', { correlationId, userId });
+          return;
+        }
         logger.error('[streamAgentNormalized] Cloud Run agent error', { error: err.message, userId });
         sse.write({ type: 'error', error: { code: 'UPSTREAM_ERROR', message: err.message } });
         done(false);
@@ -1222,6 +1231,7 @@ async function streamAgentNormalizedHandler(req, res) {
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
         validateStatus: (status) => status >= 200 && status < 500,
+        signal: abortController.signal,
       });
     } catch (axiosErr) {
       logger.error('[streamAgentNormalized] Axios request failed', { 
@@ -1605,6 +1615,11 @@ async function streamAgentNormalizedHandler(req, res) {
       done(false, err);
     });
   } catch (err) {
+    // AbortError/CanceledError on client disconnect — not an error, just stop
+    if (err.name === 'AbortError' || err.name === 'CanceledError' || err.code === 'ERR_CANCELED') {
+      logger.info('[stream] upstream_canceled_on_disconnect', { correlationId: req.body?.correlationId });
+      return;
+    }
     logger.error('[streamAgentNormalized] handler error', { error: String(err?.message || err) });
     done(false, err);
   }
