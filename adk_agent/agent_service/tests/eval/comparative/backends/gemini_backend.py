@@ -76,8 +76,9 @@ class GeminiBackend:
     derived from the $GCP_SA_KEY environment variable.
     """
 
-    def __init__(self, base_url: str):
+    def __init__(self, base_url: str, api_key: str | None = None):
         self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
         self._token: str | None = None
 
     def _get_token(self) -> str:
@@ -109,7 +110,10 @@ class GeminiBackend:
                     "conversation_id": conv_id,
                     "message": query,
                 },
-                headers={"Authorization": f"Bearer {self._get_token()}"},
+                headers={
+                    "Authorization": f"Bearer {self._get_token()}",
+                    **({"x-api-key": self.api_key} if self.api_key else {}),
+                },
             ) as resp:
                 resp.raise_for_status()
                 lines = []

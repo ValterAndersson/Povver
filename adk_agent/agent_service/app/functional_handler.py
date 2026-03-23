@@ -29,7 +29,7 @@ from app.llm.protocol import LLMClient, LLMChunk, ModelConfig
 logger = logging.getLogger(__name__)
 
 # Model configuration
-FUNCTIONAL_MODEL = os.getenv("FUNCTIONAL_MODEL", "gemini-2.5-flash")
+FUNCTIONAL_MODEL = os.getenv("FUNCTIONAL_MODEL", "gemini-3-flash-preview")
 FUNCTIONAL_TEMPERATURE = 0.0
 
 # System instruction for JSON-only output

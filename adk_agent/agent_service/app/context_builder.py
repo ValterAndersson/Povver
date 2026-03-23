@@ -33,7 +33,7 @@ Your saved memories are loaded automatically at the start of each conversation.
 async def build_system_context(
     ctx: RequestContext,
     llm_client=None,
-    model: str = "gemini-2.5-flash",
+    model: str = "gemini-3-flash-preview",
 ) -> tuple[str, list[dict]]:
     """Build instruction string and conversation history.
 
@@ -50,7 +50,7 @@ async def build_system_context(
     planning_task = fs.get_planning_context(ctx.user_id)
     memories_task = mm.list_active_memories(ctx.user_id, limit=50)
     history_task = fs.get_conversation_messages(
-        ctx.user_id, ctx.conversation_id, limit=20
+        ctx.user_id, ctx.conversation_id, limit=80
     )
     summaries_task = _load_recent_summaries(fs, ctx.user_id, limit=5)
     alerts_task = _load_active_alerts(fs, ctx.user_id)
@@ -118,6 +118,15 @@ async def build_system_context(
 
     # Format history for LLM
     formatted_history = _format_history(history)
+
+    # Compact history if it exceeds token budget
+    if llm_client and formatted_history:
+        try:
+            formatted_history = await _compact_history_if_needed(
+                formatted_history, llm_client, model
+            )
+        except Exception as e:
+            logger.warning("History compaction failed, using full history: %s", e)
 
     return instruction, formatted_history
 
@@ -300,23 +309,163 @@ def _format_snapshot(planning: dict) -> str:
     return "## Training Snapshot\n" + " | ".join(parts)
 
 
+HISTORY_TOKEN_BUDGET = 8000  # ~32K chars — compact if history exceeds this
+RECENT_TURNS_TO_KEEP = 3    # Always keep the last N user→assistant turns uncompacted
+
+COMPACTION_PROMPT = """Summarize this conversation history concisely. Preserve:
+- Key data points and numbers the coach referenced (weights, reps, dates, percentages)
+- What tools were called and the important data they returned
+- Decisions made and recommendations given
+- The user's goals, concerns, and preferences expressed
+
+Write the summary as a narrative, not a list. Use 200-400 words. Focus on what the model would need to continue the conversation coherently."""
+
+
+def _estimate_tokens(messages: list[dict]) -> int:
+    """Rough token estimate: chars / 4."""
+    import json as _json
+    total = 0
+    for msg in messages:
+        total += len(_json.dumps(msg, default=str))
+    return total // 4
+
+
+def _find_turn_boundary(messages: list[dict], keep_recent: int) -> int:
+    """Find the index where 'recent' turns start.
+
+    A turn starts with a user message. We count backwards from the end
+    to find the boundary that keeps `keep_recent` complete turns.
+    """
+    turns_found = 0
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i].get("role") == "user":
+            turns_found += 1
+            if turns_found >= keep_recent:
+                return i
+    return 0
+
+
+async def _compact_history_if_needed(
+    messages: list[dict], llm_client, model: str
+) -> list[dict]:
+    """Compact conversation history if it exceeds the token budget.
+
+    Splits history into old and recent portions at a turn boundary.
+    Summarizes old portion using the LLM and prepends as a summary message.
+    """
+    import json as _json
+
+    estimated = _estimate_tokens(messages)
+    if estimated <= HISTORY_TOKEN_BUDGET:
+        return messages
+
+    logger.info(
+        "History exceeds token budget (%d > %d), compacting",
+        estimated, HISTORY_TOKEN_BUDGET,
+    )
+
+    # Split at turn boundary
+    boundary = _find_turn_boundary(messages, RECENT_TURNS_TO_KEEP)
+    if boundary <= 0:
+        return messages  # Not enough turns to compact
+
+    old_messages = messages[:boundary]
+    recent_messages = messages[boundary:]
+
+    # Summarize old messages
+    old_text = _json.dumps(old_messages, indent=1, default=str)
+    summary_messages = [
+        {"role": "system", "content": COMPACTION_PROMPT},
+        {"role": "user", "content": old_text},
+    ]
+
+    summary_text = ""
+    async for chunk in llm_client.stream(model, summary_messages, None, None):
+        if chunk.is_text:
+            summary_text += chunk.text
+
+    if not summary_text.strip():
+        logger.warning("Compaction produced empty summary, keeping full history")
+        return messages
+
+    logger.info(
+        "Compacted %d old messages into summary (%d chars), keeping %d recent",
+        len(old_messages), len(summary_text), len(recent_messages),
+    )
+
+    # Return summary + recent turns
+    compacted = [
+        {
+            "role": "user",
+            "content": (
+                "[CONVERSATION SUMMARY — earlier turns compacted]\n"
+                + summary_text.strip()
+            ),
+        },
+    ]
+    compacted.extend(recent_messages)
+    return compacted
+
+
 def _format_history(messages: list[dict]) -> list[dict]:
     """Format Firestore messages to LLM history format.
 
-    Firestore uses `type` field with values: user_prompt, agent_response, artifact.
-    LLM expects `role` field with values: user, assistant (model).
-    Artifacts are skipped — they are rendered as cards in the UI, not chat turns.
-
-    Note: This duplicates logic in main.py. Task 30 will remove it from main.py
-    and wire up context_builder as the single source.
+    Firestore message types → LLM roles:
+    - user_prompt   → {"role": "user", "content": ...}
+    - agent_response / agentResponse → {"role": "assistant", "content": ...}
+    - tool_calls    → {"role": "assistant", "tool_calls": [...]}
+    - tool_result   → {"role": "tool", "tool_name": ..., "tool_call_id": ..., "tool_result": ...}
+    - artifact      → skipped (rendered as cards in the UI)
+    - summary       → {"role": "user", "content": ...} (compacted history)
     """
-    TYPE_TO_ROLE = {"user_prompt": "user", "agent_response": "assistant"}
+    import json as _json
+
+    TYPE_TO_ROLE = {
+        "user_prompt": "user",
+        "agent_response": "assistant",
+        "agentResponse": "assistant",
+    }
     formatted = []
     for msg in messages:
         msg_type = msg.get("type", "user_prompt")
+
+        # Standard text messages
         role = TYPE_TO_ROLE.get(msg_type)
         if role:
             formatted.append({"role": role, "content": msg.get("content", "")})
+            continue
+
+        # Model function calls (persisted by agent_loop)
+        if msg_type == "tool_calls":
+            content = msg.get("content", "[]")
+            calls = _json.loads(content) if isinstance(content, str) else content
+            formatted.append({"role": "assistant", "tool_calls": calls})
+            continue
+
+        # Tool results (persisted by agent_loop)
+        if msg_type == "tool_result":
+            content = msg.get("content", "{}")
+            result = _json.loads(content) if isinstance(content, str) else content
+            formatted.append({
+                "role": "tool",
+                "tool_name": msg.get("tool_name", "unknown"),
+                "tool_call_id": msg.get("call_id", "unknown"),
+                "tool_result": result,
+            })
+            continue
+
+        # Compacted history summary
+        if msg_type == "summary":
+            formatted.append({
+                "role": "user",
+                "content": (
+                    "[CONVERSATION SUMMARY — earlier turns compacted]\n"
+                    + msg.get("content", "")
+                ),
+            })
+            continue
+
+        # Skip artifacts and unknown types
     return formatted
 
 

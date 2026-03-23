@@ -206,7 +206,8 @@ async def main():
     if not os.environ.get("GCP_SA_KEY"):
         raise RuntimeError("GCP_SA_KEY env var must point to the GCP service account key file")
 
-    gemini = GeminiBackend(args.gemini_url)
+    agent_api_key = os.environ.get("EVAL_AGENT_API_KEY") or os.environ.get("MYON_API_KEY")
+    gemini = GeminiBackend(args.gemini_url, api_key=agent_api_key)
     claude = ClaudeBackend(args.mcp_url, mcp_api_key)
 
     cases = get_cases(category=args.category, case_id=args.id)

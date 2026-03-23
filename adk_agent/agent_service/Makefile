@@ -56,4 +56,4 @@ deploy:
 		--timeout 300 \
 		--concurrency 1 \
 		--service-account ai-agents@$(PROJECT_ID).iam.gserviceaccount.com \
-		--set-env-vars "PROJECT_ID=$(PROJECT_ID),GOOGLE_CLOUD_PROJECT=$(PROJECT_ID),GOOGLE_CLOUD_LOCATION=$${GOOGLE_CLOUD_LOCATION:-us-central1},ENABLE_USAGE_TRACKING=true,CONVERSATION_COLLECTION=conversations,AGENT_MODEL=$${AGENT_MODEL:-gemini-2.5-flash},MYON_API_KEY=$${MYON_API_KEY:?Set MYON_API_KEY env var},MYON_FUNCTIONS_BASE_URL=$${MYON_FUNCTIONS_BASE_URL:-https://us-central1-myon-53d85.cloudfunctions.net}"
+		--set-env-vars "PROJECT_ID=$(PROJECT_ID),GOOGLE_CLOUD_PROJECT=$(PROJECT_ID),GOOGLE_CLOUD_LOCATION=$${GOOGLE_CLOUD_LOCATION:-global},ENABLE_USAGE_TRACKING=true,CONVERSATION_COLLECTION=conversations,AGENT_MODEL=$${AGENT_MODEL:-gemini-3-flash-preview},MYON_API_KEY=$${MYON_API_KEY:?Set MYON_API_KEY env var},MYON_FUNCTIONS_BASE_URL=$${MYON_FUNCTIONS_BASE_URL:-https://us-central1-myon-53d85.cloudfunctions.net}"

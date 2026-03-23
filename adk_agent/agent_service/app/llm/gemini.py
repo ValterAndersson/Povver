@@ -95,6 +95,15 @@ class GeminiClient:
                         response=msg["tool_result"],
                     ))],
                 ))
+            elif "tool_calls" in msg:
+                # Model's function call response — reconstruct from history
+                parts = []
+                for tc in msg["tool_calls"]:
+                    parts.append(types.Part(function_call=types.FunctionCall(
+                        name=tc["name"],
+                        args=tc.get("args", {}),
+                    )))
+                contents.append(types.Content(role="model", parts=parts))
             else:
                 contents.append(types.Content(
                     role=gemini_role,
