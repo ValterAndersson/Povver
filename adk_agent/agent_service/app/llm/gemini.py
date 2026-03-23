@@ -82,33 +82,45 @@ class GeminiClient:
 
     def _to_gemini_contents(self, messages: list[dict]) -> list:
         contents = []
+        # Collect consecutive tool results into a single Content message
+        # (Gemini requires function_response count == function_call count per turn)
+        pending_responses: list[types.Part] = []
+
+        def _flush_responses():
+            if pending_responses:
+                contents.append(types.Content(
+                    role="user",
+                    parts=list(pending_responses),
+                ))
+                pending_responses.clear()
+
         for msg in messages:
             role = msg["role"]
             if role == "system":
                 continue
-            gemini_role = "user" if role == "user" else "model"
             if "tool_result" in msg:
-                contents.append(types.Content(
-                    role="user",
-                    parts=[types.Part(function_response=types.FunctionResponse(
+                # Within-request tool results (from agent_loop)
+                pending_responses.append(
+                    types.Part(function_response=types.FunctionResponse(
                         name=msg["tool_name"],
                         response=msg["tool_result"],
-                    ))],
-                ))
-            elif "tool_calls" in msg:
-                # Model's function call response — reconstruct from history
-                parts = []
-                for tc in msg["tool_calls"]:
-                    parts.append(types.Part(function_call=types.FunctionCall(
-                        name=tc["name"],
-                        args=tc.get("args", {}),
-                    )))
-                contents.append(types.Content(role="model", parts=parts))
+                    ))
+                )
+                continue
+            # Flush any pending responses before a non-tool message
+            _flush_responses()
+            if "tool_calls" in msg:
+                # Tool calls from history are merged into assistant text
+                # by _format_history. Skip any that leak through here.
+                continue
             else:
+                gemini_role = "user" if role == "user" else "model"
                 contents.append(types.Content(
                     role=gemini_role,
                     parts=[types.Part(text=msg["content"])],
                 ))
+
+        _flush_responses()
         return contents
 
     def _to_gemini_tools(self, tools: list[ToolDef]) -> list:

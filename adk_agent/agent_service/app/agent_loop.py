@@ -191,17 +191,9 @@ async def run_agent_loop(
                 yield sse_event("done", {"usage": {"input_tokens": total_input_tokens, "output_tokens": total_output_tokens, "thinking_tokens": total_thinking_tokens}})
                 return
 
-            # Append model's function calls to messages so subsequent LLM
-            # rounds (within this request) see what was called.
-            messages.append({
-                "role": "assistant",
-                "tool_calls": [
-                    {"name": tc.tool_name, "call_id": tc.call_id, "args": tc.args}
-                    for tc in tool_calls
-                ],
-            })
-
             # Fire-and-forget: persist tool calls for multi-turn history
+            # (stored as text context, not native function calls — Gemini's
+            # thought_signature requirement prevents replaying raw calls)
             if fs and ctx.user_id and ctx.conversation_id:
                 asyncio.create_task(_save_tool_calls(
                     fs, ctx.user_id, ctx.conversation_id,
