@@ -31,7 +31,7 @@ class UserService: ObservableObject {
 
     private func loadUserPreferences() {
         guard let userId = AuthService.shared.currentUser?.uid else {
-            print("[UserService] loadUserPreferences — no auth, skipping")
+            AppLogger.shared.info(.work, "loadUserPreferences — no auth, skipping")
             return
         }
 
@@ -43,12 +43,12 @@ class UserService: ObservableObject {
                 let data = attrDoc.data() ?? [:]
                 let weightFormat = data["weight_format"] as? String
                 let heightFormat = data["height_format"] as? String
-                print("[UserService] loadUserPreferences — Firestore raw: weight_format=\(weightFormat ?? "nil"), height_format=\(heightFormat ?? "nil")")
+                AppLogger.shared.info(.work, "loadUserPreferences — preferences loaded")
 
                 await MainActor.run {
                     self.weightUnit = WeightUnit(firestoreFormat: weightFormat)
                     self.heightUnit = HeightUnit(firestoreFormat: heightFormat)
-                    print("[UserService] loadUserPreferences — set weightUnit=\(self.weightUnit), heightUnit=\(self.heightUnit)")
+                    AppLogger.shared.info(.work, "loadUserPreferences — units applied")
                 }
             } catch {
                 // Don't reset to defaults — keep whatever was previously loaded.
@@ -68,7 +68,7 @@ class UserService: ObservableObject {
     @MainActor
     func ensurePreferencesLoaded() async {
         guard let userId = AuthService.shared.currentUser?.uid else {
-            print("[UserService] ensurePreferencesLoaded — no auth, skipping")
+            AppLogger.shared.info(.work, "ensurePreferencesLoaded — no auth, skipping")
             return
         }
         do {
@@ -78,10 +78,10 @@ class UserService: ObservableObject {
             let data = attrDoc.data() ?? [:]
             let weightFormat = data["weight_format"] as? String
             let heightFormat = data["height_format"] as? String
-            print("[UserService] ensurePreferencesLoaded — Firestore raw: weight_format=\(weightFormat ?? "nil"), height_format=\(heightFormat ?? "nil")")
+            AppLogger.shared.info(.work, "ensurePreferencesLoaded — preferences loaded")
             self.weightUnit = WeightUnit(firestoreFormat: weightFormat)
             self.heightUnit = HeightUnit(firestoreFormat: heightFormat)
-            print("[UserService] ensurePreferencesLoaded — set weightUnit=\(self.weightUnit), heightUnit=\(self.heightUnit)")
+            AppLogger.shared.info(.work, "ensurePreferencesLoaded — units applied")
         } catch {
             AppLogger.shared.error(.store, "Failed to load user preferences: \(error)")
         }
@@ -184,7 +184,7 @@ class ActiveWorkoutManager: ObservableObject {
     
     func completeWorkout() async throws -> String? {
         guard var workout = activeWorkout else { 
-            print("❌ No active workout to complete")
+            AppLogger.shared.error(.work, "No active workout to complete")
             return nil 
         }
         
@@ -193,7 +193,7 @@ class ActiveWorkoutManager: ObservableObject {
         
         // Get current user ID
         guard let currentUserId = getCurrentUserId() else {
-            print("❌ No current user ID available")
+            AppLogger.shared.error(.work, "No current user ID available")
             throw WorkoutError.noUserID
         }
         
@@ -205,7 +205,7 @@ class ActiveWorkoutManager: ObservableObject {
         do {
             // Save to Firestore
             let workoutId = try await saveWorkout(workout)
-            print("✅ Workout saved successfully with ID: \(workoutId)")
+            AppLogger.shared.info(.work, "Workout saved successfully")
             
             // All UI updates must happen on main thread
             await MainActor.run {
@@ -228,7 +228,7 @@ class ActiveWorkoutManager: ObservableObject {
             
             return workoutId
         } catch {
-            print("💥 Error saving workout: \(error)")
+            AppLogger.shared.error(.work, "Error saving workout", error)
             throw error
         }
     }
@@ -663,7 +663,7 @@ class ActiveWorkoutManager: ObservableObject {
         
         do {
             guard let exercise = try await exerciseRepository.read(id: exerciseId) else {
-                print("Exercise not found for ID: \(exerciseId)")
+                AppLogger.shared.error(.work, "Exercise not found for analytics")
                 return MuscleMetrics(
                     weightPerMuscleGroup: [:], weightPerMuscle: [:],
                     repsPerMuscleGroup: [:], repsPerMuscle: [:],
@@ -713,7 +713,7 @@ class ActiveWorkoutManager: ObservableObject {
                 }
             }
         } catch {
-            print("Error fetching exercise data for analytics: \(error)")
+            AppLogger.shared.error(.work, "Error fetching exercise data for analytics", error)
         }
         
         return MuscleMetrics(

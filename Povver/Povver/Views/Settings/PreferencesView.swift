@@ -124,11 +124,11 @@ struct PreferencesView: View {
         .task {
             await loadUser()
             await userService.ensurePreferencesLoaded()
-            print("[PreferencesView] Loaded prefs — weight: \(userService.weightUnit), height: \(userService.heightUnit)")
+            AppLogger.shared.info(.app, "Preferences loaded")
             selectedWeightUnit = userService.weightUnit
             selectedHeightUnit = userService.heightUnit
             isInitializing = false
-            print("[PreferencesView] Init complete — selectedWeight: \(selectedWeightUnit), selectedHeight: \(selectedHeightUnit)")
+            AppLogger.shared.info(.app, "Preferences init complete")
         }
     }
 
@@ -147,7 +147,7 @@ struct PreferencesView: View {
         do {
             user = try await UserRepository.shared.getUser(userId: userId)
         } catch {
-            print("[PreferencesView] Failed to load user: \(error)")
+            AppLogger.shared.error(.app, "Failed to load user", error)
         }
     }
 
@@ -171,10 +171,10 @@ struct PreferencesView: View {
 
     private func updateWeightUnit(_ unit: WeightUnit) async {
         guard authService.currentUser?.uid != nil else {
-            print("[PreferencesView] updateWeightUnit — no auth, skipping")
+            AppLogger.shared.info(.app, "updateWeightUnit — no auth, skipping")
             return
         }
-        print("[PreferencesView] updateWeightUnit — saving \(unit) (firestore: \(unit.firestoreFormat))")
+        AppLogger.shared.info(.app, "updateWeightUnit — saving preference")
         errorMessage = nil
         isUpdatingWeightUnit = true
 
@@ -185,11 +185,11 @@ struct PreferencesView: View {
         do {
             let requestBody = UpdatePreferencesRequest(preferences: ["weight_format": unit.firestoreFormat])
             let _: UpdatePreferencesResponse = try await ApiClient.shared.postJSON("updateUserPreferences", body: requestBody)
-            print("[PreferencesView] updateWeightUnit — API success, optimistic update to \(unit)")
+            AppLogger.shared.info(.app, "updateWeightUnit — API success")
             UserService.shared.weightUnit = unit
             AnalyticsService.shared.preferenceChanged(preference: "weight_unit", value: unit.rawValue)
         } catch {
-            print("[PreferencesView] updateWeightUnit — API FAILED: \(error)")
+            AppLogger.shared.error(.app, "updateWeightUnit — API failed", error)
             errorMessage = "Failed to update preference. Please try again."
             selectedWeightUnit = userService.weightUnit
         }
@@ -197,10 +197,10 @@ struct PreferencesView: View {
 
     private func updateHeightUnit(_ unit: HeightUnit) async {
         guard authService.currentUser?.uid != nil else {
-            print("[PreferencesView] updateHeightUnit — no auth, skipping")
+            AppLogger.shared.info(.app, "updateHeightUnit — no auth, skipping")
             return
         }
-        print("[PreferencesView] updateHeightUnit — saving \(unit) (firestore: \(unit.firestoreFormat))")
+        AppLogger.shared.info(.app, "updateHeightUnit — saving preference")
         errorMessage = nil
         isUpdatingHeightUnit = true
 
@@ -211,11 +211,11 @@ struct PreferencesView: View {
         do {
             let requestBody = UpdatePreferencesRequest(preferences: ["height_format": unit.firestoreFormat])
             let _: UpdatePreferencesResponse = try await ApiClient.shared.postJSON("updateUserPreferences", body: requestBody)
-            print("[PreferencesView] updateHeightUnit — API success, optimistic update to \(unit)")
+            AppLogger.shared.info(.app, "updateHeightUnit — API success")
             UserService.shared.heightUnit = unit
             AnalyticsService.shared.preferenceChanged(preference: "height_unit", value: unit.rawValue)
         } catch {
-            print("[PreferencesView] updateHeightUnit — API FAILED: \(error)")
+            AppLogger.shared.error(.app, "updateHeightUnit — API failed", error)
             errorMessage = "Failed to update preference. Please try again."
             selectedHeightUnit = userService.heightUnit
         }

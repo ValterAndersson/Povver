@@ -444,13 +444,13 @@ struct ProfileEditView: View {
         do {
             user = try await UserRepository.shared.getUser(userId: userId)
         } catch {
-            print("[ProfileEditView] Failed to load user: \(error)")
+            AppLogger.shared.error(.app, "Failed to load user", error)
         }
 
         do {
             userAttributes = try await UserRepository.shared.getUserAttributes(userId: userId)
         } catch {
-            print("[ProfileEditView] Failed to load user attributes: \(error)")
+            AppLogger.shared.error(.app, "Failed to load user attributes", error)
         }
 
         do {

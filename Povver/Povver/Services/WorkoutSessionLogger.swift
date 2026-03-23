@@ -205,7 +205,7 @@ final class WorkoutSessionLogger {
             let data = try encoder.encode(snapshot)
             try data.write(to: fileURL, options: .atomic)
         } catch {
-            print("[WorkoutSessionLogger] Failed to write log: \(error)")
+            AppLogger.shared.error(.work, "Failed to write workout session log", error)
         }
     }
 

@@ -15,7 +15,7 @@ class WorkoutRepository {
                 return workout
             }
         } catch {
-            print("[WorkoutRepository] getWorkouts error for userId \(userId): \(error)")
+            AppLogger.shared.error(.store, "Error fetching workouts", error)
             throw error
         }
     }
@@ -35,7 +35,7 @@ class WorkoutRepository {
             workout.id = doc.documentID
             return workout
         } catch {
-            print("[WorkoutRepository] getWorkout error for id \(id), userId \(userId): \(error)")
+            AppLogger.shared.error(.store, "Error fetching workout", error)
             throw error
         }
     }

@@ -16,7 +16,7 @@ class UserRepository {
                 return nil
             }
         } catch {
-            print("[UserRepository] getUser error for userId \(userId): \(error)")
+            AppLogger.shared.error(.store, "Error fetching user", error)
             throw error
         }
     }
@@ -25,7 +25,7 @@ class UserRepository {
         do {
             try db.collection(collection).document(userId).setData(from: user, merge: true)
         } catch {
-            print("[UserRepository] updateUser error for userId \(userId): \(error)")
+            AppLogger.shared.error(.store, "Error updating user", error)
             throw error
         }
     }
@@ -64,9 +64,9 @@ class UserRepository {
         
         do {
             try await userRef.updateData(updates)
-            print("[UserRepository] Updated timezone for user \(userId) to \(timezone)")
+            AppLogger.shared.info(.store, "Updated timezone to \(timezone)")
         } catch {
-            print("[UserRepository] Failed to update timezone for user \(userId): \(error)")
+            AppLogger.shared.error(.store, "Failed to update timezone", error)
             throw UserRepositoryError.updateFailed(error)
         }
     }
@@ -77,7 +77,7 @@ class UserRepository {
             let user = try await getUser(userId: userId)
             return user?.timeZone ?? TimeZone.current.identifier
         } catch {
-            print("[UserRepository] Failed to get timezone for user \(userId), using device timezone: \(error)")
+            AppLogger.shared.error(.store, "Failed to get timezone, using device timezone", error)
             return TimeZone.current.identifier
         }
     }

@@ -354,7 +354,7 @@ actor MutationCoordinator {
         let queued = QueuedMutation(mutation: mutation)
         pending.append(queued)
         
-        print("[MutationCoordinator] Enqueued: \(mutation), pending count: \(pending.count)")
+        AppLogger.shared.info(.work, "Enqueued: \(mutation), pending count: \(pending.count)")
         
         // Trigger processing
         await processLoop()
@@ -368,7 +368,7 @@ actor MutationCoordinator {
             pending.removeAll { queued in
                 if case .patchWorkoutMetadata(let existingField, _) = queued.mutation {
                     if existingField == field {
-                        print("[MutationCoordinator] Coalesced metadata mutation for field: \(field)")
+                        AppLogger.shared.info(.work, "Coalesced metadata mutation for field: \(field)")
                         return true
                     }
                 }
@@ -379,7 +379,7 @@ actor MutationCoordinator {
             pending.removeAll { queued in
                 if case .patchExerciseField(let existingExId, let existingField, _) = queued.mutation {
                     if existingExId == exId && existingField == field {
-                        print("[MutationCoordinator] Coalesced exercise field mutation for \(exId).\(field)")
+                        AppLogger.shared.info(.work, "Coalesced exercise field mutation for \(exId).\(field)")
                         return true
                     }
                 }
@@ -404,7 +404,7 @@ actor MutationCoordinator {
             queued.attempt += 1
             inFlight = queued
             
-            print("[MutationCoordinator] Executing: \(queued.mutation), attempt: \(queued.attempt)")
+            AppLogger.shared.info(.work, "Executing: \(queued.mutation), attempt: \(queued.attempt)")
             
             let result = await execute(queued)
             
@@ -422,7 +422,7 @@ actor MutationCoordinator {
         }
         
         if !pending.isEmpty {
-            print("[MutationCoordinator] \(pending.count) mutations waiting for dependencies")
+            AppLogger.shared.info(.work, "\(pending.count) mutations waiting for dependencies")
         }
     }
     
@@ -454,11 +454,11 @@ actor MutationCoordinator {
         switch mutation {
         case .removeExercise(let instanceId):
             pending.removeAll { $0.mutation.isAffectedByRemoveExercise(instanceId) }
-            print("[MutationCoordinator] Purged mutations for removed exercise: \(instanceId)")
+            AppLogger.shared.info(.work, "Purged mutations for removed exercise")
             
         case .removeSet(let exId, let setId):
             pending.removeAll { $0.mutation.isAffectedByRemoveSet(exId, setId) }
-            print("[MutationCoordinator] Purged mutations for removed set: \(setId)")
+            AppLogger.shared.info(.work, "Purged mutations for removed set")
             
         default:
             break
@@ -476,11 +476,11 @@ actor MutationCoordinator {
             for set in sets {
                 ackSets.insert(SetKey(exerciseInstanceId: instanceId, setId: set.id))
             }
-            print("[MutationCoordinator] ACK exercise: \(instanceId) with \(sets.count) sets")
+            AppLogger.shared.info(.work, "ACK exercise with \(sets.count) sets")
             
         case .addSet(let exId, let setId, _, _, _, _):
             ackSets.insert(SetKey(exerciseInstanceId: exId, setId: setId))
-            print("[MutationCoordinator] ACK set: \(setId)")
+            AppLogger.shared.info(.work, "ACK set")
             
         case .removeExercise(let instanceId):
             ackExercises.remove(instanceId)
@@ -516,7 +516,7 @@ actor MutationCoordinator {
             
         case .targetNotFound:
             // DON'T retry. Trigger reconciliation.
-            print("[MutationCoordinator] TARGET_NOT_FOUND - triggering reconcile")
+            AppLogger.shared.error(.work, "TARGET_NOT_FOUND - triggering reconcile")
             await triggerReconcile(sessionId: sessionId)
             await onStateChange?(.syncFailed(queued.mutation, "Entity not found on server"), sessionId)
             
@@ -531,7 +531,7 @@ actor MutationCoordinator {
         guard !isReconciling else { return }
         
         isReconciling = true
-        print("[MutationCoordinator] Starting reconciliation")
+        AppLogger.shared.info(.work, "Starting reconciliation")
         
         // Notify service to fetch latest state
         await onStateChange?(.needsReconcile, sessionId)
@@ -549,13 +549,13 @@ actor MutationCoordinator {
         pending.removeAll { queued in
             if let exId = queued.mutation.exerciseDependency {
                 if !ackExercises.contains(exId) {
-                    print("[MutationCoordinator] Dropping mutation for missing exercise: \(exId)")
+                    AppLogger.shared.info(.work, "Dropping mutation for missing exercise")
                     return true
                 }
             }
             if let setKey = queued.mutation.setDependency {
                 if !ackSets.contains(setKey) {
-                    print("[MutationCoordinator] Dropping mutation for missing set: \(setKey)")
+                    AppLogger.shared.info(.work, "Dropping mutation for missing set")
                     return true
                 }
             }
@@ -563,7 +563,7 @@ actor MutationCoordinator {
         }
         
         isReconciling = false
-        print("[MutationCoordinator] Reconciliation complete, resuming processing")
+        AppLogger.shared.info(.work, "Reconciliation complete, resuming processing")
         
         await processLoop()
     }
@@ -634,7 +634,7 @@ actor MutationCoordinator {
                 
             case .removeExercise(let instanceId):
                 // TODO: Implement remove exercise endpoint
-                print("[MutationCoordinator] removeExercise not yet implemented: \(instanceId)")
+                AppLogger.shared.info(.work, "removeExercise not yet implemented")
                 return .success
                 
             case .reorderExercises(let order):

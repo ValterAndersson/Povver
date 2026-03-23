@@ -265,7 +265,7 @@ struct SubscriptionView: View {
             do {
                 user = try await UserRepository.shared.getUser(userId: userId)
             } catch {
-                print("[SubscriptionView] Failed to load user: \(error)")
+                AppLogger.shared.error(.app, "Failed to load user", error)
             }
         }
 

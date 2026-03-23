@@ -324,7 +324,7 @@ struct ConnectedAppsView: View {
             apiKeys = response.data?.keys ?? []
         } catch {
             errorMessage = "Failed to load API keys."
-            print("[ConnectedAppsView] loadKeys failed: \(error)")
+            AppLogger.shared.error(.app, "Failed to load API keys", error)
         }
 
         isLoading = false
@@ -344,7 +344,7 @@ struct ConnectedAppsView: View {
             generatedKey = response.data?.key
         } catch {
             errorMessage = "Failed to generate API key."
-            print("[ConnectedAppsView] generateKey failed: \(error)")
+            AppLogger.shared.error(.app, "Failed to generate API key", error)
         }
 
         isGenerating = false
@@ -362,7 +362,7 @@ struct ConnectedAppsView: View {
             apiKeys.removeAll { $0.keyId == keyId }
         } catch {
             errorMessage = "Failed to revoke API key."
-            print("[ConnectedAppsView] revokeKey failed: \(error)")
+            AppLogger.shared.error(.app, "Failed to revoke API key", error)
         }
 
         revokingKeyId = nil

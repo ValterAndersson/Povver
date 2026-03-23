@@ -171,7 +171,7 @@ final class OnboardingViewModel: ObservableObject {
 
             return true
         } catch {
-            print("[OnboardingViewModel] Failed to save user attributes: \(error)")
+            AppLogger.shared.error(.app, "Failed to save user attributes", error)
             return false
         }
     }
