@@ -90,7 +90,7 @@ async def stream_handler(request: Request) -> StreamingResponse:
 
         fs = get_firestore_client()
         llm_client = GeminiClient()
-        model = os.environ.get("AGENT_MODEL", "gemini-3-flash-preview")
+        model = os.environ.get("AGENT_MODEL", "gemini-2.5-flash")
 
         # Route the request
         lane = route_request(message if isinstance(message, str) else body)
