@@ -146,7 +146,7 @@ struct ShowcaseScreen: View {
             vm.isLoadingTrial = true
             vm.trialError = nil
             await SubscriptionService.shared.restorePurchases()
-            if await SubscriptionService.shared.isPremium {
+            if SubscriptionService.shared.isPremium {
                 let _ = await vm.autoSaveRoutine()
                 onTrialStarted()
             } else {
