@@ -11,6 +11,7 @@ enum CoachState: Equatable {
     case restDay(RestDayContext)
     case postWorkout(PostWorkoutContext)
     case returningAfterInactivity(InactivityContext)
+    case onboardingComplete(OnboardingCompleteContext)
 
     static func == (lhs: CoachState, rhs: CoachState) -> Bool {
         switch (lhs, rhs) {
@@ -19,6 +20,7 @@ enum CoachState: Equatable {
         case (.restDay(let l), .restDay(let r)): return l.id == r.id
         case (.postWorkout(let l), .postWorkout(let r)): return l.id == r.id
         case (.returningAfterInactivity(let l), .returningAfterInactivity(let r)): return l.id == r.id
+        case (.onboardingComplete(let l), .onboardingComplete(let r)): return l.id == r.id
         default: return false
         }
     }
@@ -58,6 +60,12 @@ struct InactivityContext {
     let daysSinceLastWorkout: Int
     let nextWorkoutName: String?
     let snapshot: TrainingSnapshot
+}
+
+struct OnboardingCompleteContext {
+    let id = UUID()
+    let routineName: String
+    let conversationId: String?
 }
 
 // MARK: - Post-Workout Flag
@@ -114,13 +122,22 @@ class CoachTabViewModel: ObservableObject {
                 return
             }
 
-            // 2. Must be authenticated to proceed
+            // 2. Check onboarding complete flag (time-bounded, clears after 24h or first workout)
+            if let flag = OnboardingCompleteFlag.load() {
+                self.state = .onboardingComplete(OnboardingCompleteContext(
+                    routineName: flag.routineName,
+                    conversationId: flag.conversationId
+                ))
+                return
+            }
+
+            // 3. Must be authenticated to proceed
             guard let userId = Auth.auth().currentUser?.uid else {
                 self.state = .newUser
                 return
             }
 
-            // 3. Gather data — workout count and next workout in parallel
+            // 4. Gather data — workout count and next workout in parallel
             async let workoutCountTask = WorkoutRepository().getWorkoutCount(userId: userId)
             async let nextWorkoutTask = workoutService.getNextWorkout()
 
@@ -129,13 +146,13 @@ class CoachTabViewModel: ObservableObject {
 
             let hasActiveRoutine = nextWorkout?.hasNextWorkout == true
 
-            // 4. Brand-new user: no routine, no workout history
+            // 5. Brand-new user: no routine, no workout history
             if !hasActiveRoutine && workoutCount == 0 {
                 self.state = .newUser
                 return
             }
 
-            // 5. Load training snapshot and weekly workout counts
+            // 6. Load training snapshot and weekly workout counts
             async let snapshotTask = trainingService.fetchTrainingSnapshot()
             async let weeklyCountsTask = trainingService.fetchWeeklyWorkoutCounts(weeks: 12)
 
@@ -147,10 +164,10 @@ class CoachTabViewModel: ObservableObject {
                 self.routineFrequency = next.templateCount
             }
 
-            // 6. Check milestones (consistency thresholds)
+            // 7. Check milestones (consistency thresholds)
             self.pendingMilestones = trainingService.checkMilestones(workoutCount: workoutCount)
 
-            // 7. Inactivity check — 7+ days since last workout
+            // 8. Inactivity check — 7+ days since last workout
             // Note: Uses weeklyReview.createdAt (the analyst run date) as a proxy for last workout date.
             // The WeeklyReview has weekEnding (a String like "YYYY-WNN") but no parseable last-workout Date.
             // This is a best-available approximation; the analyst typically runs shortly after the last workout of the week.
@@ -166,7 +183,7 @@ class CoachTabViewModel: ObservableObject {
                 return
             }
 
-            // 8. Determine workout day vs rest day
+            // 9. Determine workout day vs rest day
             let greeting = self.timeAwareGreeting()
 
             if let next = nextWorkout, next.hasNextWorkout {

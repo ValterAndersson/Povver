@@ -6,9 +6,6 @@ import SwiftUI
 struct CoachTabView: View {
     /// Callback to switch to another tab (e.g., Train)
     let switchToTab: (MainTab) -> Void
-    /// One-shot context to auto-navigate to conversation (e.g., after onboarding "Adjust with coach")
-    var initialConversationContext: String? = nil
-
     @StateObject private var viewModel = CoachTabViewModel()
     @State private var hasAppeared = false
 
@@ -72,15 +69,6 @@ struct CoachTabView: View {
                     hasAppeared = true
                 }
             }
-            // Auto-navigate to conversation if coming from onboarding "Adjust with coach"
-            if let context = initialConversationContext, !context.isEmpty {
-                selectedConversationId = nil
-                entryContext = context
-                // Small delay to let NavigationStack settle
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    navigateToConversation = true
-                }
-            }
         }
         .onChange(of: navigateToConversation) { _, isActive in
             if !isActive {
@@ -116,6 +104,8 @@ struct CoachTabView: View {
             postWorkoutHero(ctx)
         case .returningAfterInactivity(let ctx):
             inactivityHero(ctx)
+        case .onboardingComplete(let ctx):
+            onboardingCompleteHero(ctx)
         }
     }
 
@@ -165,6 +155,27 @@ struct CoachTabView: View {
                     .clipShape(Capsule())
             }
             .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - Onboarding Complete Hero
+
+    private func onboardingCompleteHero(_ ctx: OnboardingCompleteContext) -> some View {
+        heroCard {
+            Text("YOUR COACH")
+                .textStyle(.sectionLabel)
+
+            CoachPresenceIndicator(size: 40)
+
+            Text("You're all set")
+                .textStyle(.screenTitle)
+                .foregroundStyle(Color.textPrimary)
+
+            Text("Your program is ready — tap into our conversation below to fine-tune it, or head to Train to start your first session.")
+                .textStyle(.secondary)
+                .foregroundStyle(Color.textSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, Space.md)
         }
     }
 
@@ -373,6 +384,20 @@ struct CoachTabView: View {
                         accent: true
                     ) {
                         switchToTab(.train)
+                    }
+                } else if case .onboardingComplete = viewModel.state {
+                    quickActionRow(title: "Start today's session", icon: "play.fill", accent: true) {
+                        switchToTab(.train)
+                    }
+                    quickActionRow(title: "Adjust my routine", icon: "arrow.triangle.2.circlepath", accent: false) {
+                        selectedConversationId = nil
+                        entryContext = "quick:Review plan"
+                        navigateToConversation = true
+                    }
+                    quickActionRow(title: "Tell me about your goals", icon: "target", accent: false) {
+                        selectedConversationId = nil
+                        entryContext = "quick:What are your fitness goals? I'd like to understand what you're training for."
+                        navigateToConversation = true
                     }
                 }
 
