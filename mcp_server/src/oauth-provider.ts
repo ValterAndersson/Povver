@@ -123,6 +123,8 @@ export class PovverOAuthProvider implements OAuthServerProvider {
       token,
       clientId: 'api-key',
       scopes: [],
+      // API keys don't expire — set far-future expiry to satisfy SDK middleware
+      expiresAt: Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60,
       extra: { userId: auth.userId },
     };
   }

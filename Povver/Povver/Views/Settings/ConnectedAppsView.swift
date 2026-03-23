@@ -228,7 +228,10 @@ struct ConnectedAppsView: View {
                             Spacer()
 
                             Button {
-                                UIPasteboard.general.string = generatedKey
+                                UIPasteboard.general.setItems(
+                                    [[UIPasteboard.typeAutomatic: generatedKey]],
+                                    options: [.expirationDate: Date().addingTimeInterval(120)]
+                                )
                             } label: {
                                 Image(systemName: "doc.on.doc")
                                     .foregroundColor(Color.accent)

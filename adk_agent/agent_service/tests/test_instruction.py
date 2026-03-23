@@ -1,7 +1,7 @@
 # tests/test_instruction.py
 """Tests for SHELL_INSTRUCTION content and build_system_instruction builder."""
 
-from app.instruction import SHELL_INSTRUCTION, build_system_instruction
+from app.instruction import SHELL_INSTRUCTION, CORE_INSTRUCTION, WORKOUT_INSTRUCTION, build_system_instruction
 from app.context import RequestContext
 
 
@@ -24,13 +24,16 @@ def test_shell_instruction_contains_key_sections():
     required_sections = [
         "## IDENTITY",
         "## ABSOLUTE RULES",
+        "## REASONING FRAMEWORK",
         "## RESPONSE CRAFT",
         "## USING YOUR TOOLS",
         "## INTERPRETING DATA",
-        "## BUILDING & MODIFYING",
+        "## TRAINING KNOWLEDGE",
+        "## BUILDING & MODIFYING WORKOUTS & ROUTINES",
         "## WEIGHT PRESCRIPTION",
         "## ACTIVE WORKOUT MODE",
         "## CONVERSATION HISTORY",
+        "## EXAMPLES",
     ]
     for section in required_sections:
         assert section in SHELL_INSTRUCTION, f"Missing section: {section}"
@@ -108,8 +111,17 @@ def test_build_today_unknown_when_none():
     assert "today=unknown" in result
 
 
-def test_build_contains_shell_instruction():
-    """The full SHELL_INSTRUCTION must be embedded in the output."""
-    ctx = _make_ctx(today="2026-01-01")
+def test_build_without_workout_contains_core_only():
+    """Without a workout_id, only CORE_INSTRUCTION is included (no workout mode)."""
+    ctx = _make_ctx(today="2026-01-01", workout_id=None)
     result = build_system_instruction(ctx)
-    assert SHELL_INSTRUCTION in result
+    assert CORE_INSTRUCTION in result
+    assert WORKOUT_INSTRUCTION not in result
+
+
+def test_build_with_workout_contains_full_instruction():
+    """With a workout_id, both CORE and WORKOUT instructions are included."""
+    ctx = _make_ctx(today="2026-01-01", workout_id="w-123")
+    result = build_system_instruction(ctx)
+    assert CORE_INSTRUCTION in result
+    assert WORKOUT_INSTRUCTION in result

@@ -175,7 +175,7 @@ final class WorkoutSessionLogger {
         }
 
         // Also breadcrumb to Crashlytics for correlation
-        let summary = "\(type.rawValue)\(details.map { " \($0)" } ?? "")"
+        let summary = type.rawValue
         FirebaseConfig.shared.log(summary)
     }
 
@@ -204,6 +204,10 @@ final class WorkoutSessionLogger {
         do {
             let data = try encoder.encode(snapshot)
             try data.write(to: fileURL, options: .atomic)
+            try? (fileURL as NSURL).setResourceValue(
+                URLFileProtection.complete,
+                forKey: .fileProtectionKey
+            )
         } catch {
             AppLogger.shared.error(.work, "Failed to write workout session log", error)
         }
@@ -247,6 +251,10 @@ final class WorkoutSessionLogger {
         let dir = caches.appendingPathComponent("workout_logs", isDirectory: true)
         if !FileManager.default.fileExists(atPath: dir.path) {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try? FileManager.default.setAttributes(
+                [.protectionKey: FileProtectionType.complete],
+                ofItemAtPath: dir.path
+            )
         }
         return dir
     }

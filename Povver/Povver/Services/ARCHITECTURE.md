@@ -23,7 +23,6 @@ Services are singleton managers and API clients that provide cross-cutting conce
 | `CacheManager.swift` | Memory + disk caching (Actor-based) |
 | `DeviceManager.swift` | Device registration for push notifications |
 | `TimezoneManager.swift` | User timezone detection and sync |
-| `SessionPreWarmer.swift` | Dead code — stub only, to be removed from Xcode project |
 | `AgentsApi.swift` | Agent invocation helpers |
 | `AgentPipelineLogger.swift` | Thin facade over `AppLogger` for agent streaming pipeline. Keeps `AgentLane`/`PipelineStep` enums and SSE event parsing logic |
 | `ThinkingProcessState.swift` | Agent thinking/tool execution progress tracking |
