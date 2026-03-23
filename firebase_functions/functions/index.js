@@ -93,6 +93,7 @@ const { completeCurrentSet } = require('./active_workout/complete-current-set');
 
 // StrengthOS Operations
 const { streamAgentNormalizedHandler } = require('./strengthos/stream-agent-normalized');
+const { streamOnboardingRoutineHandler } = require('./strengthos/stream-onboarding-routine');
 const { requireFlexibleAuth } = require('./auth/middleware');
 const { upsertProgressReport, getProgressReports } = require('./strengthos/progress-reports');
 
@@ -240,6 +241,10 @@ exports.completeCurrentSet = completeCurrentSet;
 exports.streamAgentNormalized = onRequestV2(
   { timeoutSeconds: 300, memory: '512MiB', maxInstances: 20, concurrency: 1 },
   requireFlexibleAuth(streamAgentNormalizedHandler)
+);
+exports.streamOnboardingRoutine = onRequestV2(
+  { timeoutSeconds: 120, memory: '256MiB', maxInstances: 10, concurrency: 1 },
+  requireFlexibleAuth(streamOnboardingRoutineHandler)
 );
 exports.upsertProgressReport = functions.runWith(writeOptions).https.onRequest((req, res) => withApiKey(upsertProgressReport)(req, res));
 exports.getProgressReports = functions.runWith(readOptions).https.onRequest((req, res) => requireFlexibleAuth(getProgressReports)(req, res));
