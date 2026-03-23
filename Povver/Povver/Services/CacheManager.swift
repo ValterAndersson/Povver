@@ -256,11 +256,23 @@ private actor DiskCache {
     
     func set(_ key: String, data: Data) async {
         let fileURL = cacheDirectory.appendingPathComponent(key.sha256())
-        
+
         do {
             try data.write(to: fileURL, options: .atomic)
+
+            // Apply file protection to encrypt file when device is locked
+            do {
+                try (fileURL as NSURL).setResourceValue(
+                    URLFileProtection.complete,
+                    forKey: .fileProtectionKey
+                )
+            } catch {
+                // File protection is best-effort; don't crash if it fails
+                logger.warning("Failed to set file protection on cache file: \(error)")
+            }
+
             currentSize += data.count
-            
+
             // Evict old entries if needed
             if currentSize > sizeLimit {
                 await evictOldEntries()

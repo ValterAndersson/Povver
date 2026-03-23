@@ -56,7 +56,8 @@ const USER_SUBCOLLECTIONS = [
 // Subcollections that themselves have sub-subcollections
 const NESTED_SUBCOLLECTIONS = {
   conversations: ['messages', 'artifacts'],
-  canvases: ['cards'],
+  canvases: ['cards', 'workspace_entries', 'up_next', 'events', 'idempotency'],
+  templates: ['changelog'],
 };
 
 /**
