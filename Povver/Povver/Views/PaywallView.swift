@@ -236,6 +236,17 @@ struct PaywallView: View {
                     .foregroundColor(Color.textSecondary)
                     .underline()
             }
+
+            // Terms and Privacy links (App Store Guideline 3.1.2)
+            HStack(spacing: 16) {
+                Link("Terms of Service", destination: URL(string: "https://povver.ai/terms")!)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Link("Privacy Policy", destination: URL(string: "https://povver.ai/privacy")!)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.top, Space.xs)
         }
         .padding(.top, Space.sm)
     }

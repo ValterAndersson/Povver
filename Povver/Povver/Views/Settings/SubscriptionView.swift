@@ -26,6 +26,11 @@ struct SubscriptionView: View {
                     manageSection
                 }
 
+                // Restore purchases (for non-premium users)
+                if !subscriptionService.isPremium {
+                    restorePurchasesSection
+                }
+
                 Spacer(minLength: Space.xxl)
             }
             .padding(Space.lg)
@@ -173,6 +178,45 @@ struct SubscriptionView: View {
             Image(systemName: "checkmark")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(Color.success)
+        }
+    }
+
+    // MARK: - Restore Purchases Section (for non-premium users)
+
+    private var restorePurchasesSection: some View {
+        VStack(alignment: .leading, spacing: Space.md) {
+            Text("Already Subscribed?")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundColor(Color.textPrimary)
+
+            Button {
+                Task {
+                    await subscriptionService.restorePurchases()
+                }
+            } label: {
+                HStack(spacing: Space.md) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 18))
+                        .foregroundColor(Color.textSecondary)
+                        .frame(width: 24)
+
+                    Text("Restore Purchases")
+                        .font(.system(size: 15))
+                        .foregroundColor(Color.textPrimary)
+
+                    Spacer()
+
+                    if subscriptionService.isLoading {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    }
+                }
+                .padding(Space.md)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PlainButtonStyle())
+            .background(Color.surface)
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadiusToken.radiusControl))
         }
     }
 
