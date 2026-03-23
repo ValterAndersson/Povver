@@ -86,6 +86,7 @@ const { ok, fail } = require('../utils/response');
 const { formatValidationResponse } = require('../utils/validation-response');
 const { validateProposeCardsRequest } = require('./validators');
 const crypto = require('crypto');
+const { logger } = require('firebase-functions');
 
 // Load JSON schemas for self-healing agents (map card type -> schema)
 const CARD_SCHEMAS = {
@@ -299,8 +300,8 @@ async function proposeCards(req, res) {
     try { console.log('[proposeCards] ok', { uid, canvasId, created: created.length, correlationId }); } catch (_) {}
     return ok(res, { created_card_ids: created });
   } catch (error) {
-    console.error('proposeCards error:', error);
-    return fail(res, 'INTERNAL', 'Failed to propose cards', { message: error.message }, 500);
+    logger.error('[proposeCards] Failed', { error: error.message });
+    return fail(res, 'INTERNAL', 'Failed to propose cards', null, 500);
   }
 }
 

@@ -3,6 +3,7 @@ const { requireFlexibleAuth } = require('../auth/middleware');
 const admin = require('firebase-admin');
 const { ok, fail } = require('../utils/response');
 const { listExercises } = require('../shared/exercises');
+const { logger } = require('firebase-functions');
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
@@ -21,8 +22,8 @@ async function getExercisesHandler(req, res) {
 
     return ok(res, { ...result, limit, canonicalOnly, includeMerged });
   } catch (error) {
-    console.error('get-exercises function error:', error);
-    return fail(res, 'INTERNAL', 'Failed to get exercises', { message: error.message }, 500);
+    logger.error('[getExercises] Failed', { error: error.message });
+    return fail(res, 'INTERNAL', 'Failed to get exercises', null, 500);
   }
 }
 

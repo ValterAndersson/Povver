@@ -39,6 +39,7 @@ const { onRequest } = require('firebase-functions/v2/https');
 const { requireFlexibleAuth } = require('../auth/middleware');
 const { ok, fail } = require('../utils/response');
 const admin = require('firebase-admin');
+const { logger } = require('firebase-functions');
 
 const firestore = admin.firestore();
 
@@ -95,8 +96,8 @@ async function cancelActiveWorkoutHandler(req, res) {
     return ok(res, { success: true, workout_id });
 
   } catch (error) {
-    console.error('cancel-active-workout error:', error);
-    return fail(res, 'INTERNAL', 'Failed to cancel active workout', { message: error.message }, 500);
+    logger.error('[cancelActiveWorkout] Failed', { error: error.message });
+    return fail(res, 'INTERNAL', 'Failed to cancel active workout', null, 500);
   }
 }
 

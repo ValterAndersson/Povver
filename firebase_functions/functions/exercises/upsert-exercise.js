@@ -6,6 +6,7 @@ const { ExerciseUpsertSchema } = require('../utils/validators');
 const { toSlug, buildAliasSlugs, uniqueArray } = require('../utils/strings');
 const { computeFamilySlug, computeVariantKey, reserveAliasesTransaction } = require('../utils/aliases');
 const admin = require('firebase-admin');
+const { logger } = require('firebase-functions');
 
 const db = new FirestoreHelper();
 
@@ -258,8 +259,8 @@ async function upsertExerciseHandler(req, res) {
 
     return ok(res, { exercise_id: id, version: data.version, status: data.status || 'draft', name_slug: canonicalSlug, family_slug: data.family_slug || familySlug, variant_key: data.variant_key || variantKey });
   } catch (error) {
-    console.error('upsert-exercise error:', error);
-    return fail(res, 'INTERNAL', 'Failed to upsert exercise', { message: error.message }, 500);
+    logger.error('[upsertExercise] Failed', { error: error.message });
+    return fail(res, 'INTERNAL', 'Failed to upsert exercise', null, 500);
   }
 }
 

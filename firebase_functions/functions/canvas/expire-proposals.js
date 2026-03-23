@@ -1,5 +1,6 @@
 const admin = require('firebase-admin');
 const { ok, fail } = require('../utils/response');
+const { logger } = require('firebase-functions');
 
 async function expireProposals(req, res) {
   try {
@@ -58,8 +59,8 @@ async function expireProposals(req, res) {
 
     return ok(res, { expired, scope: canvasId ? 'single_canvas' : 'all_canvases' });
   } catch (error) {
-    console.error('expireProposals error:', error);
-    return fail(res, 'INTERNAL', 'Failed to expire proposals', { message: error.message }, 500);
+    logger.error('[expireProposals] Failed', { error: error.message });
+    return fail(res, 'INTERNAL', 'Failed to expire proposals', null, 500);
   }
 }
 

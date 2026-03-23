@@ -2,6 +2,7 @@
 
 const admin = require('firebase-admin');
 const { ok, fail } = require('../utils/response');
+const { logger } = require('firebase-functions');
 
 async function emitEvent(req, res) {
   try {
@@ -33,8 +34,8 @@ async function emitEvent(req, res) {
 
     return ok(res, { id: ref.id });
   } catch (e) {
-    console.error('[emitEvent] error', e);
-    return fail(res, 'INTERNAL', 'Failed to emit event', { message: e?.message }, 500);
+    logger.error('[emitEvent] Failed', { error: e?.message });
+    return fail(res, 'INTERNAL', 'Failed to emit event', null, 500);
   }
 }
 

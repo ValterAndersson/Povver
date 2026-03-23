@@ -17,6 +17,7 @@ const {
   ensureWorkoutIdempotent,
   storeWorkoutIdempotentTx
 } = require('../utils/idempotency');
+const { logger } = require('firebase-functions');
 
 const db = admin.firestore();
 
@@ -199,8 +200,8 @@ async function addExerciseHandler(req, res) {
     if (error.httpCode) {
       return fail(res, error.code, error.message, error.details || null, error.httpCode);
     }
-    console.error('add-exercise error:', error);
-    return fail(res, 'INTERNAL', 'Failed to add exercise', { message: error.message }, 500);
+    logger.error('[addExercise] Failed', { error: error.message });
+    return fail(res, 'INTERNAL', 'Failed to add exercise', null, 500);
   }
 }
 

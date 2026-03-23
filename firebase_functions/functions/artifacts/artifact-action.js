@@ -34,7 +34,12 @@ async function artifactActionHandler(req, res) {
     const httpStatus = error.httpStatus || error.http || 500;
     if (httpStatus >= 500) {
       logger.error('[artifactAction] Error', { error: error.message, action, artifactId });
+      return res.status(httpStatus).json({
+        success: false,
+        error: 'Internal error',
+      });
     }
+    // Keep error.message for 4xx errors (user-facing validation errors)
     return res.status(httpStatus).json({
       success: false,
       error: error.message || 'Internal error',

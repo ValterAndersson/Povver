@@ -348,8 +348,8 @@ async function completeActiveWorkoutHandler(req, res) {
 
     return ok(res, result);
   } catch (error) {
-    console.error('complete-active-workout error:', error);
-    return fail(res, 'INTERNAL', 'Failed to complete active workout', { message: error.message }, 500);
+    logger.error('[completeActiveWorkout] Failed', { error: error.message });
+    return fail(res, 'INTERNAL', 'Failed to complete active workout', null, 500);
   }
 }
 

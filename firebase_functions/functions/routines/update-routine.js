@@ -6,6 +6,7 @@ const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const { RoutineSchema } = require('../utils/validators');
 const { formatValidationResponse } = require('../utils/validation-response');
 const admin = require('firebase-admin');
+const { logger } = require('firebase-functions');
 
 const db = new FirestoreHelper();
 const firestore = admin.firestore();
@@ -82,8 +83,8 @@ async function updateRoutineHandler(req, res) {
     return ok(res, { routine: result });
 
   } catch (error) {
-    console.error('update-routine function error:', error);
-    return fail(res, 'INTERNAL', 'Failed to update routine', { message: error.message }, 500);
+    logger.error('[updateRoutine] Failed', { error: error.message });
+    return fail(res, 'INTERNAL', 'Failed to update routine', null, 500);
   }
 }
 

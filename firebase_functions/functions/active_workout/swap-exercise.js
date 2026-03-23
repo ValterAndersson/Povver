@@ -3,6 +3,7 @@ const { requireFlexibleAuth } = require('../auth/middleware');
 const admin = require('firebase-admin');
 const { ensureIdempotent } = require('../utils/idempotency');
 const { ok, fail } = require('../utils/response');
+const { logger } = require('firebase-functions');
 
 const db = admin.firestore();
 
@@ -112,8 +113,8 @@ async function swapExerciseHandler(req, res) {
     if (error.httpCode) {
       return fail(res, error.code, error.message, error.details || null, error.httpCode);
     }
-    console.error('swap-exercise error:', error);
-    return fail(res, 'INTERNAL', 'Failed to swap exercise', { message: error.message }, 500);
+    logger.error('[swapExercise] Failed', { error: error.message });
+    return fail(res, 'INTERNAL', 'Failed to swap exercise', null, 500);
   }
 }
 

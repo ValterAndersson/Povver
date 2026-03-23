@@ -15,6 +15,7 @@ const { ok, fail } = require('../utils/response');
 const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const { ValidationError } = require('../shared/errors');
 const { querySets: querySetsCore, aggregateSets: aggregateSetsCore } = require('../shared/training-queries');
+const { logger } = require('firebase-functions');
 
 if (!admin.apps.length) {
   admin.initializeApp();
@@ -39,8 +40,8 @@ exports.querySets = onRequest(requireFlexibleAuth(async (req, res) => {
     if (error instanceof ValidationError) {
       return fail(res, 'INVALID_ARGUMENT', error.message, error.details, 400);
     }
-    console.error('Error in querySets:', error);
-    return fail(res, 'INTERNAL', error.message, null, 500);
+    logger.error('[querySets] Failed', { error: error.message });
+    return fail(res, 'INTERNAL', 'Internal error', null, 500);
   }
 }));
 
@@ -61,7 +62,7 @@ exports.aggregateSets = onRequest(requireFlexibleAuth(async (req, res) => {
     if (error instanceof ValidationError) {
       return fail(res, 'INVALID_ARGUMENT', error.message, error.details, 400);
     }
-    console.error('Error in aggregateSets:', error);
-    return fail(res, 'INTERNAL', error.message, null, 500);
+    logger.error('[aggregateSets] Failed', { error: error.message });
+    return fail(res, 'INTERNAL', 'Internal error', null, 500);
   }
 }));

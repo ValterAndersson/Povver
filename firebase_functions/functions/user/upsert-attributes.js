@@ -3,6 +3,7 @@ const { requireFlexibleAuth } = require('../auth/middleware');
 const FirestoreHelper = require('../utils/firestore-helper');
 const { ok, fail } = require('../utils/response');
 const { getAuthenticatedUserId } = require('../utils/auth-helpers');
+const { logger } = require('firebase-functions');
 
 const db = new FirestoreHelper();
 
@@ -45,8 +46,8 @@ async function upsertUserAttributesHandler(req, res) {
     await db.upsertDocumentInSubcollection('users', userId, 'user_attributes', userId, updates);
     return ok(res, { updated: Object.keys(updates) });
   } catch (error) {
-    console.error('upsert-user-attributes error:', error);
-    return fail(res, 'INTERNAL', 'Failed to upsert user attributes', { message: error.message }, 500);
+    logger.error('[upsertUserAttributes] Failed', { error: error.message });
+    return fail(res, 'INTERNAL', 'Failed to upsert user attributes', null, 500);
   }
 }
 

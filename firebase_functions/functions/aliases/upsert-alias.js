@@ -2,6 +2,7 @@ const { onRequest } = require('firebase-functions/v2/https');
 const { requireFlexibleAuth } = require('../auth/middleware');
 const { ok, fail } = require('../utils/response');
 const admin = require('firebase-admin');
+const { logger } = require('firebase-functions');
 
 async function upsertAliasHandler(req, res) {
   try {
@@ -24,8 +25,8 @@ async function upsertAliasHandler(req, res) {
     await ref.set(payload, { merge: true });
     return ok(res, { alias_slug, exercise_id });
   } catch (error) {
-    console.error('upsert-alias error:', error);
-    return fail(res, 'INTERNAL', 'Failed to upsert alias', { message: error.message }, 500);
+    logger.error('[upsertAlias] Failed', { error: error.message });
+    return fail(res, 'INTERNAL', 'Failed to upsert alias', null, 500);
   }
 }
 

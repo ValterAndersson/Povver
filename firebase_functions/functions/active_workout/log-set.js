@@ -23,6 +23,7 @@ const {
 } = require('../utils/idempotency');
 const { computeTotals, findExerciseAndSet } = require('../utils/active-workout-helpers');
 const { writeLimiter } = require('../utils/rate-limiter');
+const { logger } = require('firebase-functions');
 
 const db = admin.firestore();
 
@@ -194,8 +195,8 @@ async function logSetHandler(req, res) {
     if (error.httpCode) {
       return fail(res, error.code, error.message, error.details || null, error.httpCode);
     }
-    console.error('log-set error:', error);
-    return fail(res, 'INTERNAL', 'Failed to log set', { message: error.message }, 500);
+    logger.error('[logSet] Failed', { error: error.message });
+    return fail(res, 'INTERNAL', 'Failed to log set', null, 500);
   }
 }
 

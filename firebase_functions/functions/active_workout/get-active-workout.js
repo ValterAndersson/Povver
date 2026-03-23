@@ -50,6 +50,7 @@ const { onRequest } = require('firebase-functions/v2/https');
 const { requireFlexibleAuth } = require('../auth/middleware');
 const { ok, fail } = require('../utils/response');
 const admin = require('firebase-admin');
+const { logger } = require('firebase-functions');
 
 const firestore = admin.firestore();
 
@@ -147,8 +148,8 @@ async function getActiveWorkoutHandler(req, res) {
     return ok(res, { success: true, workout: null });
 
   } catch (error) {
-    console.error('get-active-workout error:', error);
-    return fail(res, 'INTERNAL', 'Failed to get active workout', { message: error.message }, 500);
+    logger.error('[getActiveWorkout] Failed', { error: error.message });
+    return fail(res, 'INTERNAL', 'Failed to get active workout', null, 500);
   }
 }
 

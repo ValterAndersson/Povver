@@ -148,7 +148,7 @@ const reviewRecommendation = onRequest(
         error: error.message,
         stack: error.stack,
       });
-      return fail(res, 'INTERNAL_ERROR', error.message, null, 500);
+      return fail(res, 'INTERNAL_ERROR', 'Internal error', null, 500);
     }
   })
 );
@@ -314,7 +314,7 @@ async function handleAccept(res, userId, recRef, recommendation, startTime) {
       }),
     });
 
-    return fail(res, 'INTERNAL_ERROR', `Failed to apply changes: ${applyError.message}`, null, 500);
+    return fail(res, 'INTERNAL_ERROR', 'Failed to apply changes', null, 500);
   }
 
   // 4. Update recommendation to 'applied'

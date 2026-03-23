@@ -64,6 +64,7 @@ const admin = require('firebase-admin');
 const { v4: uuidv4 } = require('uuid');
 const { templateToExercises, planBlocksToExercises, normalizePlan } = require('../utils/workout-seed-mapper');
 const { writeLimiter } = require('../utils/rate-limiter');
+const { logger } = require('firebase-functions');
 
 const firestore = admin.firestore();
 
@@ -214,8 +215,8 @@ async function startActiveWorkoutHandler(req, res) {
 
     return ok(res, result);
   } catch (error) {
-    console.error('start-active-workout error:', error);
-    return fail(res, 'INTERNAL', 'Failed to start active workout', { message: error.message }, 500);
+    logger.error('[startActiveWorkout] Failed', { error: error.message });
+    return fail(res, 'INTERNAL', 'Failed to start active workout', null, 500);
   }
 }
 

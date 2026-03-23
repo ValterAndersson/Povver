@@ -6,6 +6,7 @@ const { ok, fail } = require('../utils/response');
 const { getAuthenticatedUserId } = require('../utils/auth-helpers');
 const { TemplateSchema } = require('../utils/validators');
 const admin = require('firebase-admin');
+const { logger } = require('firebase-functions');
 
 const db = new FirestoreHelper();
 
@@ -57,8 +58,8 @@ async function updateTemplateHandler(req, res) {
     return ok(res, { template: updatedTemplate });
 
   } catch (error) {
-    console.error('update-template function error:', error);
-    return fail(res, 'INTERNAL', 'Failed to update template', { message: error.message }, 500);
+    logger.error('[updateTemplate] Failed', { error: error.message });
+    return fail(res, 'INTERNAL', 'Failed to update template', null, 500);
   }
 }
 
