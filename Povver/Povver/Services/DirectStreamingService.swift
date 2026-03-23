@@ -247,6 +247,8 @@ class DirectStreamingService: ObservableObject {
         equipment: String
     ) -> AsyncThrowingStream<StreamEvent, Error> {
         AsyncThrowingStream { continuation in
+            // Dedicated session — invalidated after use to prevent leaks
+            let onboardingSession = URLSession(configuration: .default)
             let task = Task {
                 do {
                     guard let currentUser = AuthService.shared.currentUser else {
@@ -273,9 +275,6 @@ class DirectStreamingService: ObservableObject {
                     ]
                     request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-                    // Use a dedicated session for this request so timeout
-                    // cancellation doesn't destroy the shared URLSession.
-                    let onboardingSession = URLSession(configuration: .default)
                     let (asyncBytes, response) = try await onboardingSession.bytes(for: request)
 
                     let timeoutTask = Task {
@@ -294,13 +293,13 @@ class DirectStreamingService: ObservableObject {
                         if line.hasPrefix("data: ") {
                             let jsonStr = String(line.dropFirst(6))
 
-                            if jsonStr == "[DONE]" {
-                                continuation.finish()
-                                break
-                            }
-
                             if let data = jsonStr.data(using: .utf8),
                                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+
+                                // Server sends { type: "done" } when complete
+                                if json["type"] as? String == "done" {
+                                    break
+                                }
 
                                 var contentDict: [String: AnyCodable]? = nil
                                 if let rawContent = json["content"] as? [String: Any] {
@@ -326,8 +325,10 @@ class DirectStreamingService: ObservableObject {
                         }
                     }
 
+                    onboardingSession.finishTasksAndInvalidate()
                     continuation.finish()
                 } catch {
+                    onboardingSession.invalidateAndCancel()
                     continuation.finish(throwing: error)
                 }
             }

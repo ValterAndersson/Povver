@@ -13,7 +13,6 @@ struct RootView: View {
     @ObservedObject private var authService = AuthService.shared
     @State private var flow: AppFlow = .login
     @AppStorage("selectedTab") private var selectedTabRaw: String = MainTab.coach.rawValue
-    @State private var adjustWithCoachAfterOnboarding = false
 
     var body: some View {
         NavigationStack {
@@ -41,21 +40,12 @@ struct RootView: View {
                     flow = .login
                 })
             case .onboarding:
-                OnboardingView { adjustWithCoach in
-                    if adjustWithCoach {
-                        adjustWithCoachAfterOnboarding = true
-                    }
+                OnboardingView {
                     selectedTabRaw = MainTab.coach.rawValue
                     flow = .main
                 }
             case .main:
-                MainTabsView(adjustWithCoachContext: adjustWithCoachAfterOnboarding ? "freeform:I just finished setting up my profile and you generated a routine for me. Here's what I built. What would you change?" : nil)
-                    .onAppear {
-                        // Clear the one-shot flag after MainTabsView has consumed it
-                        if adjustWithCoachAfterOnboarding {
-                            adjustWithCoachAfterOnboarding = false
-                        }
-                    }
+                MainTabsView()
             }
         }
         // Reactively reset to login when auth state becomes unauthenticated.

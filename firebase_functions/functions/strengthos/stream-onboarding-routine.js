@@ -101,6 +101,8 @@ function relayStream(stream, sse, conversationId, userId, frequency) {
     let partial = '';
     let accumulatedAgentText = '';
     let routineName = null;
+    const convRef = db.collection('users').doc(userId)
+      .collection('conversations').doc(conversationId);
 
     stream.on('data', (chunk) => {
       partial += chunk.toString('utf8');
@@ -152,9 +154,6 @@ function relayStream(stream, sse, conversationId, userId, frequency) {
     stream.on('end', async () => {
       // Persist agent response
       if (accumulatedAgentText) {
-        const convRef = db.collection('users').doc(userId)
-          .collection('conversations').doc(conversationId);
-
         await convRef.collection('messages').add({
           type: 'agent_response',
           content: accumulatedAgentText,
@@ -164,9 +163,6 @@ function relayStream(stream, sse, conversationId, userId, frequency) {
 
       // Update conversation metadata with routine name
       if (routineName) {
-        const convRef = db.collection('users').doc(userId)
-          .collection('conversations').doc(conversationId);
-
         await convRef.set({
           title: routineName,
           lastMessage: `Created your ${routineName} — ${frequency} days per week`,
@@ -219,6 +215,12 @@ async function streamOnboardingRoutineHandler(req, res) {
     const { fitnessLevel, frequency, equipment, conversationId } = req.body || {};
     if (!fitnessLevel || !frequency || !equipment || !conversationId) {
       sse.write({ type: 'error', error: { code: 'INVALID_PARAMS', message: 'fitnessLevel, frequency, equipment, and conversationId are required' } });
+      done();
+      return;
+    }
+    // Validate conversationId format — used as Firestore doc ID
+    if (typeof conversationId !== 'string' || conversationId.length > 128 || !/^[a-zA-Z0-9_-]+$/.test(conversationId)) {
+      sse.write({ type: 'error', error: { code: 'INVALID_PARAMS', message: 'Invalid conversationId format' } });
       done();
       return;
     }
