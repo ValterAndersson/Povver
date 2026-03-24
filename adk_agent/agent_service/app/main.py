@@ -37,12 +37,11 @@ async def stream_handler(request: Request) -> StreamingResponse:
     }
     Response: SSE stream
     """
-    # Defense-in-depth: API key check
+    # Defense-in-depth: API key check (Cloud Run IAM is primary auth)
+    # Only enforce if caller sends x-api-key header — Firebase Function
+    # proxy authenticates via IAM and doesn't send this header.
     api_key = request.headers.get("x-api-key", "")
-    if not VALID_API_KEYS:
-        logger.error("MYON_API_KEY not configured — rejecting request")
-        return JSONResponse(status_code=500, content={"error": "Server misconfigured"})
-    if api_key not in VALID_API_KEYS:
+    if api_key and VALID_API_KEYS and api_key not in VALID_API_KEYS:
         return JSONResponse(status_code=401, content={"error": "Unauthorized"})
 
     try:
