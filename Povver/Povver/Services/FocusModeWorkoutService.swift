@@ -1994,15 +1994,23 @@ class FocusModeWorkoutService: ObservableObject {
 
                         guard !snapshot.documents.isEmpty else { return (exerciseId, nil) }
 
-                        // Group by workout_id and take only the most recent workout's sets
+                        // Group by workout_id and take only the most recent workout's sets.
+                        // Also track best e1RM across ALL returned set_facts (not just last session).
                         var firstWorkoutId: String?
                         var sets: [LastSessionSetData] = []
+                        var bestE1rm: Double?
 
                         for doc in snapshot.documents {
                             let data = doc.data()
                             let workoutId = data["workout_id"] as? String ?? ""
+
+                            // Track best e1rm across all returned docs
+                            if let e1rm = data["e1rm"] as? Double, e1rm > (bestE1rm ?? 0) {
+                                bestE1rm = e1rm
+                            }
+
                             if firstWorkoutId == nil { firstWorkoutId = workoutId }
-                            guard workoutId == firstWorkoutId else { break }
+                            guard workoutId == firstWorkoutId else { continue }
 
                             let setIndex = data["set_index"] as? Int
                             let weight = data["weight_kg"] as? Double
@@ -2014,7 +2022,7 @@ class FocusModeWorkoutService: ObservableObject {
                         // Sort by set_index to ensure correct ordering
                         // (Firestore query is ordered by workout_date, not set_index)
                         let sortedSets = sets.sorted { ($0.setIndex ?? Int.max) < ($1.setIndex ?? Int.max) }
-                        return (exerciseId, sortedSets.isEmpty ? nil : LastSessionExerciseData(sets: sortedSets))
+                        return (exerciseId, sortedSets.isEmpty ? nil : LastSessionExerciseData(sets: sortedSets, bestE1rm: bestE1rm))
                     } catch {
                         Self.ghostLogger.warning("Failed to fetch last session for exercise \(exerciseId): \(error.localizedDescription)")
                         return (exerciseId, nil)

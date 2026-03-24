@@ -869,6 +869,7 @@ struct FocusModeWorkoutScreen: View {
                                     onEditNote: { presentSheet(.noteEditorExercise(exerciseInstanceId: exercise.instanceId)) },
                                     onSwapExercise: { presentSheet(.exerciseSwap(exercise: exercise)) },
                                     ghostValues: ghostValues(for: exercise),
+                                    lastSessionData: service.lastSessionData[exercise.exerciseId],
                                     isLastExercise: exercise.instanceId == workout.exercises.last?.instanceId
                                 )
                             }
@@ -1366,13 +1367,15 @@ struct FocusModeWorkoutScreen: View {
         // Apply auto-advance focus synchronously for responsive feel
         if let next = nextTarget {
             let hasGhosts = ghostValues(for: exercises[next.exerciseIndex])[next.setId]?.hasValues ?? false
+            let nextSet = exercises[next.exerciseIndex].sets.first { $0.id == next.setId }
+            let hasTemplateValues = nextSet?.displayWeight != nil && nextSet?.displayReps != nil
 
             withAnimation(MotionToken.snappy) {
-                if hasGhosts {
-                    // Ghost values present — highlight done button (user can tap to confirm)
+                if hasGhosts || hasTemplateValues {
+                    // Values already populated (ghost or template) — just highlight done button
                     screenMode = .normal
                 } else {
-                    // No ghosts — enter weight editing so user can type immediately
+                    // No values — enter weight editing so user can type immediately
                     screenMode = .editingSet(exerciseId: next.exerciseId, setId: next.setId, cellType: .weight)
                 }
             }

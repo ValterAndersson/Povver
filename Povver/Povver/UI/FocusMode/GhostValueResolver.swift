@@ -34,6 +34,8 @@ struct GhostValues: Equatable {
 /// Populated from the set_facts Firestore subcollection.
 struct LastSessionExerciseData {
     let sets: [LastSessionSetData]
+    /// Best estimated 1RM across all loaded set_facts for this exercise (not just last session)
+    var bestE1rm: Double? = nil
 }
 
 /// Per-set data from a previous session, used as ghost value source.

@@ -1155,19 +1155,21 @@ struct SwipeToDeleteRow<Content: View>: View {
 
     var body: some View {
         ZStack(alignment: .trailing) {
-            // Delete button (revealed behind content)
-            HStack {
-                Spacer()
-                Button {
-                    onDelete()
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundColor(.textInverse)
-                        .frame(width: deleteButtonWidth, height: 52)
-                        .background(Color.destructive)
+            // Delete button (only rendered when swiping to prevent bleed-through at reduced opacity)
+            if visibleOffset < 0 {
+                HStack {
+                    Spacer()
+                    Button {
+                        onDelete()
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(.textInverse)
+                            .frame(width: deleteButtonWidth, height: 52)
+                            .background(Color.destructive)
+                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
-                .buttonStyle(PlainButtonStyle())
             }
 
             // Main content with gesture

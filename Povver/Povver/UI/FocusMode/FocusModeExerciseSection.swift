@@ -144,6 +144,9 @@ struct FocusModeExerciseSectionNew: View {
     /// Ghost values for undone sets, resolved from last session or template prescription
     var ghostValues: [String: GhostValues] = [:]
 
+    /// Last session data for inline performance KPIs (best e1RM, last weight/reps)
+    var lastSessionData: LastSessionExerciseData? = nil
+
     /// Whether this is the last exercise in the workout (for progressive haptic intensity)
     var isLastExercise: Bool = false
 
@@ -213,6 +216,24 @@ struct FocusModeExerciseSectionNew: View {
         density == .completed && !isExpandedOverride
     }
 
+    private var weightUnit: WeightUnit { UserService.shared.activeWorkoutWeightUnit }
+
+    /// e.g. "120 kg" — total volume across completed working sets
+    private var completedVolumeSummary: String {
+        let totalKg = exercise.sets
+            .filter { $0.isDone && !$0.isWarmup }
+            .reduce(0.0) { $0 + ($1.weight ?? 0) * Double($1.reps ?? 0) }
+        return WeightFormatter.formatValue(totalKg, unit: weightUnit) + " " + weightUnit.label
+    }
+
+    /// e.g. "32 reps" — total reps across completed working sets
+    private var completedRepsSummary: String {
+        let totalReps = exercise.sets
+            .filter { $0.isDone && !$0.isWarmup }
+            .reduce(0) { $0 + ($1.reps ?? 0) }
+        return "\(totalReps) reps"
+    }
+
     var body: some View {
         Group {
             if showCompressed {
@@ -240,12 +261,10 @@ struct FocusModeExerciseSectionNew: View {
             // Exercise Header
             exerciseHeader
 
-            // Action Rail (structured AI actions)
-            ActionRail(
-                actions: actionItems,
-                isActive: isActive,
-                onMoreTap: { /* TODO: Show more actions sheet */ }
-            )
+            // Inline performance KPIs (from last session data)
+            if let kpiData = lastSessionData, isActive {
+                inlineKPIs(data: kpiData)
+            }
 
             // Set Grid with warmup divider
             FocusModeSetGrid(
@@ -300,9 +319,15 @@ struct FocusModeExerciseSectionNew: View {
                             .textStyle(.bodyStrong)
                             .foregroundColor(Color.textPrimary)
 
-                        Text("\(exercise.completedSetsCount)/\(exercise.totalWorkingSetsCount) sets")
-                            .textStyle(.caption)
-                            .foregroundColor(Color.textSecondary)
+                        HStack(spacing: Space.sm) {
+                            Text("\(exercise.completedSetsCount)/\(exercise.totalWorkingSetsCount) sets")
+                            Text("·")
+                            Text(completedVolumeSummary)
+                            Text("·")
+                            Text(completedRepsSummary)
+                        }
+                        .textStyle(.caption)
+                        .foregroundColor(Color.textSecondary)
                     }
 
                     Spacer()
@@ -343,6 +368,20 @@ struct FocusModeExerciseSectionNew: View {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(Color.success)
                         .font(.system(size: 20))
+                }
+
+                // Collapse button for manually-expanded completed exercises
+                if isExpandedOverride {
+                    Button {
+                        withAnimation(MotionToken.snappy) {
+                            isExpandedOverride = false
+                        }
+                    } label: {
+                        Image(systemName: "chevron.up")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(Color.textTertiary)
+                            .frame(width: 32, height: 32)
+                    }
                 }
 
                 // More menu
@@ -404,6 +443,38 @@ struct FocusModeExerciseSectionNew: View {
                 }
                 .buttonStyle(PlainButtonStyle())
             }
+        }
+    }
+
+    // MARK: - Inline Performance KPIs
+
+    private func inlineKPIs(data: LastSessionExerciseData) -> some View {
+        let lastWeight = data.sets.last?.weight
+        let lastReps = data.sets.last?.reps
+
+        return HStack(spacing: Space.md) {
+            if let e1rm = data.bestE1rm {
+                kpiLabel("e1RM", value: WeightFormatter.formatValue(e1rm, unit: weightUnit))
+            }
+            if let w = lastWeight {
+                kpiLabel("Last", value: WeightFormatter.formatValue(w, unit: weightUnit))
+            }
+            if let r = lastReps {
+                kpiLabel("Reps", value: "\(r)")
+            }
+        }
+        .padding(.horizontal, Space.md)
+        .padding(.bottom, Space.xs)
+    }
+
+    private func kpiLabel(_ label: String, value: String) -> some View {
+        HStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 12, weight: .medium).monospacedDigit())
+                .foregroundColor(Color.textSecondary)
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundColor(Color.textTertiary)
         }
     }
 }

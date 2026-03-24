@@ -14,6 +14,10 @@ struct HistoryView: View {
     /// All workouts fetched from repository (full list for pagination)
     @State private var allWorkouts: [Workout] = []
 
+    /// Consistency map data (from analytics_rollups — same source as coach tab)
+    @State private var weeklyWorkoutCounts: [WeekWorkoutCount] = []
+    @State private var routineFrequency: Int = 3
+
     /// Initial page size and load increment
     private let initialPageSize = 25
     private let loadMoreIncrement = 25
@@ -87,11 +91,24 @@ struct HistoryView: View {
                 .padding(.top, Space.md)
                 .staggeredEntrance(index: 0, active: hasAppeared)
 
-                // Weekly frequency chart
-                if !allWorkouts.isEmpty {
-                    WeeklyFrequencyChart(workouts: allWorkouts)
-                        .padding(.horizontal, Space.lg)
-                        .staggeredEntrance(index: 1, active: hasAppeared)
+                // 12-week training consistency map
+                if !weeklyWorkoutCounts.isEmpty {
+                    VStack(alignment: .leading, spacing: Space.sm) {
+                        TrainingConsistencyMap(
+                            weeks: weeklyWorkoutCounts,
+                            routineFrequency: routineFrequency
+                        )
+
+                        // Legend
+                        HStack(spacing: Space.md) {
+                            legendItem(color: Color.accent, label: "Completed")
+                            legendItem(color: Color.clear, borderColor: Color.separatorLine, label: "Scheduled")
+                        }
+                        .font(.system(size: 11))
+                        .foregroundColor(Color.textTertiary)
+                    }
+                    .padding(.horizontal, Space.lg)
+                    .staggeredEntrance(index: 1, active: hasAppeared)
 
                     Divider()
                         .padding(.horizontal, Space.lg)
@@ -176,9 +193,13 @@ struct HistoryView: View {
             return
         }
         
+        // Fetch consistency map data in parallel with workouts
+        async let weeklyCountsTask = TrainingDataService.shared.fetchWeeklyWorkoutCounts(weeks: 12)
+        async let nextWorkoutTask = FocusModeWorkoutService.shared.getNextWorkout()
+
         do {
             let fetchedWorkouts = try await WorkoutRepository().getWorkouts(userId: userId)
-            
+
             // Store all workouts and set total count
             allWorkouts = fetchedWorkouts.sorted { $0.endTime > $1.endTime }
             totalWorkoutCount = allWorkouts.count
@@ -204,7 +225,13 @@ struct HistoryView: View {
         } catch {
             AppLogger.shared.error(.app, "Failed to load workouts", error)
         }
-        
+
+        // Populate consistency map from rollups (same source as coach tab)
+        weeklyWorkoutCounts = (try? await weeklyCountsTask) ?? []
+        if let next = try? await nextWorkoutTask, next.templateCount > 0 {
+            routineFrequency = next.templateCount
+        }
+
         isLoading = false
     }
     
@@ -233,8 +260,23 @@ struct HistoryView: View {
         isLoadingMore = false
     }
     
+    // MARK: - Consistency Map Helpers
+
+    private func legendItem(color: Color, borderColor: Color? = nil, label: String) -> some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(color)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 2)
+                        .stroke(borderColor ?? Color.clear, lineWidth: borderColor != nil ? 0.5 : 0)
+                )
+                .frame(width: 8, height: 8)
+            Text(label)
+        }
+    }
+
     // MARK: - Formatting Helpers
-    
+
     private func formatTime(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "h:mm a"
