@@ -77,25 +77,25 @@ Files removed: ~50+ source files, ~40+ eval result files, archived multi-agent c
 | `canvas/expire-proposals.js` | No callers; proposals no longer created |
 | `canvas/expire-proposals-scheduled.js` | Not imported anywhere |
 | `canvas/emit-event.js` | No callers outside index.js |
-| `canvas/validators.js` | Only used by canvas files and tests (verify apply-action.js doesn't import it first) |
+| `canvas/validators.js` | Only used by canvas files and tests (verified: `apply-action.js` does NOT import it) |
 | `canvas/reducer-utils.js` | Only used by canvas files and tests |
 | `canvas/schemas/` (16 JSON files) | Only used by validators.js |
 | `scripts/seed_canvas.js` | Seeds deprecated canvas system |
 
-Remove corresponding exports from `index.js`.
+Remove corresponding exports (`proposeCards`, `expireProposals`, `emitEvent`) from `index.js`.
 
 ### Commit 8: Delete deprecated CRUD endpoints
 
 | File | Verification |
 |------|-------------|
 | `routines/create-routine.js` | No iOS callers, no agent callers. Replaced by `create-routine-from-draft.js`. |
-| `templates/update-template.js` | No iOS callers (dead protocol method on `CloudFunctionService`). Agent uses `patchTemplate`. |
+| `templates/update-template.js` | No iOS callers (dead method on `CloudFunctionService` — `.updateTemplate()` has zero call sites). Agent uses `patchTemplate`. |
 
-Remove exports from `index.js`.
+Remove exports (`createRoutine`, `updateTemplate`) from `index.js`.
 
 **NOT deleting**: `routines/update-routine.js` — agent service actively calls `/updateRoutine` via `planner_skills.py`.
 
-### Commit 9: Delete canvas-only test files
+### Commit 9: Delete canvas-only test files and clean index.js
 
 | Test File | Tests For |
 |-----------|-----------|
@@ -109,17 +109,17 @@ Remove exports from `index.js`.
 | `tests/reducer.undo.test.js` | Canvas reducer |
 | `tests/reducer.utils.test.js` | Canvas reducer utils |
 
-Remove unused `getAuthenticatedUserId` import from `index.js` line 26.
+Also: Remove the unused `const { getAuthenticatedUserId } = require('./utils/auth-helpers');` import from `index.js`.
 
 ### Commit 10: Remove `canvasId` backward-compat and `templateIds` camelCase fallbacks
 
 | Location | Change |
 |----------|--------|
-| `stream-agent-normalized.js` | Remove `|| req.body?.canvasId` fallback |
+| `stream-agent-normalized.js` | Remove `\|\| req.body?.canvasId` fallback |
 | `templates/create-template-from-plan.js` | Remove `canvasId` parameter acceptance |
 | `shared/templates.js` | Remove canvasId references |
-| `analytics/publish-weekly-job.js` | Remove canvasId references |
-| `shared/routines.js`, `shared/planning-context.js`, `shared/artifacts.js` | Remove `|| routine.templateIds` camelCase fallbacks |
+| `analytics/publish-weekly-job.js` | Remove `canvasId` parameter (lines 18, 23, 31) |
+| `shared/routines.js`, `shared/planning-context.js`, `shared/artifacts.js` | Remove `\|\| routine.templateIds` camelCase fallbacks |
 | `utils/validators.js` | Remove `templateIds` from Zod schema |
 | `training/process-workout-completion.js` | Remove `templateIds` fallback |
 
@@ -127,9 +127,9 @@ Remove unused `getAuthenticatedUserId` import from `index.js` line 26.
 
 ---
 
-## Phase 4: iOS Cleanup (4 commits)
+## Phase 4: iOS Cleanup (5 commits)
 
-### Commit 11: Delete verified dead Swift files (7 files)
+### Commit 11: Delete verified dead Swift files (9 files)
 
 | File | Verification |
 |------|-------------|
@@ -143,12 +143,14 @@ Remove unused `getAuthenticatedUserId` import from `index.js` line 26.
 | `UI/Canvas/WorkoutRailView.swift` | Never instantiated. |
 | `UI/Components/TrendDelta.swift` | Never used. |
 
+Also: Remove dead `updateTemplate()` method + protocol declaration from `CloudFunctionService.swift` (lines 19, 76-79). Zero call sites verified.
+
 **NOT deleting** (verified active):
 - `Models/FocusModeModels.swift` — 266 references across 27 files
 - `Models/TrainingIntelligence.swift` — 55 references across 7 files
 - `Repositories/BaseRepository.swift` — base class for active `ExerciseRepository`
 
-### Commit 12: Migrate legacy canvas actions to artifact path, delete canvas iOS code
+### Commit 12a: Migrate legacy canvas actions to artifact path in iOS
 
 Migrate remaining action kinds in `ConversationScreen.swift` that use `applyAction`:
 
@@ -160,20 +162,25 @@ Migrate remaining action kinds in `ConversationScreen.swift` that use `applyActi
 | `reject_all` | `applyAction("REJECT_ALL")` | Remove — no new cards have group proposals |
 | `pin_draft` | `applyAction("PIN_DRAFT")` | Remove — new artifact system doesn't use pinning |
 
-Then delete:
+Then delete iOS canvas infrastructure:
 - `ConversationActions.swift` — zero call sites (dead factory)
-- `ConversationService.applyAction()` method — no longer needed after migration
+- `ConversationService.applyAction()` method — no longer called after migration
 - `ConversationService.purgeConversation()` method — zero call sites
-- Remove `ConversationServiceProtocol` (or simplify if needed)
-- All canvas-related DTOs: `ApplyActionRequestDTO`, `ApplyActionResponseDTO`, `CanvasActionDTO`, `CanvasPhase`, `CanvasStateDTO`, `UpNextEntryDTO`, `ChangedCardDTO`, `ConversationSnapshot`
+- Simplify `ConversationServiceProtocol` — after removing `applyAction()` and `purgeConversation()`, the protocol becomes empty. Delete the protocol and remove the dependency injection from `ConversationViewModel` (it no longer needs a service abstraction for canvas operations).
+- All canvas-related DTOs from `ConversationDTOs.swift`: `ApplyActionRequestDTO`, `ApplyActionResponseDTO`, `CanvasActionDTO`, `CanvasPhase`, `CanvasStateDTO`, `UpNextEntryDTO`, `ChangedCardDTO`, `ConversationSnapshot`
 
-After iOS canvas code is removed, delete remaining Firebase canvas files:
-- `canvas/apply-action.js`
-- `canvas/purge-canvas.js` (plus `bootstrap-canvas.js` if that's the actual file)
-- `shared/active_workout/` (4 files: `log_set_core.js`, `swap_core.js`, `adjust_load_core.js`, `reorder_sets_core.js`)
-- `routines/create-routine-from-draft.js`
+**Checkpoint**: `xcodebuild -scheme Povver -destination 'platform=iOS Simulator,name=iPhone 16 Pro' build`
+
+### Commit 12b: Delete remaining Firebase canvas infrastructure
+
+After iOS no longer calls `applyAction` or `purgeCanvas`, delete:
+- Entire `canvas/` directory (`apply-action.js`, `purge-canvas.js`, `canvas/ARCHITECTURE.md`, and any remaining files)
+- `shared/active_workout/` (4 files: `log_set_core.js`, `swap_core.js`, `adjust_load_core.js`, `reorder_sets_core.js`) — verified: only imported by `canvas/apply-action.js`, NOT by `active_workout/*.js` endpoints (which use `utils/active-workout-helpers.js` instead)
+- `routines/create-routine-from-draft.js` — only imported by `canvas/apply-action.js`
 - Remove `ajv` from `package.json`
-- Remove all remaining canvas exports from `index.js`
+- Remove all remaining canvas exports (`applyAction`, `purgeCanvas`) from `index.js`
+
+**Checkpoint**: `cd firebase_functions/functions && npm test`
 
 ### Commit 13: Rename `canvasId` to `conversationId` across iOS
 
@@ -181,17 +188,16 @@ Files to update (~10 files):
 
 | File | Changes |
 |------|---------|
-| `ConversationViewModel.swift` | Property `canvasId` → `conversationId`, method params |
+| `ConversationViewModel.swift` | Property `canvasId` -> `conversationId`, method params |
 | `ConversationScreen.swift` | Property + all references |
-| `ConversationRepository.swift` | `currentCanvasId` → `currentConversationId`, `subscribe(canvasId:)` → `subscribe(conversationId:)`, log strings, comments |
-| `ConversationDTOs.swift` | Remove dead canvas DTOs (done in commit 12). Update `ConversationSnapshot` if retained. |
-| `AgentPipelineLogger.swift` | Method parameter `canvasId:` → `conversationId:` |
+| `ConversationRepository.swift` | `currentCanvasId` -> `currentConversationId`, `subscribe(canvasId:)` -> `subscribe(conversationId:)`, log strings, comments |
+| `AgentPipelineLogger.swift` | Method parameter `canvasId:` -> `conversationId:` |
 | `DebugLogger.swift` | Skip set entries |
 | `OnboardingViewModel.swift` | Local variable |
 | `CoachTabView.swift` | Closure parameter |
 | `DirectStreamingService.swift` | Already sends `conversationId` — update comments only |
 
-**Wire format note**: `DirectStreamingService` already sends `"conversationId"` over the wire. `AgentsApi.artifactAction()` already sends `"conversationId"`. After commit 12 removes the `applyAction` code path, there is no wire format concern — the rename is purely internal Swift naming.
+**Wire format note**: `DirectStreamingService` already sends `"conversationId"` over the wire. `AgentsApi.artifactAction()` already sends `"conversationId"`. After commit 12a removes the `applyAction` code path, there is no wire format concern — the rename is purely internal Swift naming.
 
 ### Commit 14: Rename `CanvasCardModel` to `ArtifactCardModel` (~28 files)
 
@@ -242,14 +248,12 @@ Add a comment header to root `package.json` explaining it provides `firebase-adm
 
 ---
 
-## What Stays (Verified Active, Future Cleanup Candidates)
+## What Stays (Future Cleanup Candidates)
 
 | Item | Why It Stays | Future Action |
 |------|-------------|---------------|
 | `routines/update-routine.js` | Agent calls `/updateRoutine` | Migrate agent to `patchRoutine` |
-| `CanvasCardModel` naming in card renderers | Renamed to `ArtifactCardModel` in this cleanup | Done |
-| `canvas/apply-action.js` | Migrated away in commit 12 | Deleted in commit 12 |
-| Eval result files in `agent_service/tests/eval/` | Not dead code, but bloat | Consider `.gitignore` or archive |
+| Eval result files in `agent_service/tests/eval/` | Not dead code, but git bloat | Consider `.gitignore` or archive |
 
 ---
 
@@ -262,7 +266,8 @@ Add a comment header to root `package.json` explaining it provides `firebase-adm
 | 3 | 6-9 | None | Zero references verified |
 | 3 | 10 | Low | Server-side compat removal, no clients use old params |
 | 4 | 11 | None | All files verified zero-reference |
-| 4 | 12 | **Medium** | Functional migration — must verify artifact path handles all action types correctly |
+| 4 | 12a | **Medium** | Functional migration — Xcode build checkpoint immediately after |
+| 4 | 12b | Low | Firebase deletions orphaned by 12a — npm test checkpoint |
 | 4 | 13 | Low | Internal rename, build will catch misses |
 | 4 | 14 | Low | Internal rename across 28 files, build will catch |
 | 5 | 15-16 | None | Scripts and docs |
@@ -272,7 +277,7 @@ Add a comment header to root `package.json` explaining it provides `firebase-adm
 
 ## Estimated Scope
 
-- ~18 commits
+- ~19 commits (commit 12 split into 12a + 12b)
 - ~130+ files deleted
 - ~40+ files modified (renames, import cleanup, doc updates)
-- 3 checkpoints (agent make check, firebase npm test, xcode build)
+- 5 checkpoints (agent make check, firebase npm test x2, xcode build x2)
