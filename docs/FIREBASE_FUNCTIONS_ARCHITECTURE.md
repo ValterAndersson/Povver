@@ -332,6 +332,15 @@ Workout creation/completion now uses **Cloud Tasks** instead of Firestore trigge
 
 Enqueue points: `complete-active-workout.js`, `upsert-workout.js`
 
+**GCP prerequisites** (must exist before first workout completion):
+```bash
+gcloud services enable cloudtasks.googleapis.com --project=myon-53d85
+gcloud tasks queues create workout-completion --location=us-central1 --project=myon-53d85
+```
+The default compute SA (`919326069447-compute@developer.gserviceaccount.com`) needs `cloudtasks.tasks.create` (included in `roles/editor`). The App Engine SA (`myon-53d85@appspot.gserviceaccount.com`) generates OIDC tokens to invoke `processWorkoutCompletionTask` and needs `run.invoker` (included in `roles/editor`).
+
+If the queue or API is missing, `enqueueWorkoutCompletion` fails silently (non-fatal warning) and the post-workout pipeline (set_facts, analysis, recommendations) does not run. The watchdog cannot recover this since it also uses the same queue. Fix: enable API, create queue, then backfill with `node scripts/backfill_set_facts.js --user <userId>`.
+
 ### Weekly Analytics (Remaining Triggers)
 
 | Trigger | Event | Purpose |
