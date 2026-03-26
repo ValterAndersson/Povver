@@ -132,6 +132,7 @@
 				0AF8B4872DF6E7000037B0F1 /* Sources */,
 				0AF8B4882DF6E7000037B0F1 /* Frameworks */,
 				0AF8B4892DF6E7000037B0F1 /* Resources */,
+				4B1C2D3E4F5A6B7C8D9E0F1A /* Upload Crashlytics dSYMs */,
 			);
 			buildRules = (
 			);
@@ -288,6 +289,24 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "if [ \"$CONFIGURATION\" = \"Release\" ]; then\n  FOUND=$(find \"$SRCROOT/Povver\" -name '*.swift' -not -path '*/.build/*' -print0 | xargs -0 awk '\n    /^#if DEBUG/ || /^#Preview/ { skip++ }\n    /^#endif/ && skip > 0 { skip--; next }\n    skip > 0 { next }\n    /PreviewProvider/ || /Previews:/ { next }\n    /\\/\\/.*print\\(/ { next }\n    /AppLogger/ { next }\n    /debugPrint/ { next }\n    /print\\(/ { printf \"%s:%d: %s\\n\", FILENAME, NR, $0 }\n  ' 2>/dev/null || true)\n  if [ -n \"$FOUND\" ]; then\n    echo \"error: Bare print() found in release code. Use AppLogger instead:\"\n    echo \"$FOUND\"\n    exit 1\n  fi\nfi\n";
+		};
+		4B1C2D3E4F5A6B7C8D9E0F1A /* Upload Crashlytics dSYMs */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}",
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${PRODUCT_NAME}",
+				"${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Info.plist",
+				"$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)",
+			);
+			name = "Upload Crashlytics dSYMs";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"$CONFIGURATION\" != \"Debug\" ]; then\n  SCRIPT=\"${BUILD_DIR%/Build/Products}/../../SourcePackages/checkouts/firebase-ios-sdk/Crashlytics/run\"\n  if [ -f \"$SCRIPT\" ]; then\n    \"$SCRIPT\"\n  else\n    echo \"warning: Crashlytics upload script not found at $SCRIPT — skipping dSYM upload\"\n  fi\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

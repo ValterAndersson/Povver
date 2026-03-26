@@ -283,11 +283,12 @@ struct DevicesPlaceholderView: View {
                 .font(.system(size: 48))
                 .foregroundColor(Color.textTertiary)
 
-            Text("Connected Devices")
+            Text("Coming Soon")
                 .textStyle(.screenTitle)
 
-            Text("Link your Apple Watch or other devices")
+            Text("Device connectivity is on the way. Check back later!")
                 .textStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.bg)
@@ -302,11 +303,12 @@ struct MemoriesPlaceholderView: View {
                 .font(.system(size: 48))
                 .foregroundColor(Color.textTertiary)
 
-            Text("Memories")
+            Text("Coming Soon")
                 .textStyle(.screenTitle)
 
-            Text("What Coach has learned about your training")
+            Text("Coach memories are on the way. Check back later!")
                 .textStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.bg)

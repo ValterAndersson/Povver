@@ -3,6 +3,7 @@ import SwiftUI
 struct ShowcaseScreen: View {
     @ObservedObject var vm: OnboardingViewModel
     let onTrialStarted: () -> Void
+    var onSkipped: (() -> Void)?
 
     @State private var showFeatures = false
 
@@ -119,6 +120,21 @@ struct ShowcaseScreen: View {
                         .foregroundColor(.textTertiary)
                 }
                 .disabled(vm.isLoadingTrial)
+
+                // Skip
+                if let onSkipped {
+                    Button {
+                        Task {
+                            let _ = await vm.autoSaveRoutine()
+                            onSkipped()
+                        }
+                    } label: {
+                        Text("Maybe later")
+                            .textStyle(.micro)
+                            .foregroundColor(.textTertiary)
+                    }
+                    .disabled(vm.isLoadingTrial)
+                }
             }
             .padding(.horizontal, Space.lg)
             .padding(.bottom, Space.xl)

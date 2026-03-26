@@ -129,6 +129,11 @@ struct OnboardingView: View {
                     vm.completeOnboarding()
                     AnalyticsService.shared.onboardingCompleted()
                     onComplete()
+                },
+                onSkipped: {
+                    vm.completeOnboarding()
+                    AnalyticsService.shared.onboardingCompleted()
+                    onComplete()
                 }
             )
             .transition(.asymmetric(
